@@ -7,7 +7,6 @@
 yottu-api
 
 # Test binary, built with `go test -c`
-tests/
 *.test
 
 # Output of the go coverage tool, specifically when used with LiteIDE
