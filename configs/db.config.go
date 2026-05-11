@@ -24,54 +24,29 @@ func DBConnection() {
 
 	fmt.Println("Connected Successfully to the data base")
 
-	if err := db.AutoMigrate(&models.AuthAccount{}); err != nil {
-		log.Fatal("Falied to Migrate of Table AuthAccount", err)
-	}
-	if err := db.AutoMigrate(&models.BeautyCenter{}); err != nil {
-		log.Fatal("Falied to Migrate of Table BeautyCenter", err)
-	}
-	if err := db.AutoMigrate(&models.BeautyCenterImage{}); err != nil {
-		log.Fatal("Falied to Migrate of Table BeautyCenterImage", err)
-	}
-	if err := db.AutoMigrate(&models.Category{}); err != nil {
-		log.Fatal("Falied to Migrate of Table Category", err)
-	}
-	if err := db.AutoMigrate(&models.Client{}); err != nil {
-		if err := db.AutoMigrate(&models.Favorite{}); err != nil {
-			log.Fatal("Falied to Migrate of Table Favorite", err)
-		}
-		log.Fatal("Falied to Migrate of Table Client", err)
-	}
-	if err := db.AutoMigrate(&models.Membership{}); err != nil {
-		log.Fatal("Falied to Migrate of Table Membership", err)
-	}
-	if err := db.AutoMigrate(&models.Personnel{}); err != nil {
-		log.Fatal("Falied to Migrate of Table Personnel", err)
-	}
-	if err := db.AutoMigrate(&models.PersonnelImage{}); err != nil {
-		log.Fatal("Falied to Migrate of Table PersonnelImage", err)
-	}
-	if err := db.AutoMigrate(&models.Reservation{}); err != nil {
-		log.Fatal("Falied to Migrate of Table Reservation", err)
-	}
-	if err := db.AutoMigrate(&models.Service{}); err != nil {
-		log.Fatal("Falied to Migrate of Table Service", err)
-	}
-	if err := db.AutoMigrate(&models.Review{}); err != nil {
-		log.Fatal("Falied to Migrate of Table Review", err)
+	list_models := []interface{}{
+		&models.AuthAccount{},
+		&models.BeautyCenter{},
+		&models.BeautyCenterImage{},
+		&models.Category{},
+		&models.Client{},
+		&models.Favorite{},
+		&models.FeedPost{},
+		&models.Membership{},
+		&models.Personnel{},
+		&models.PersonnelImage{},
+		&models.PostLike{},
+		&models.Reservation{},
+		&models.Review{},
+		&models.Service{},
+		&models.SocialMedia{},
+		&models.WorkingHour{},
 	}
 
-	if err := db.AutoMigrate(&models.SocialMedia{}); err != nil {
-		log.Fatal("Falied to Migrate of Table SocialMedia", err)
-	}
-	if err := db.AutoMigrate(&models.WorkingHour{}); err != nil {
-		log.Fatal("Falied to Migrate of Table WorkingHour", err)
-	}
-	if err := db.AutoMigrate(&models.FeedPost{}); err != nil {
-		log.Fatal("Falied to Migrate of Table FeedPost", err)
-	}
-	if err := db.AutoMigrate(&models.PostLike{}); err != nil {
-		log.Fatal("Falied to Migrate of Table PostLike", err)
+	for _, model := range list_models {
+		if err := db.AutoMigrate(model); err != nil {
+			log.Fatalf("Error migrating the model %T: %v", model, err)
+		}
 	}
 
 	DB = db

@@ -69,9 +69,13 @@ func (s *ClientServiceImpl) Register(req request.RegisterClientRequest) (string,
 		return "", err
 	}
 	if existingUsername != nil {
-		return "", errors.New("email already exists")
+		return "", errors.New("username already exists")
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := utils.HashPassword(req.Password)
+	if err != nil {
+		return "", err
+	}
+
 	client := models.Client{FirstName: req.FirstName, LastName: req.LastName, Username: req.Username, Email: req.Email, Phone: req.Phone, Password: string(hash), IsActive: true}
 	if err := s.ClientRepository.Create(&client); err != nil {
 		return "", err
@@ -107,7 +111,11 @@ func (s *ClientServiceImpl) Update(clientID uint, req request.RegisterClientRequ
 		client.Email = req.Email
 	}
 	if req.Password != "" {
-		client.Password = req.Password
+		hash, err := utils.HashPassword(req.Password)
+		if err != nil {
+			return err
+		}
+		client.Password = hash
 	}
 	client.IsActive = req.IsActive
 
