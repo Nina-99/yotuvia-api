@@ -3,17 +3,25 @@ package router
 import (
 	"github.com/Nina-99/yottu-api/controller"
 	"github.com/Nina-99/yottu-api/middleware"
+	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yottu-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
 )
 
-func ClientRoutes(rg *gin.RouterGroup, clientController *controller.ClientController) {
+func ClientRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
+	repo := repository.NewClientRepositoryImpl(db)
+	svc := service.NewClientServiceImpl(repo, validate)
+	ctrl := controller.NewClientController(svc)
+
 	client := rg.Group("/client")
-	client.POST("/register", clientController.Register)
-	client.POST("/login", clientController.Login)
+	client.POST("/register", ctrl.Register)
+	client.POST("/login", ctrl.Login)
 	client.Use(middleware.JWTAuthMiddleware())
 	{
-		client.GET("", clientController.FindAll)
-		client.DELETE("/:id", clientController.Delete)
-		client.PUT("/:id", clientController.Update)
+		client.GET("", ctrl.FindAll)
+		client.DELETE("/:id", ctrl.Delete)
+		client.PUT("/:id", ctrl.Update)
 	}
 }

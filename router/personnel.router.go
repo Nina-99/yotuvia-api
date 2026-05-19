@@ -2,16 +2,24 @@ package router
 
 import (
 	"github.com/Nina-99/yottu-api/controller"
+	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yottu-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
 )
 
-func PersonnelRoutes(rg *gin.RouterGroup, personnelController *controller.PersonnelController) {
+func PersonnelRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
+	repo := repository.NewPersonnelRepositoryImpl(db)
+	svc := service.NewPersonnelServiceImpl(repo, validate)
+	ctrl := controller.NewPersonnelController(svc)
+
 	personnel := rg.Group("/personnel")
 	{
-		personnel.POST("", personnelController.Create)
-		personnel.GET("/:id", personnelController.FindByID)
-		personnel.GET("", personnelController.FindAll)
-		personnel.PUT("/:id", personnelController.Update)
-		personnel.DELETE("/:id", personnelController.Delete)
+		personnel.POST("", ctrl.Create)
+		personnel.GET("/:id", ctrl.FindByID)
+		personnel.GET("", ctrl.FindAll)
+		personnel.PUT("/:id", ctrl.Update)
+		personnel.DELETE("/:id", ctrl.Delete)
 	}
 }
