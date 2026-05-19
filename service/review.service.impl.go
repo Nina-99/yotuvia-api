@@ -7,17 +7,22 @@ import (
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
+	"github.com/go-playground/validator/v10"
 )
 
 type ReviewServiceImpl struct {
-	repo repository.ReviewRepository
+	repo     repository.ReviewRepository
+	Validate *validator.Validate
 }
 
-func NewReviewServiceImpl(repo repository.ReviewRepository) ReviewService {
-	return &ReviewServiceImpl{repo: repo}
+func NewReviewServiceImpl(repo repository.ReviewRepository, validate *validator.Validate) ReviewService {
+	return &ReviewServiceImpl{repo: repo, Validate: validate}
 }
 
 func (s *ReviewServiceImpl) Create(clientID uint, req request.CreateReviewRequest) error {
+	if err := s.Validate.Struct(req); err != nil {
+		return err
+	}
 	review := &models.Review{
 		ClientID:       clientID,
 		BeautyCenterID: req.BeautyCenterID,
@@ -28,6 +33,9 @@ func (s *ReviewServiceImpl) Create(clientID uint, req request.CreateReviewReques
 }
 
 func (s *ReviewServiceImpl) Update(clientID uint, reviewID uint, req request.UpdateReviewRequest) error {
+	if err := s.Validate.Struct(req); err != nil {
+		return err
+	}
 	review, err := s.repo.FindByID(reviewID)
 	if err != nil {
 		return err

@@ -5,19 +5,25 @@ import (
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
+	"github.com/go-playground/validator/v10"
 )
 
 type MembershipServiceImpl struct {
 	MembershipRepository repository.MembershipRepository
+	Validate             *validator.Validate
 }
 
-func NewMembershipService(membershipRepo repository.MembershipRepository) MembershipService {
+func NewMembershipService(membershipRepo repository.MembershipRepository, validate *validator.Validate) MembershipService {
 	return &MembershipServiceImpl{
 		MembershipRepository: membershipRepo,
+		Validate:             validate,
 	}
 }
 
 func (s *MembershipServiceImpl) Create(req request.CreateMembershipRequest) error {
+	if err := s.Validate.Struct(req); err != nil {
+		return err
+	}
 	membership := models.Membership{
 		Name:           req.Name,
 		Description:    req.Description,
@@ -28,6 +34,9 @@ func (s *MembershipServiceImpl) Create(req request.CreateMembershipRequest) erro
 }
 
 func (s *MembershipServiceImpl) Update(id uint, req request.UpdateMembershipRequest) error {
+	if err := s.Validate.Struct(req); err != nil {
+		return err
+	}
 	membership, err := s.MembershipRepository.FindByID(id)
 	if err != nil {
 		return err

@@ -1,11 +1,11 @@
 package request
 
 type AuthAccountCreateRequest struct {
-	ClientID   uint   `json:"client_id" binding:"required"`
-	Provider   string `json:"provider" binding:"required,oneof=local google facebook"`
-	ProviderID string `json:"provider_id" binding:"required,max=255"`
+	ClientID   uint   `json:"client_id" validate:"required"`
+	Provider   string `json:"provider" validate:"required,oneof=local google facebook"`
+	ProviderID string `json:"provider_id" validate:"required,max=255"`
 }
 
 type AuthAccountUpdateRequest struct {
-	ProviderID string `json:"provider_id" binding:"max=255"`
+	ProviderID string `json:"provider_id" validate:"max=255"`
 }

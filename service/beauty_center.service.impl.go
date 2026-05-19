@@ -8,18 +8,26 @@ import (
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/utils"
+	"github.com/go-playground/validator/v10"
 )
 
 type BeautyCenterServiceImpl struct {
-	repo repository.BeautyCenterRepository
+	repo     repository.BeautyCenterRepository
+	Validate *validator.Validate
 }
 
-func NewBeautyCenterServiceImpl(repo repository.BeautyCenterRepository) BeautyCenterService {
-	return &BeautyCenterServiceImpl{repo: repo}
+func NewBeautyCenterServiceImpl(repo repository.BeautyCenterRepository, validate *validator.Validate) BeautyCenterService {
+	return &BeautyCenterServiceImpl{
+		repo:     repo,
+		Validate: validate,
+	}
 }
 
 // Create implements BeautyCenterService
 func (s *BeautyCenterServiceImpl) Create(req request.CreateBeautyCenterRequest) (response.BeautyCenterResponse, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return response.BeautyCenterResponse{}, err
+	}
 	// Check if email already exists
 	existing, _ := s.repo.FindByEmail(req.Email)
 	if existing != nil {
@@ -72,6 +80,9 @@ func (s *BeautyCenterServiceImpl) Create(req request.CreateBeautyCenterRequest) 
 
 // Update implements BeautyCenterService
 func (s *BeautyCenterServiceImpl) Update(id uint, req request.UpdateBeautyCenterRequest) (response.BeautyCenterResponse, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return response.BeautyCenterResponse{}, err
+	}
 	// Find existing
 	center, err := s.repo.FindByID(id)
 	if err != nil {

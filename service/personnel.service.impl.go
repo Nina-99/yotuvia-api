@@ -8,18 +8,23 @@ import (
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/utils"
+	"github.com/go-playground/validator/v10"
 )
 
 type PersonnelServiceImpl struct {
-	repo repository.PersonnelRepository
+	repo     repository.PersonnelRepository
+	Validate *validator.Validate
 }
 
-func NewPersonnelServiceImpl(repo repository.PersonnelRepository) PersonnelService {
-	return &PersonnelServiceImpl{repo: repo}
+func NewPersonnelServiceImpl(repo repository.PersonnelRepository, validate *validator.Validate) PersonnelService {
+	return &PersonnelServiceImpl{repo: repo, Validate: validate}
 }
 
 // Create implements PersonnelService
 func (s *PersonnelServiceImpl) Create(req request.CreatePersonnelRequest) (response.PersonnelResponse, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return response.PersonnelResponse{}, err
+	}
 	// Check if email already exists
 	existing, err := s.repo.FindByEmail(req.Email)
 	if err != nil {
@@ -67,6 +72,9 @@ func (s *PersonnelServiceImpl) Create(req request.CreatePersonnelRequest) (respo
 
 // Update implements PersonnelService
 func (s *PersonnelServiceImpl) Update(id uint, req request.UpdatePersonnelRequest) (response.PersonnelResponse, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return response.PersonnelResponse{}, err
+	}
 	personnel, err := s.repo.FindByID(id)
 	if err != nil {
 		return response.PersonnelResponse{}, err

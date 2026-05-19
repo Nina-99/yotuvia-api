@@ -8,7 +8,6 @@ import (
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/utils"
 	"github.com/go-playground/validator/v10"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type ClientServiceImpl struct {
@@ -25,6 +24,9 @@ func NewClientServiceImpl(clientRepository repository.ClientRepository, validate
 
 // Login implements ClientService
 func (s *ClientServiceImpl) Login(req request.LoginClientRequest) (string, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return "", err
+	}
 	// Find username in database
 	var client *models.Client
 	var err error
@@ -76,7 +78,16 @@ func (s *ClientServiceImpl) Register(req request.RegisterClientRequest) (string,
 		return "", err
 	}
 
-	client := models.Client{FirstName: req.FirstName, LastName: req.LastName, Username: req.Username, Email: req.Email, Phone: req.Phone, Password: string(hash), IsActive: true}
+	client := models.Client{
+		FirstName: req.FirstName,
+		LastName:  req.LastName,
+		Username:  req.Username,
+		Email:     req.Email,
+		Phone:     req.Phone,
+		Password:  string(hash),
+		IsActive:  true,
+	}
+
 	if err := s.ClientRepository.Create(&client); err != nil {
 		return "", err
 	}
@@ -104,10 +115,24 @@ func (s *ClientServiceImpl) Update(clientID uint, req request.RegisterClientRequ
 	if req.LastName != "" {
 		client.LastName = req.LastName
 	}
-	if req.Username != "" {
+	if req.Username != "" && req.Username != client.Username {
+		existingUsername, err := s.ClientRepository.FindByUsername(req.Username)
+		if err != nil {
+			return err
+		}
+		if existingUsername != nil {
+			return errors.New("username already exists")
+		}
 		client.Username = req.Username
 	}
-	if req.Email != "" {
+	if req.Email != "" && req.Email != client.Email {
+		existingEmail, err := s.ClientRepository.FindByEmail(req.Email)
+		if err != nil {
+			return err
+		}
+		if existingEmail != nil {
+			return errors.New("email already exists")
+		}
 		client.Email = req.Email
 	}
 	if req.Password != "" {
@@ -131,10 +156,20 @@ func (s *ClientServiceImpl) Delete(clientID uint) error {
 	return s.ClientRepository.Delete(user)
 }
 
+// FindAll user implements ClientService
 func (s *ClientServiceImpl) FindAll() ([]models.Client, error) {
 	return s.ClientRepository.FindAll()
 }
 
+// FindEmail user implements ClientService
 func (s *ClientServiceImpl) FindEmail(Email string) (*models.Client, error) {
-	return s.ClientRepository.FindByEmail(Email)
+	client, err := s.ClientRepository.FindByEmail(Email)
+	if err != nil {
+		return nil, err
+	}
+	if client == nil {
+		return nil, errors.New("Client not found")
+	}
+
+	return client, nil
 }
