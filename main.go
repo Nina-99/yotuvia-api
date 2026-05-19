@@ -6,6 +6,7 @@ import (
 
 	"github.com/Nina-99/yottu-api/configs"
 	"github.com/Nina-99/yottu-api/router"
+	"github.com/Nina-99/yottu-api/utils"
 	"github.com/joho/godotenv"
 )
 
@@ -13,6 +14,11 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("🚀 Could not load environment variables", err)
 	}
+
+	utils.InitLogger(utils.LoggerConfig{
+		Level:  os.Getenv("LOG_LEVEL"),  // "debug", "info"
+		Format: os.Getenv("LOG_FORMAT"), // "console" or "json"
+	})
 
 	// NOTE: DataBase
 	// validate := validator.New()
