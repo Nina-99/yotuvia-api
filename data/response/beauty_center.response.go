@@ -1,5 +1,7 @@
 package response
 
+import "time"
+
 type BeautyCenterResponse struct {
 	ID          uint                    `json:"id"`
 	Name        string                  `json:"name"`
@@ -14,10 +16,12 @@ type BeautyCenterResponse struct {
 }
 
 type BeautyCenterImageResp struct {
-	ID       uint   `json:"id"`
-	ImageUrl string `json:"image_url"`
-	IsCover  bool   `json:"is_cover"`
-	Position int    `json:"position"`
+	ID             uint      `json:"id"`
+	BeautyCenterID uint      `json:"beauty_center_id"`
+	ImageUrl       string    `json:"image_url"`
+	IsCover        bool      `json:"is_cover"`
+	Position       int       `json:"position"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type WorkingHourResp struct {

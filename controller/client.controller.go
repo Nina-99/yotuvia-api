@@ -108,5 +108,8 @@ func (c *ClientController) GetUserByEmail(ctx *gin.Context) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
-	ctx.JSON(http.StatusOK, client)
+
+	var res []response.ClientResponse
+	res = append(res, response.ClientResponse{ID: client.ID, FirstName: client.FirstName, LastName: client.LastName, Username: client.Username, Email: client.Email})
+	ctx.JSON(http.StatusOK, res)
 }

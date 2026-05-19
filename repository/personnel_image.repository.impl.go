@@ -14,17 +14,17 @@ func NewPersonnelImageRepositoryImpl(Db *gorm.DB) PersonnelImageRepository {
 	return &PersonnelImageRepositoryImpl{Db: Db}
 }
 
-func (p *PersonnelImageRepositoryImpl) Save(personnelImage *models.PersonnelImage) error {
-	result := p.Db.Save(personnelImage)
+func (r *PersonnelImageRepositoryImpl) Save(personnelImage *models.PersonnelImage) error {
+	result := r.Db.Save(personnelImage)
 	if result.Error != nil {
 		return result.Error
 	}
 	return nil
 }
 
-func (p *PersonnelImageRepositoryImpl) FindByID(id uint) (*models.PersonnelImage, error) {
+func (r *PersonnelImageRepositoryImpl) FindByID(id uint) (*models.PersonnelImage, error) {
 	var personnelImage models.PersonnelImage
-	result := p.Db.First(&personnelImage, id)
+	result := r.Db.First(&personnelImage, id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, errors.New("personnel image not found")
@@ -34,18 +34,18 @@ func (p *PersonnelImageRepositoryImpl) FindByID(id uint) (*models.PersonnelImage
 	return &personnelImage, nil
 }
 
-func (p *PersonnelImageRepositoryImpl) FindByPersonnelID(personnelID uint) ([]models.PersonnelImage, error) {
+func (r *PersonnelImageRepositoryImpl) FindByPersonnelID(personnelID uint) ([]models.PersonnelImage, error) {
 	var personnelImages []models.PersonnelImage
-	result := p.Db.Where("personnel_id = ?", personnelID).Find(&personnelImages)
+	result := r.Db.Where("personnel_id = ?", personnelID).Find(&personnelImages)
 	if result.Error != nil {
 		return nil, result.Error
 	}
 	return personnelImages, nil
 }
 
-func (p *PersonnelImageRepositoryImpl) Delete(id uint) error {
+func (r *PersonnelImageRepositoryImpl) Delete(id uint) error {
 	var personnelImage models.PersonnelImage
-	result := p.Db.Delete(&personnelImage, id)
+	result := r.Db.Delete(&personnelImage, id)
 	if result.Error != nil {
 		return result.Error
 	}
