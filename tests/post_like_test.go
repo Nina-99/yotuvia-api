@@ -12,6 +12,7 @@ import (
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -50,11 +51,12 @@ func MockMiddleware(clientID uint) gin.HandlerFunc {
 }
 
 func TestPostLikeCRUD(t *testing.T) {
+	validate := validator.New()
 	gin.SetMode(gin.TestMode)
 	db := setupPostLikeTestDB(t)
 
 	repo := repository.NewPostLikeRepositoryImpl(db)
-	svc := service.NewPostLikeServiceImpl(repo)
+	svc := service.NewPostLikeServiceImpl(repo, validate)
 	ctrl := controller.NewPostLikeController(svc)
 
 	r := gin.Default()

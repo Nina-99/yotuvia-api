@@ -13,6 +13,7 @@ import (
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -50,10 +51,11 @@ func setupReviewTestDB(t *testing.T) *gorm.DB {
 }
 
 func TestReviewController_CreateValidation(t *testing.T) {
+	validate := validator.New()
 	gin.SetMode(gin.TestMode)
 	db := setupReviewTestDB(t)
 	repo := repository.NewReviewRepositoryImpl(db)
-	svc := service.NewReviewServiceImpl(repo)
+	svc := service.NewReviewServiceImpl(repo, validate)
 	ctrl := controller.NewReviewController(svc)
 
 	r := gin.Default()
@@ -96,9 +98,10 @@ func TestReviewController_CreateValidation(t *testing.T) {
 }
 
 func TestReviewService_OwnershipUpdateDelete(t *testing.T) {
+	validate := validator.New()
 	db := setupReviewTestDB(t)
 	repo := repository.NewReviewRepositoryImpl(db)
-	svc := service.NewReviewServiceImpl(repo)
+	svc := service.NewReviewServiceImpl(repo, validate)
 
 	// User 2 trying to update User 1's review (ID 1)
 	rating := 4

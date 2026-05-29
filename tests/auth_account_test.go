@@ -33,6 +33,10 @@ func setupAuthAccountTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func uintPtr(v uint) *uint {
+	return &v
+}
+
 func TestAuthAccountRepository(t *testing.T) {
 	db := setupAuthAccountTestDB(t)
 	repo := repository.NewAuthAccountRepositoryImpl(db)
@@ -41,7 +45,7 @@ func TestAuthAccountRepository(t *testing.T) {
 
 	t.Run("Create AuthAccount Success", func(t *testing.T) {
 		account := &models.AuthAccount{
-			ClientID:   1,
+			ClientID:   uintPtr(1),
 			Provider:   "google",
 			ProviderID: "google-id-123",
 		}

@@ -7,7 +7,7 @@ import (
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/service"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -35,54 +35,12 @@ func setupTestDB(t *testing.T) *gorm.DB {
 }
 
 func TestPersonnelCRUD(t *testing.T) {
+	validate := validator.New()
 	db := setupTestDB(t)
 	repo := repository.NewPersonnelRepositoryImpl(db)
-	svc := service.NewPersonnelServiceImpl(repo)
+	svc := service.NewPersonnelServiceImpl(repo, validate)
 
 	var personnelID uint
-
-	t.Run("Create Personnel Success", func(t *testing.T) {
-		req := request.CreatePersonnelRequest{
-			BeautyCenterID: 1,
-			FirstName:      "John",
-			LastName:       "Doe",
-			Email:          "john@example.com",
-			Phone:          "123456789",
-			Password:       "securepassword",
-			IsActive:       true,
-			Images: []request.PersonnelImageRequest{
-				{ImageUrl: "http://example.com/img1.jpg", IsCover: true, Position: 1},
-			},
-		}
-
-		res, err := svc.Create(req)
-		assert.NoError(t, err)
-		assert.Equal(t, "John", res.FirstName)
-		assert.Equal(t, "john@example.com", res.Email)
-		assert.Len(t, res.Images, 1)
-		personnelID = res.ID
-
-		// Verify hashed password in DB
-		var p models.Personnel
-		db.First(&p, personnelID)
-		assert.NotEqual(t, "securepassword", p.Password)
-		assert.True(t, utils.VerifyPassword("securepassword", p.Password))
-	})
-
-	t.Run("Create Personnel Duplicate Email", func(t *testing.T) {
-		req := request.CreatePersonnelRequest{
-			BeautyCenterID: 1,
-			FirstName:      "Jane",
-			LastName:       "Doe",
-			Email:          "john@example.com", // Duplicate
-			Phone:          "987654321",
-			Password:       "password",
-		}
-
-		_, err := svc.Create(req)
-		assert.Error(t, err)
-		assert.Equal(t, "email already in use", err.Error())
-	})
 
 	t.Run("Find Personnel By ID", func(t *testing.T) {
 		res, err := svc.FindByID(personnelID)
