@@ -33,7 +33,7 @@ func (s *BeautyCenterImageServiceImpl) Create(req request.BeautyCenterImageReque
 	// Verify if personnel exists
 	_, err = s.BeautyCenterRepository.FindByID(req.BeautyCenterID)
 	if err != nil {
-		return response.BeautyCenterImageResp{}, errors.New("personnel not found")
+		return response.BeautyCenterImageResp{}, errors.New("beauty center not found")
 	}
 
 	personnelImage := models.BeautyCenterImage{
