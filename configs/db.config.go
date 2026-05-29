@@ -2,10 +2,10 @@ package configs
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yottu-api/utils"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -19,10 +19,10 @@ func DBConnection() {
 	db, err := gorm.Open(postgres.Open(connectionStr), &gorm.Config{})
 
 	if err != nil {
-		log.Fatal("Falied to connect of data base")
+		utils.Log.Fatal("Failed to connect to database: ", err)
 	}
 
-	fmt.Println("Connected Successfully to the data base")
+	utils.Log.Info("Connected Successfully to the database")
 
 	list_models := []interface{}{
 		&models.AuthAccount{},
@@ -30,12 +30,15 @@ func DBConnection() {
 		&models.BeautyCenterImage{},
 		&models.Category{},
 		&models.Client{},
+		&models.CustomerPunchCard{},
 		&models.Favorite{},
 		&models.FeedPost{},
+		&models.LoyaltyProgram{},
 		&models.Membership{},
 		&models.Personnel{},
 		&models.PersonnelImage{},
 		&models.PostLike{},
+		&models.PunchHistory{},
 		&models.Reservation{},
 		&models.Review{},
 		&models.Service{},
@@ -45,7 +48,7 @@ func DBConnection() {
 
 	for _, model := range list_models {
 		if err := db.AutoMigrate(model); err != nil {
-			log.Fatalf("Error migrating the model %T: %v", model, err)
+			utils.Log.Fatalf("Error migrating the model %T: %v", model, err)
 		}
 	}
 

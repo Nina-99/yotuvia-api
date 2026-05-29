@@ -6,9 +6,7 @@ import (
 )
 
 type ClientService interface {
-	Login(req request.LoginClientRequest) (string, error)
-	Register(req request.RegisterClientRequest) (string, error)
-	Update(clientID uint, req request.RegisterClientRequest) error
+	Update(clientID uint, req request.UpdateClientRequest) error
 	Delete(clientID uint) error
 	FindAll() ([]models.Client, error)
 	FindEmail(email string) (*models.Client, error)

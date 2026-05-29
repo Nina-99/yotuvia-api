@@ -18,39 +18,6 @@ func NewClientController(service service.ClientService) *ClientController {
 	return &ClientController{clientService: service}
 }
 
-func (c *ClientController) Login(ctx *gin.Context) {
-	var req request.LoginClientRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	token, err := c.clientService.Login(req)
-	if err != nil {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Credentials"})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{"token": token})
-}
-
-func (c *ClientController) Register(ctx *gin.Context) {
-	var req request.RegisterClientRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	token, err := c.clientService.Register(req)
-	if err != nil {
-		if err.Error() == "email already registered" {
-			ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-			return
-		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	ctx.JSON(http.StatusOK, gin.H{"token": token})
-}
-
 func (c *ClientController) Update(ctx *gin.Context) {
 	idParam := ctx.Param("id")
 	clientId, err := strconv.Atoi(idParam)
@@ -58,7 +25,7 @@ func (c *ClientController) Update(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Format of ID invalid"})
 		return
 	}
-	var req request.RegisterClientRequest
+	var req request.UpdateClientRequest
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

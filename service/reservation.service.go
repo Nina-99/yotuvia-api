@@ -11,4 +11,6 @@ type ReservationService interface {
 	Delete(reservationID uint) error
 	FindAll() ([]models.Reservation, error)
 	FindById(categoryID uint) (*models.Reservation, error)
+	GenerateVerificationToken(reservationID uint) (string, error)
+	VerifyQR(token string, authBeautyCenterID uint) error
 }

@@ -22,90 +22,17 @@ func NewClientServiceImpl(clientRepository repository.ClientRepository, validate
 	}
 }
 
-// Login implements ClientService
-func (s *ClientServiceImpl) Login(req request.LoginClientRequest) (string, error) {
-	if err := s.Validate.Struct(req); err != nil {
-		return "", err
-	}
-	// Find username in database
-	var client *models.Client
-	var err error
-	if utils.IsEmail(req.Identifier) {
-		client, err = s.ClientRepository.FindByEmail(req.Identifier)
-	} else {
-		client, err = s.ClientRepository.FindByUsername(req.Identifier)
-	}
-	if err != nil {
-		return "", errors.New("invalid credentials")
-	}
-
-	match := utils.VerifyPassword(req.Password, client.Password)
-	if match == false {
-		return "", errors.New("Invalid Password")
-	}
-
-	token, err := utils.GenerateJWT(client)
-	if err != nil {
-		return "", err
-	}
-	return token, nil
-}
-
-// Register implements ClientService
-func (s *ClientServiceImpl) Register(req request.RegisterClientRequest) (string, error) {
-	if err := s.Validate.Struct(req); err != nil {
-		return "", err
-	}
-
-	existingEmail, err := s.ClientRepository.FindByEmail(req.Email)
-	if err != nil {
-		return "", err
-	}
-	if existingEmail != nil {
-		return "", errors.New("email already exists")
-	}
-
-	existingUsername, err := s.ClientRepository.FindByUsername(req.Username)
-	if err != nil {
-
-		return "", err
-	}
-	if existingUsername != nil {
-		return "", errors.New("username already exists")
-	}
-	hash, err := utils.HashPassword(req.Password)
-	if err != nil {
-		return "", err
-	}
-
-	client := models.Client{
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-		Username:  req.Username,
-		Email:     req.Email,
-		Phone:     req.Phone,
-		Password:  string(hash),
-		IsActive:  true,
-	}
-
-	if err := s.ClientRepository.Create(&client); err != nil {
-		return "", err
-	}
-	token, err := utils.GenerateJWT(&client)
-	if err != nil {
-		return "", err
-	}
-	return token, nil
-}
-
 // Update implements ClientServiceImpl
-func (s *ClientServiceImpl) Update(clientID uint, req request.RegisterClientRequest) error {
+func (s *ClientServiceImpl) Update(clientID uint, req request.UpdateClientRequest) error {
+	utils.Log.Infof("Updating client with ID: %d", clientID)
 	if err := s.Validate.Struct(req); err != nil {
+		utils.Log.Warnf("Update failed: validation error: %v", err)
 		return err
 	}
 
 	client, err := s.ClientRepository.FindById(clientID)
 	if err != nil {
+		utils.Log.Errorf("Update failed: client ID %d not found: %v", clientID, err)
 		return err
 	}
 
@@ -118,9 +45,11 @@ func (s *ClientServiceImpl) Update(clientID uint, req request.RegisterClientRequ
 	if req.Username != "" && req.Username != client.Username {
 		existingUsername, err := s.ClientRepository.FindByUsername(req.Username)
 		if err != nil {
+			utils.Log.Errorf("Update failed: error checking username %s: %v", req.Username, err)
 			return err
 		}
 		if existingUsername != nil {
+			utils.Log.Warnf("Update failed: username %s already exists", req.Username)
 			return errors.New("username already exists")
 		}
 		client.Username = req.Username
@@ -128,9 +57,11 @@ func (s *ClientServiceImpl) Update(clientID uint, req request.RegisterClientRequ
 	if req.Email != "" && req.Email != client.Email {
 		existingEmail, err := s.ClientRepository.FindByEmail(req.Email)
 		if err != nil {
+			utils.Log.Errorf("Update failed: error checking email %s: %v", req.Email, err)
 			return err
 		}
 		if existingEmail != nil {
+			utils.Log.Warnf("Update failed: email %s already exists", req.Email)
 			return errors.New("email already exists")
 		}
 		client.Email = req.Email
@@ -138,13 +69,19 @@ func (s *ClientServiceImpl) Update(clientID uint, req request.RegisterClientRequ
 	if req.Password != "" {
 		hash, err := utils.HashPassword(req.Password)
 		if err != nil {
+			utils.Log.Errorf("Update failed: failed to hash password: %v", err)
 			return err
 		}
 		client.Password = hash
 	}
 	client.IsActive = req.IsActive
 
-	return s.ClientRepository.Update(client)
+	if err := s.ClientRepository.Update(client); err != nil {
+		utils.Log.Errorf("Update failed: error saving client to database: %v", err)
+		return err
+	}
+	utils.Log.Infof("Client with ID %d updated successfully", clientID)
+	return nil
 }
 
 // Delete user implements ClientService

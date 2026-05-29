@@ -16,22 +16,22 @@ func NewReservationRepositoryImpl(db *gorm.DB) ReservationRepository {
 	return &ReservationRepositoryImpl{db: db}
 }
 
-// Create implements ClientRepository
+// Create implements ReservationRepository
 func (r *ReservationRepositoryImpl) Create(reservation *models.Reservation) error {
 	return r.db.Create(&reservation).Error
 }
 
-// Update implements ClientRepository
+// Update implements ReservationRepository
 func (r *ReservationRepositoryImpl) Update(reservation *models.Reservation) error {
 	return r.db.Save(reservation).Error
 }
 
-// Delete implements ClientRepository
+// Delete implements ReservationRepository
 func (r *ReservationRepositoryImpl) Delete(reservation *models.Reservation) error {
 	return r.db.Delete(&reservation).Error
 }
 
-// FindById implements ClientRepository
+// FindById implements ReservationRepository
 func (r *ReservationRepositoryImpl) FindById(reservationID uint) (*models.Reservation, error) {
 	var reservation models.Reservation
 	err := r.db.Preload("Client").Preload("Personnel").Preload("Service").Preload("BeautyCenter").First(&reservation, reservationID).Error
@@ -59,7 +59,7 @@ func (r *ReservationRepositoryImpl) FindBeautyCenterId(beautyCenterID uint) (*mo
 	return &reservation, err
 }
 
-// FindAll implements ClientRepository
+// FindAll implements ReservationRepository
 func (r *ReservationRepositoryImpl) FindAll() ([]models.Reservation, error) {
 	var reservations []models.Reservation
 	err := r.db.Preload("Client").Preload("Personnel").Preload("Service").Preload("BeautyCenter").Find(&reservations).Error
@@ -79,4 +79,18 @@ func (r *ReservationRepositoryImpl) CheckOverlap(centerID uint, date time.Time, 
 
 	err := query.Count(&count).Error
 	return count > 0, err
+}
+
+// FindByToken implements  ReservationRepository
+func (r *ReservationRepositoryImpl) FindByToken(token string) (*models.Reservation, error) {
+	var reservation models.Reservation
+	err := r.db.Where("verification_token = ?", token).First(&reservation).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &reservation, nil
 }

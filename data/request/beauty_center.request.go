@@ -15,9 +15,11 @@ type CreateBeautyCenterRequest struct {
 type UpdateBeautyCenterRequest struct {
 	Name        string                     `json:"name" validate:"omitempty,min=5"`
 	Address     string                     `json:"address" validate:"max=omitempty,min=5"`
+	Email       string                     `json:"email" validate:"required,email,max=70"`
 	Phone       string                     `json:"phone" validate:"max=20"`
 	Url         string                     `json:"url"`
 	Description string                     `json:"description" validate:"max=255"`
+	Password    string                     `json:"password" validate:"required"`
 	IsActive    *bool                      `json:"is_active"`
 	Images      []BeautyCenterImageRequest `json:"images"`
 	Schedules   []WorkingHourRequest       `json:"schedules"`

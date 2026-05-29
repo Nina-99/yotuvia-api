@@ -15,4 +15,5 @@ type ReservationRepository interface {
 	FindBeautyCenterId(beautyCenterID uint) (*models.Reservation, error)
 	FindAll() ([]models.Reservation, error)
 	CheckOverlap(centerID uint, date time.Time, startTime, endTime string, excludeID uint) (bool, error)
+	FindByToken(token string) (*models.Reservation, error)
 }

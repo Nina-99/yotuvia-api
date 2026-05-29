@@ -23,61 +23,6 @@ func NewBeautyCenterServiceImpl(repo repository.BeautyCenterRepository, validate
 	}
 }
 
-// Create implements BeautyCenterService
-func (s *BeautyCenterServiceImpl) Create(req request.CreateBeautyCenterRequest) (response.BeautyCenterResponse, error) {
-	if err := s.Validate.Struct(req); err != nil {
-		return response.BeautyCenterResponse{}, err
-	}
-	// Check if email already exists
-	existing, _ := s.repo.FindByEmail(req.Email)
-	if existing != nil {
-		return response.BeautyCenterResponse{}, errors.New("email already registered")
-	}
-
-	// Hash password
-	hashedPassword, err := utils.HashPassword(req.Password)
-	if err != nil {
-		return response.BeautyCenterResponse{}, err
-	}
-
-	// Map request to model
-	center := models.BeautyCenter{
-		Name:        req.Name,
-		Address:     req.Address,
-		Email:       req.Email,
-		Phone:       req.Phone,
-		Url:         req.Url,
-		Description: req.Description,
-		Password:    hashedPassword,
-		IsActive:    true,
-	}
-
-	// Map images
-	for _, imgReq := range req.Images {
-		center.BeautyCenterImage = append(center.BeautyCenterImage, models.BeautyCenterImage{
-			ImageUrl: imgReq.ImageUrl,
-			IsCover:  imgReq.IsCover,
-			Position: imgReq.Position,
-		})
-	}
-
-	// Map schedules
-	for _, schedReq := range req.Schedules {
-		center.WorkingHour = append(center.WorkingHour, models.WorkingHour{
-			DayOfWeek: schedReq.DayOfWeek,
-			StartTime: schedReq.StartTime,
-			EndTime:   schedReq.EndTime,
-		})
-	}
-
-	// Save to DB
-	if err := s.repo.Create(&center); err != nil {
-		return response.BeautyCenterResponse{}, err
-	}
-
-	return s.mapToResponse(center), nil
-}
-
 // Update implements BeautyCenterService
 func (s *BeautyCenterServiceImpl) Update(id uint, req request.UpdateBeautyCenterRequest) (response.BeautyCenterResponse, error) {
 	if err := s.Validate.Struct(req); err != nil {
@@ -107,6 +52,28 @@ func (s *BeautyCenterServiceImpl) Update(id uint, req request.UpdateBeautyCenter
 	}
 	if req.IsActive != nil {
 		center.IsActive = *req.IsActive
+	}
+
+	if req.Email != "" && req.Email != center.Email {
+		existingEmail, err := s.repo.FindByEmail(req.Email)
+		if err != nil {
+			utils.Log.Errorf("Update failed: error checking email %s: %v", req.Email, err)
+			return response.BeautyCenterResponse{}, err
+		}
+		if existingEmail != nil {
+			utils.Log.Warnf("Update failed: email %s already exists", req.Email)
+			return response.BeautyCenterResponse{}, errors.New("email already exists")
+		}
+		center.Email = req.Email
+	}
+	if req.Password != "" {
+		hashed, err := utils.HashPassword(req.Password)
+		if err != nil {
+			utils.Log.Errorf("Update failed: failed to hash password: %v", err)
+			return response.BeautyCenterResponse{}, err
+		}
+
+		center.Password = hashed
 	}
 
 	// Update images (Replacement strategy)

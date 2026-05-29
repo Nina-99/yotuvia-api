@@ -48,7 +48,7 @@ func (r *AuthAccountRepositoryImpl) FindById(id uint) (*models.AuthAccount, erro
 // FindByProvider implements AuthAccountRepository
 func (r *AuthAccountRepositoryImpl) FindByProvider(provider, providerId string) (*models.AuthAccount, error) {
 	var account models.AuthAccount
-	err := r.db.Preload("Client").Where("provider = ? AND provider_id = ?", provider, providerId).First(&account).Error
+	err := r.db.Where("provider = ? AND provider_id = ?", provider, providerId).First(&account).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil

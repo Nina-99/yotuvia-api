@@ -2,7 +2,6 @@ package controller
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/service"
@@ -17,84 +16,48 @@ func NewAuthAccountController(authAccountService service.AuthAccountService) *Au
 	return &AuthAccountController{authAccountService: authAccountService}
 }
 
-func (c *AuthAccountController) Create(ctx *gin.Context) {
-	var req request.AuthAccountCreateRequest
+func (c *AuthAccountController) Register(ctx *gin.Context) {
+	var req request.RegisterRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	token, err := c.authAccountService.Register(req)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusCreated, gin.H{"token": token})
+}
+
+func (c *AuthAccountController) Login(ctx *gin.Context) {
+	var req request.LoginRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	res, err := c.authAccountService.Create(req)
+	token, err := c.authAccountService.Login(req)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx.JSON(http.StatusCreated, res)
+	ctx.JSON(http.StatusOK, gin.H{"token": token})
 }
 
-func (c *AuthAccountController) Update(ctx *gin.Context) {
-	idParam := ctx.Param("id")
-	id, err := strconv.Atoi(idParam)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid id format"})
-		return
-	}
-
-	var req request.AuthAccountUpdateRequest
+func (c *AuthAccountController) SocialLogin(ctx *gin.Context) {
+	var req request.SocialLoginRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	res, err := c.authAccountService.Update(uint(id), req)
+	token, err := c.authAccountService.SocialLogin(req)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, res)
-}
-
-func (c *AuthAccountController) Delete(ctx *gin.Context) {
-	idParam := ctx.Param("id")
-	id, err := strconv.Atoi(idParam)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid id format"})
-		return
-	}
-
-	if err := c.authAccountService.Delete(uint(id)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	ctx.Status(http.StatusNoContent)
-}
-
-func (c *AuthAccountController) FindAll(ctx *gin.Context) {
-	res, err := c.authAccountService.FindAll()
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, res)
-}
-
-func (c *AuthAccountController) FindByID(ctx *gin.Context) {
-	idParam := ctx.Param("id")
-	id, err := strconv.Atoi(idParam)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid id format"})
-		return
-	}
-
-	res, err := c.authAccountService.FindById(uint(id))
-	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "auth account not found"})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, res)
+	ctx.JSON(http.StatusOK, gin.H{"token": token})
 }

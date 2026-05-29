@@ -1,22 +1,28 @@
 package service
 
 import (
+	"crypto/rand"
 	"errors"
+	"math/big"
+	"time"
 
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yottu-api/utils"
 	"github.com/go-playground/validator/v10"
 )
 
 type ReservationServiceImpl struct {
 	ReservationRepository repository.ReservationRepository
+	LoyaltyService        LoyaltyService
 	Validate              *validator.Validate
 }
 
-func NewReservationServiceImpl(reservationRepository repository.ReservationRepository, validate *validator.Validate) ReservationService {
+func NewReservationServiceImpl(reservationRepository repository.ReservationRepository, loyaltyService LoyaltyService, validate *validator.Validate) ReservationService {
 	return &ReservationServiceImpl{
 		ReservationRepository: reservationRepository,
+		LoyaltyService:        loyaltyService,
 		Validate:              validate,
 	}
 }
@@ -99,4 +105,86 @@ func (s *ReservationServiceImpl) FindAll() ([]models.Reservation, error) {
 
 func (s *ReservationServiceImpl) FindById(reservationID uint) (*models.Reservation, error) {
 	return s.ReservationRepository.FindById(reservationID)
+}
+
+// Helper to generate a secure and fast token
+func generateSecureToken() string {
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789"
+	result := make([]byte, 6)
+	for i := range result {
+		num, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		result[i] = charset[num.Int64()]
+	}
+	return string(result)
+}
+
+// GenerateVerificationToken implements on-the-fly QR generaation with a 30-minute expiration
+func (s *ReservationServiceImpl) GenerateVerificationToken(reservationID uint) (string, error) {
+	reservation, err := s.ReservationRepository.FindById(reservationID)
+	if err != nil {
+		return "", errors.New("reservation not found")
+	}
+
+	if reservation.Status == "completed" || reservation.Status == "cancelled" {
+		return "", errors.New("cannot generate QR for a completed or cancelled reservation")
+	}
+
+	var token string
+	for {
+		token = generateSecureToken()
+
+		existing, _ := s.ReservationRepository.FindByToken(token)
+		if existing == nil {
+			break
+		}
+	}
+
+	expiration := time.Now().Add(30 * time.Minute)
+
+	reservation.VerificationToken = token
+	reservation.TokenExpirateAt = &expiration
+
+	if err := s.ReservationRepository.Update(reservation); err != nil {
+		return "", err
+	}
+
+	utils.Log.Infof("[QR] Dynamic QR generated for Reservation ID %d. Expires at: %s", reservation.ID, expiration.Format("15:04:05"))
+	return token, nil
+}
+
+func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint) error {
+	reservation, err := s.ReservationRepository.FindByToken(token)
+	if err != nil || reservation == nil {
+		return errors.New("invalid or expired QR code")
+	}
+
+	if reservation.BeautyCenterID != authBeautyCenterID {
+		utils.Log.Warnf("[SECURITY ALERT] Intrusion attempt! Salon ID %d tried to verify QR for Reservation ID %d (owned by Salon %d)", authBeautyCenterID, reservation.ID, reservation.BeautyCenterID)
+		return errors.New("unauthorized: this reservation does not belong to your brauty center")
+	}
+
+	if reservation.TokenExpirateAt != nil && time.Now().After(*reservation.TokenExpirateAt) {
+		return errors.New("QR code has expired. Please refresh the app to generate a new one")
+	}
+
+	if reservation.Status == "completed" {
+		return errors.New("reservation is already completed")
+	}
+
+	reservation.Status = "completed"
+	reservation.VerificationToken = ""
+	reservation.TokenExpirateAt = nil
+
+	if err := s.ReservationRepository.Update(reservation); err != nil {
+		return err
+	}
+
+	err = s.LoyaltyService.AddPunch(reservation.ID, reservation.ClientID, reservation.BeautyCenterID, reservation.ServiceID)
+	if err != nil {
+		utils.Log.Errorf("[Loyalty Error] falied to add punch via QR for Client %d; %v", reservation.ClientID, err)
+		// We are not blocking the response to the client, the service has already been successfully provide
+	}
+
+	utils.Log.Infof("[QR VERIFIED] Reservation ID %d marked as COMPLETED. Stamp added to Client", reservation.ID, reservation.ClientID)
+	return nil
 }

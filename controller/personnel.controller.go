@@ -17,26 +17,6 @@ func NewPersonnelController(service service.PersonnelService) *PersonnelControll
 	return &PersonnelController{personnelService: service}
 }
 
-func (c *PersonnelController) Create(ctx *gin.Context) {
-	var req request.CreatePersonnelRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	res, err := c.personnelService.Create(req)
-	if err != nil {
-		if err.Error() == "email already registered" {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	ctx.JSON(http.StatusCreated, res)
-}
-
 func (c *PersonnelController) Update(ctx *gin.Context) {
 	idParam := ctx.Param("id")
 	id, err := strconv.Atoi(idParam)

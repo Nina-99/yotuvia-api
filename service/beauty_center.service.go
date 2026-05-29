@@ -6,7 +6,6 @@ import (
 )
 
 type BeautyCenterService interface {
-	Create(req request.CreateBeautyCenterRequest) (response.BeautyCenterResponse, error)
 	Update(id uint, req request.UpdateBeautyCenterRequest) (response.BeautyCenterResponse, error)
 	Delete(id uint) error
 	FindByID(id uint) (response.BeautyCenterResponse, error)

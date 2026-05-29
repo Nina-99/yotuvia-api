@@ -20,56 +20,6 @@ func NewPersonnelServiceImpl(repo repository.PersonnelRepository, validate *vali
 	return &PersonnelServiceImpl{repo: repo, Validate: validate}
 }
 
-// Create implements PersonnelService
-func (s *PersonnelServiceImpl) Create(req request.CreatePersonnelRequest) (response.PersonnelResponse, error) {
-	if err := s.Validate.Struct(req); err != nil {
-		return response.PersonnelResponse{}, err
-	}
-	// Check if email already exists
-	existing, err := s.repo.FindByEmail(req.Email)
-	if err != nil {
-		return response.PersonnelResponse{}, err
-	}
-	if existing != nil {
-		return response.PersonnelResponse{}, errors.New("email already in use")
-	}
-
-	// Hash password
-	hashedPassword, err := utils.HashPassword(req.Password)
-	if err != nil {
-		return response.PersonnelResponse{}, err
-	}
-
-	// Map images
-	var images []models.PersonnelImage
-	for _, imgReq := range req.Images {
-		images = append(images, models.PersonnelImage{
-			ImageUrl: imgReq.ImageUrl,
-			IsCover:  imgReq.IsCover,
-			Position: imgReq.Position,
-		})
-	}
-
-	// Map to model
-	personnel := models.Personnel{
-		BeautyCenterID: req.BeautyCenterID,
-		FirstName:      req.FirstName,
-		LastName:       req.LastName,
-		Email:          req.Email,
-		Phone:          req.Phone,
-		Password:       hashedPassword,
-		IsActive:       req.IsActive,
-		PersonnelImage: images,
-	}
-
-	// Persist
-	if err := s.repo.Create(&personnel); err != nil {
-		return response.PersonnelResponse{}, err
-	}
-
-	return s.mapToResponse(personnel), nil
-}
-
 // Update implements PersonnelService
 func (s *PersonnelServiceImpl) Update(id uint, req request.UpdatePersonnelRequest) (response.PersonnelResponse, error) {
 	if err := s.Validate.Struct(req); err != nil {

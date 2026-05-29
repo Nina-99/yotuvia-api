@@ -17,22 +17,6 @@ func NewBeautyCenterController(service service.BeautyCenterService) *BeautyCente
 	return &BeautyCenterController{beautyCenterService: service}
 }
 
-func (c *BeautyCenterController) Create(ctx *gin.Context) {
-	var req request.CreateBeautyCenterRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	res, err := c.beautyCenterService.Create(req)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	ctx.JSON(http.StatusCreated, res)
-}
-
 func (c *BeautyCenterController) Update(ctx *gin.Context) {
 	idParam := ctx.Param("id")
 	id, err := strconv.Atoi(idParam)

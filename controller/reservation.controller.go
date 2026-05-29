@@ -110,3 +110,48 @@ func (c *ReservationController) FindById(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, res)
 }
+
+// GenrateQR
+func (c *ReservationController) GenrateQR(ctx *gin.Context) {
+	idParam := ctx.Param("id")
+	reservationID, err := strconv.Atoi(idParam)
+	if err != nil || reservationID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	token, err := c.reservationService.GenerateVerificationToken(uint(reservationID))
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"verification_token": token})
+}
+
+type VerifyQRRequest struct {
+	Token string `json:"token" validate:"required"`
+}
+
+// VerifyQR, retrieve of the salon (or personnel) performing the action
+func (c *ReservationController) VerifyQR(ctx *gin.Context) {
+	var req VerifyQRRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	authBeautyCenterID, exists := ctx.Get("beautyCenterID")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing salon identify"})
+		return
+	}
+
+	err := c.reservationService.VerifyQR(req.Token, authBeautyCenterID.(uint))
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Reservation verified and loyalty ounch added successfully"})
+}
