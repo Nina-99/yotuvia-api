@@ -9,26 +9,27 @@ import (
 )
 
 func JWTAuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
+	return func(ctx *gin.Context) {
+		authHeader := ctx.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing"})
-			c.Abort()
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing"})
+			ctx.Abort()
 			return
 		}
 		token := strings.Split(authHeader, "Bearer ")
 		if len(token) < 2 {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-			c.Abort()
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			ctx.Abort()
 			return
 		}
 		claims, err := utils.ValidateToken(token[1])
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-			c.Abort()
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			ctx.Abort()
 			return
 		}
-		c.Set("clientID", claims.ID)
-		c.Next()
+		ctx.Set("clientID", claims.ID)
+		ctx.Set("userRole", claims.Role)
+		ctx.Next()
 	}
 }

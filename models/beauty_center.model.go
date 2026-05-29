@@ -10,7 +10,7 @@ type BeautyCenter struct {
 	Phone       string `gorm:"size:20;not null" json:"phone"`
 	Url         string `gorm:"unique_index" json:"url"`
 	Description string `gorm:"size:255" json:"description"`
-	Password    string `gorm:"size:255;not null" json:"-"`
+	Password    string `gorm:"size:255" json:"-"`
 	IsActive    bool   `gorm:"default:true" json:"is_active"`
 
 	BeautyCenterImage []BeautyCenterImage `gorm:"constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`

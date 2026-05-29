@@ -5,7 +5,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/Nina-99/yottu-api/models"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -13,28 +12,31 @@ import (
 func getJWTSecret() ([]byte, error) {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		return nil, errors.New("JWT_SECRET not configure")
+		return nil, errors.New("JWT_SECRET not configured")
 	}
 	return []byte(secret), nil
 }
 
 type JWTClaim struct {
-	ClientID uint
-	Email    string
-	Username string
+	UserID   uint   `json:"user_id,omitempty"`
+	Role     string `json:"role"`
+	Email    string `json:"email,omitempty"`
+	Username string `json:"username,omitempty"`
 
 	jwt.RegisteredClaims
 }
 
-func GenerateJWT(client *models.Client) (string, error) {
+func GenerateJWT(userID uint, role string, email string, username string) (string, error) {
 	claims := &JWTClaim{
-		ClientID: client.ID,
-		Email:    client.Email,
-		Username: client.Username,
+		UserID:   userID,
+		Role:     role,
+		Email:    email,
+		Username: username,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(72 * time.Hour)),
 		},
 	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	secret, err := getJWTSecret()
 	if err != nil {
