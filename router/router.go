@@ -25,6 +25,7 @@ func SetupRouter() *gin.Engine {
 		ClientRoutes(api, db, validate)
 		FavoriteRoutes(api, db, validate)
 		FeedPostRoutes(api, db, validate)
+		LoyaltyRoutes(api, db, validate)
 		MembershipRoutes(api, db, validate)
 		PersonnelRoutes(api, db, validate)
 		PersonnelImageRoutes(api, db, validate)

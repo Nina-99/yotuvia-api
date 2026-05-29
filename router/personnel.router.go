@@ -16,7 +16,6 @@ func PersonnelRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valid
 
 	personnel := rg.Group("/personnel")
 	{
-		personnel.POST("", ctrl.Create)
 		personnel.GET("/:id", ctrl.FindByID)
 		personnel.GET("", ctrl.FindAll)
 		personnel.PUT("/:id", ctrl.Update)

@@ -11,8 +11,11 @@ import (
 )
 
 func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
+	loyaltyRepo := repository.NewLoyaltyRepositoryImpl(db)
+	loyaltySvc := service.NewLoyaltyService(loyaltyRepo, validate)
+
 	repo := repository.NewReservationRepositoryImpl(db)
-	svc := service.NewReservationServiceImpl(repo, validate)
+	svc := service.NewReservationServiceImpl(repo, loyaltySvc, validate)
 	ctrl := controller.NewReservationController(svc)
 
 	reservation := rg.Group("/reservation")
@@ -23,5 +26,7 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 		reservation.DELETE("/:id", ctrl.Delete)
 		reservation.GET("", ctrl.FindAll)
 		reservation.GET("/:id", ctrl.FindById)
+		reservation.POST("/generate-qr", ctrl.GenrateQR)
+		reservation.GET("/verify-qr", ctrl.VerifyQR)
 	}
 }

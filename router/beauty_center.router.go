@@ -23,7 +23,6 @@ func BeautyCenterRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Va
 		// Protected routes
 		beautyCenter.Use(middleware.JWTAuthMiddleware())
 		{
-			beautyCenter.POST("", ctrl.Create)
 			beautyCenter.PUT("/:id", ctrl.Update)
 			beautyCenter.DELETE("/:id", ctrl.Delete)
 		}

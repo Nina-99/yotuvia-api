@@ -1,0 +1,22 @@
+package router
+
+import (
+	"github.com/Nina-99/yottu-api/controller"
+	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yottu-api/service"
+	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
+)
+
+func LoyaltyRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
+	repo := repository.NewLoyaltyRepositoryImpl(db)
+	svc := service.NewLoyaltyService(repo, validate)
+	ctrl := controller.NewLoyaltyController(svc)
+
+	loyalty := rg.Group("/loyalty")
+	{
+		loyalty.POST("", ctrl.CreateProgram)
+		loyalty.GET("/client/:clientId", ctrl.GetCLientCards)
+	}
+}

@@ -16,8 +16,6 @@ func ClientRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate
 	ctrl := controller.NewClientController(svc)
 
 	client := rg.Group("/client")
-	client.POST("/register", ctrl.Register)
-	client.POST("/login", ctrl.Login)
 	client.Use(middleware.JWTAuthMiddleware())
 	{
 		client.GET("", ctrl.FindAll)
