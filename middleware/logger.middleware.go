@@ -31,7 +31,7 @@ func GinLogger() gin.HandlerFunc {
 		if len(ctx.Errors) > 0 {
 			// if Gin caught errors during execution
 			for _, e := range ctx.Errors.Errors() {
-				utils.Log.Errorf("[API ERROR] Path: %s", path, e)
+				utils.Log.Errorf("[API ERROR] Path: %s - Error: %v", path, e)
 			}
 		} else if status >= 500 {
 			utils.Log.Errorf("[HTTP 5XX] %s %s | Status: %d | Latency: %s | IP: %s | QUery: %s", method, path, status, latency, clientIP, query)
