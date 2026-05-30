@@ -25,10 +25,9 @@ func (s *MembershipServiceImpl) Create(req request.CreateMembershipRequest) erro
 		return err
 	}
 	membership := models.Membership{
-		Name:           req.Name,
-		Description:    req.Description,
-		BeautyCenterID: req.BeautyCenterID,
-		IsActive:       req.IsActive,
+		Name:        req.Name,
+		Description: req.Description,
+		IsActive:    req.IsActive,
 	}
 	return s.MembershipRepository.Create(&membership)
 }
@@ -66,11 +65,10 @@ func (s *MembershipServiceImpl) FindByID(id uint) (response.MembershipResponse, 
 	}
 
 	return response.MembershipResponse{
-		ID:             membership.ID,
-		Name:           membership.Name,
-		Description:    membership.Description,
-		BeautyCenterID: membership.BeautyCenterID,
-		IsActive:       membership.IsActive,
+		ID:          membership.ID,
+		Name:        membership.Name,
+		Description: membership.Description,
+		IsActive:    membership.IsActive,
 	}, nil
 }
 
@@ -83,11 +81,10 @@ func (s *MembershipServiceImpl) FindAll() ([]response.MembershipResponse, error)
 	var res []response.MembershipResponse
 	for _, m := range memberships {
 		res = append(res, response.MembershipResponse{
-			ID:             m.ID,
-			Name:           m.Name,
-			Description:    m.Description,
-			BeautyCenterID: m.BeautyCenterID,
-			IsActive:       m.IsActive,
+			ID:          m.ID,
+			Name:        m.Name,
+			Description: m.Description,
+			IsActive:    m.IsActive,
 		})
 	}
 	return res, nil

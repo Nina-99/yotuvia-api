@@ -10,12 +10,14 @@ import (
 )
 
 type MembershipController struct {
-	MembershipService service.MembershipService
+	MembershipService       service.MembershipService
+	CenterMembershipService service.CenterMembershipService
 }
 
-func NewMembershipController(membershipService service.MembershipService) *MembershipController {
+func NewMembershipController(membershipService service.MembershipService, centerMembershipService service.CenterMembershipService) *MembershipController {
 	return &MembershipController{
-		MembershipService: membershipService,
+		MembershipService:       membershipService,
+		CenterMembershipService: centerMembershipService,
 	}
 }
 
@@ -102,4 +104,38 @@ func (c *MembershipController) FindAll(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"data": memberships})
+}
+
+func (c *MembershipController) Buy(ctx *gin.Context) {
+	var req request.BuyMembershipRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	centerID, _ := ctx.Get("centerID")
+
+	if err := c.CenterMembershipService.BuyMembership(centerID.(uint), req); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Payment received! You have temporary access for 24hs while we review it"})
+}
+
+func (c *MembershipController) Review(ctx *gin.Context) {
+	subID, _ := strconv.Atoi(ctx.Param("id"))
+
+	var req request.ReviewMembershipRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := c.CenterMembershipService.ReviewMembership(uint(subID), req.Status); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Subscription status updated to: " + req.Status})
 }

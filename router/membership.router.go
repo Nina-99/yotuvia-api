@@ -11,9 +11,11 @@ import (
 )
 
 func MembershipRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
-	repo := repository.NewMembershipRepositoryImpl(db)
-	svc := service.NewMembershipService(repo, validate)
-	ctrl := controller.NewMembershipController(svc)
+	membershipRepo := repository.NewMembershipRepositoryImpl(db)
+	centerMembershipRepo := repository.NewCenterMembershipRepositoryImpl(db)
+	centerMembershipSvc := service.NewCenterMembershipServiceImpl(membershipRepo, centerMembershipRepo, validate)
+	membershipSvc := service.NewMembershipService(membershipRepo, validate)
+	ctrl := controller.NewMembershipController(membershipSvc, centerMembershipSvc)
 
 	membership := rg.Group("/memberships")
 	{
@@ -24,6 +26,8 @@ func MembershipRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Vali
 			membership.DELETE("/:id", ctrl.Delete)
 			membership.GET("/:id", ctrl.FindByID)
 			membership.GET("", ctrl.FindAll)
+			membership.POST("/buy", ctrl.Buy)
+			membership.POST("/review/:id", ctrl.Review)
 		}
 	}
 }
