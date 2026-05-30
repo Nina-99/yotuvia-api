@@ -28,8 +28,11 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 			ctx.Abort()
 			return
 		}
-		ctx.Set("clientID", claims.ID)
-		ctx.Set("userRole", claims.Role)
+		ctx.Set("clientID", claims.UserID)
+		ctx.Set("role", claims.Role)
+		if claims.CenterID != 0 {
+			ctx.Set("centerID", claims.CenterID)
+		}
 		ctx.Next()
 	}
 }

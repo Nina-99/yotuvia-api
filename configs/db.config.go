@@ -28,6 +28,7 @@ func DBConnection() {
 		&models.AuthAccount{},
 		&models.BeautyCenter{},
 		&models.BeautyCenterImage{},
+		&models.CenterMembership{},
 		&models.Category{},
 		&models.Client{},
 		&models.CustomerPunchCard{},

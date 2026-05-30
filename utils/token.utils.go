@@ -19,6 +19,7 @@ func getJWTSecret() ([]byte, error) {
 
 type JWTClaim struct {
 	UserID   uint   `json:"user_id,omitempty"`
+	CenterID uint   `json:"center_id,omitempty"`
 	Role     string `json:"role"`
 	Email    string `json:"email,omitempty"`
 	Username string `json:"username,omitempty"`
@@ -26,9 +27,10 @@ type JWTClaim struct {
 	jwt.RegisteredClaims
 }
 
-func GenerateJWT(userID uint, role string, email string, username string) (string, error) {
+func GenerateJWT(userID uint, centerID uint, role string, email string, username string) (string, error) {
 	claims := &JWTClaim{
 		UserID:   userID,
+		CenterID: centerID,
 		Role:     role,
 		Email:    email,
 		Username: username,
