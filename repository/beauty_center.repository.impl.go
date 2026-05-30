@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/Nina-99/yottu-api/models"
 	"gorm.io/gorm"
 )
@@ -43,6 +45,20 @@ func (r *BeautyCenterRepositoryImpl) FindAll() ([]models.BeautyCenter, error) {
 	var centers []models.BeautyCenter
 	err := r.db.Preload("WorkingHour").Preload("BeautyCenterImage").Find(&centers).Error
 	return centers, err
+}
+
+func (r *BeautyCenterRepositoryImpl) FindAllActiveForClients() ([]models.BeautyCenter, error) {
+	var centers []models.BeautyCenter
+	now := time.Now()
+
+	subQuery := r.db.Model(&models.CenterMembership{}).Select("beauty_center_id").Where("(status = 'active' AND end_date > ?) OR (status = 'provisional' AND provisional_end_date > ?)", now, now)
+	err := r.db.Where("id IN (?)", subQuery).Find(centers).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return centers, nil
 }
 
 // FindByEmail implements BeautyCenterRepository

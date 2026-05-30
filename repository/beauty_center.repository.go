@@ -8,5 +8,6 @@ type BeautyCenterRepository interface {
 	Delete(id uint) error
 	FindByID(id uint) (*models.BeautyCenter, error)
 	FindAll() ([]models.BeautyCenter, error)
+	FindAllActiveForClients() ([]models.BeautyCenter, error)
 	FindByEmail(email string) (*models.BeautyCenter, error)
 }
