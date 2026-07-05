@@ -55,7 +55,16 @@ func (c *ClientController) Delete(ctx *gin.Context) {
 }
 
 func (c *ClientController) FindAll(ctx *gin.Context) {
-	clients, err := c.clientService.FindAll()
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	clients, total, err := c.clientService.FindAll(page, limit)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -65,7 +74,12 @@ func (c *ClientController) FindAll(ctx *gin.Context) {
 	for _, client := range clients {
 		res = append(res, response.ClientResponse{ID: client.ID, FirstName: client.FirstName, LastName: client.LastName, Username: client.Username, Email: client.Email})
 	}
-	ctx.JSON(http.StatusOK, res)
+	ctx.JSON(http.StatusOK, response.PaginatedResponse{
+		Data:  res,
+		Total: total,
+		Page:  page,
+		Limit: limit,
+	})
 }
 
 func (c *ClientController) GetUserByEmail(ctx *gin.Context) {

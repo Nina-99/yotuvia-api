@@ -66,9 +66,10 @@ func TestPersonnelCRUD(t *testing.T) {
 	})
 
 	t.Run("Find All Personnel", func(t *testing.T) {
-		res, err := svc.FindAll(1)
+		res, total, err := svc.FindAll(1, 1, 20)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, res)
+		assert.Equal(t, int64(1), total)
 		assert.Equal(t, "John", res[0].FirstName)
 	})
 

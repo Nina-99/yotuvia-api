@@ -95,17 +95,17 @@ func (s *FeedPostServiceImpl) FindByID(id uint) (response.FeedPostResponse, erro
 	return s.mapToResponse(*post), nil
 }
 
-func (s *FeedPostServiceImpl) FindAll() ([]response.FeedPostResponse, error) {
-	posts, err := s.FeedPostRepository.FindAll()
+func (s *FeedPostServiceImpl) FindAll(page, limit int) ([]response.FeedPostResponse, int64, error) {
+	posts, total, err := s.FeedPostRepository.FindAll(page, limit)
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
 
 	var res []response.FeedPostResponse
 	for _, post := range posts {
 		res = append(res, s.mapToResponse(post))
 	}
-	return res, nil
+	return res, total, nil
 }
 
 func (s *FeedPostServiceImpl) FindByBeautyCenterID(centerID uint) ([]response.FeedPostResponse, error) {

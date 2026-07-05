@@ -94,8 +94,8 @@ func (s *ClientServiceImpl) Delete(clientID uint) error {
 }
 
 // FindAll user implements ClientService
-func (s *ClientServiceImpl) FindAll() ([]models.Client, error) {
-	return s.ClientRepository.FindAll()
+func (s *ClientServiceImpl) FindAll(page, limit int) ([]models.Client, int64, error) {
+	return s.ClientRepository.FindAll(page, limit)
 }
 
 // FindEmail user implements ClientService

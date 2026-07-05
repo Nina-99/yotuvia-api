@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/Nina-99/yottu-api/data/request"
+	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/service"
 	"github.com/gin-gonic/gin"
 )
@@ -97,11 +98,25 @@ func (c *PersonnelController) FindAll(ctx *gin.Context) {
 		beautyCenterID = uint(id)
 	}
 
-	res, err := c.personnelService.FindAll(beautyCenterID)
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	res, total, err := c.personnelService.FindAll(beautyCenterID, page, limit)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, res)
+	ctx.JSON(http.StatusOK, response.PaginatedResponse{
+		Data:  res,
+		Total: total,
+		Page:  page,
+		Limit: limit,
+	})
 }

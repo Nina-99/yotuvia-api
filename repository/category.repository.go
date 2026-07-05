@@ -7,5 +7,5 @@ type CategoryRepository interface {
 	Update(category *models.Category) error
 	Delete(category *models.Category) error
 	FindById(categoryID uint) (*models.Category, error)
-	FindAll() ([]models.Category, error)
+	FindAll(page, limit int) ([]models.Category, int64, error)
 }

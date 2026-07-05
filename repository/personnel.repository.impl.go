@@ -39,14 +39,21 @@ func (r *PersonnelRepositoryImpl) FindByID(id uint) (*models.Personnel, error) {
 }
 
 // FindAll implements PersonnelRepository
-func (r *PersonnelRepositoryImpl) FindAll(beautyCenterID uint) ([]models.Personnel, error) {
+func (r *PersonnelRepositoryImpl) FindAll(beautyCenterID uint, page, limit int) ([]models.Personnel, int64, error) {
 	var personnel []models.Personnel
-	db := r.db.Preload("PersonnelImage").Preload("BeautyCenter")
+	var total int64
+
+	countDb := r.db.Model(&models.Personnel{})
+	fetchDb := r.db.Preload("PersonnelImage").Preload("BeautyCenter")
 	if beautyCenterID != 0 {
-		db = db.Where("beauty_center_id = ?", beautyCenterID)
+		countDb = countDb.Where("beauty_center_id = ?", beautyCenterID)
+		fetchDb = fetchDb.Where("beauty_center_id = ?", beautyCenterID)
 	}
-	err := db.Find(&personnel).Error
-	return personnel, err
+	countDb.Count(&total)
+
+	offset := (page - 1) * limit
+	err := fetchDb.Offset(offset).Limit(limit).Find(&personnel).Error
+	return personnel, total, err
 }
 
 // FindByEmail implements PersonnelRepository

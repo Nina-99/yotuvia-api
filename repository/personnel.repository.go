@@ -7,6 +7,6 @@ type PersonnelRepository interface {
 	Update(personnel *models.Personnel) error
 	Delete(id uint) error
 	FindByID(id uint) (*models.Personnel, error)
-	FindAll(beautyCenterID uint) ([]models.Personnel, error)
+	FindAll(beautyCenterID uint, page, limit int) ([]models.Personnel, int64, error)
 	FindByEmail(email string) (*models.Personnel, error)
 }

@@ -60,10 +60,15 @@ func (r *ReservationRepositoryImpl) FindBeautyCenterId(beautyCenterID uint) (*mo
 }
 
 // FindAll implements ReservationRepository
-func (r *ReservationRepositoryImpl) FindAll() ([]models.Reservation, error) {
+func (r *ReservationRepositoryImpl) FindAll(page, limit int) ([]models.Reservation, int64, error) {
 	var reservations []models.Reservation
-	err := r.db.Preload("Client").Preload("Personnel").Preload("Service").Preload("BeautyCenter").Find(&reservations).Error
-	return reservations, err
+	var total int64
+
+	r.db.Model(&models.Reservation{}).Count(&total)
+
+	offset := (page - 1) * limit
+	err := r.db.Preload("Client").Preload("Personnel").Preload("Service").Preload("BeautyCenter").Offset(offset).Limit(limit).Find(&reservations).Error
+	return reservations, total, err
 }
 
 func (r *ReservationRepositoryImpl) CheckOverlap(centerID uint, date time.Time, startTime, endTime string, excludeID uint) (bool, error) {

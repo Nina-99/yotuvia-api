@@ -71,7 +71,16 @@ func (c *CategoryController) Delete(ctx *gin.Context) {
 }
 
 func (c *CategoryController) FindAll(ctx *gin.Context) {
-	categorys, err := c.categoryService.FindAll()
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	categorys, total, err := c.categoryService.FindAll(page, limit)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -81,7 +90,12 @@ func (c *CategoryController) FindAll(ctx *gin.Context) {
 	for _, category := range categorys {
 		res = append(res, response.CategoryResponse{ID: category.ID, BeautyCenterID: category.BeautyCenterID, Name: category.Name, Description: category.Description})
 	}
-	ctx.JSON(http.StatusOK, res)
+	ctx.JSON(http.StatusOK, response.PaginatedResponse{
+		Data:  res,
+		Total: total,
+		Page:  page,
+		Limit: limit,
+	})
 }
 
 func (c *CategoryController) FindById(ctx *gin.Context) {

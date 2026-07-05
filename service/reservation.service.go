@@ -9,7 +9,7 @@ type ReservationService interface {
 	Create(req request.CreateReservationRequest) error
 	Update(reservationID uint, req request.CreateReservationRequest) error
 	Delete(reservationID uint) error
-	FindAll() ([]models.Reservation, error)
+	FindAll(page, limit int) ([]models.Reservation, int64, error)
 	FindById(categoryID uint) (*models.Reservation, error)
 	GenerateVerificationToken(reservationID uint) (string, error)
 	VerifyQR(token string, authBeautyCenterID uint) error

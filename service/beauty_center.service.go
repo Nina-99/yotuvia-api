@@ -9,5 +9,5 @@ type BeautyCenterService interface {
 	Update(id uint, req request.UpdateBeautyCenterRequest) (response.BeautyCenterResponse, error)
 	Delete(id uint) error
 	FindByID(id uint) (response.BeautyCenterResponse, error)
-	FindAll() ([]response.BeautyCenterResponse, error)
+	FindAll(page, limit int) ([]response.BeautyCenterResponse, int64, error)
 }

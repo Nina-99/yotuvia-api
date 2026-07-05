@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/Nina-99/yottu-api/data/request"
+	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/service"
 	"github.com/gin-gonic/gin"
 )
@@ -97,13 +98,27 @@ func (c *MembershipController) FindByID(ctx *gin.Context) {
 
 // FindAll retrieves all memberships
 func (c *MembershipController) FindAll(ctx *gin.Context) {
-	memberships, err := c.MembershipService.FindAll()
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	memberships, total, err := c.MembershipService.FindAll(page, limit)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"data": memberships})
+	ctx.JSON(http.StatusOK, response.PaginatedResponse{
+		Data:  memberships,
+		Total: total,
+		Page:  page,
+		Limit: limit,
+	})
 }
 
 func (c *MembershipController) Buy(ctx *gin.Context) {

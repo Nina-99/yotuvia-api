@@ -29,10 +29,15 @@ func (r *AuthAccountRepositoryImpl) Delete(id uint) error {
 }
 
 // FindAll implements AuthAccountRepository
-func (r *AuthAccountRepositoryImpl) FindAll() ([]models.AuthAccount, error) {
+func (r *AuthAccountRepositoryImpl) FindAll(page, limit int) ([]models.AuthAccount, int64, error) {
 	var accounts []models.AuthAccount
-	err := r.db.Preload("Client").Find(&accounts).Error
-	return accounts, err
+	var total int64
+
+	r.db.Model(&models.AuthAccount{}).Count(&total)
+
+	offset := (page - 1) * limit
+	err := r.db.Preload("Client").Offset(offset).Limit(limit).Find(&accounts).Error
+	return accounts, total, err
 }
 
 // FindById implements AuthAccountRepository

@@ -7,6 +7,6 @@ type FeedPostRepository interface {
 	Update(post *models.FeedPost) error
 	Delete(id uint) error
 	FindByID(id uint) (*models.FeedPost, error)
-	FindAll() ([]models.FeedPost, error)
+	FindAll(page, limit int) ([]models.FeedPost, int64, error)
 	FindByBeautyCenterID(centerID uint) ([]models.FeedPost, error)
 }

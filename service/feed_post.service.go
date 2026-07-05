@@ -10,6 +10,6 @@ type FeedPostService interface {
 	Update(id uint, req request.UpdateFeedPostRequest) (response.FeedPostResponse, error)
 	Delete(id uint) error
 	FindByID(id uint) (response.FeedPostResponse, error)
-	FindAll() ([]response.FeedPostResponse, error)
+	FindAll(page, limit int) ([]response.FeedPostResponse, int64, error)
 	FindByBeautyCenterID(centerID uint) ([]response.FeedPostResponse, error)
 }

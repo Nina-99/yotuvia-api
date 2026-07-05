@@ -7,7 +7,7 @@ type ClientRepository interface {
 	Update(user *models.Client) error
 	Delete(user *models.Client) error
 	FindById(userID uint) (*models.Client, error)
-	FindAll() ([]models.Client, error)
+	FindAll(page, limit int) ([]models.Client, int64, error)
 	FindByEmail(email string) (*models.Client, error)
 	FindByUsername(username string) (*models.Client, error)
 }

@@ -127,17 +127,17 @@ func (s *BeautyCenterServiceImpl) FindByID(id uint) (response.BeautyCenterRespon
 }
 
 // FindAll implements BeautyCenterService
-func (s *BeautyCenterServiceImpl) FindAll() ([]response.BeautyCenterResponse, error) {
-	centers, err := s.repo.FindAll()
+func (s *BeautyCenterServiceImpl) FindAll(page, limit int) ([]response.BeautyCenterResponse, int64, error) {
+	centers, total, err := s.repo.FindAll(page, limit)
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
 
 	var resps []response.BeautyCenterResponse
 	for _, c := range centers {
 		resps = append(resps, s.mapToResponse(c))
 	}
-	return resps, nil
+	return resps, total, nil
 }
 
 // Internal mapper

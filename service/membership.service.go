@@ -10,5 +10,5 @@ type MembershipService interface {
 	Update(id uint, req request.UpdateMembershipRequest) error
 	Delete(id uint) error
 	FindByID(id uint) (response.MembershipResponse, error)
-	FindAll() ([]response.MembershipResponse, error)
+	FindAll(page, limit int) ([]response.MembershipResponse, int64, error)
 }

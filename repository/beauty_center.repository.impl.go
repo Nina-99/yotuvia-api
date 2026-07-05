@@ -41,10 +41,15 @@ func (r *BeautyCenterRepositoryImpl) FindByID(id uint) (*models.BeautyCenter, er
 }
 
 // FindAll implements BeautyCenterRepository
-func (r *BeautyCenterRepositoryImpl) FindAll() ([]models.BeautyCenter, error) {
+func (r *BeautyCenterRepositoryImpl) FindAll(page, limit int) ([]models.BeautyCenter, int64, error) {
 	var centers []models.BeautyCenter
-	err := r.db.Preload("WorkingHour").Preload("BeautyCenterImage").Find(&centers).Error
-	return centers, err
+	var total int64
+
+	r.db.Model(&models.BeautyCenter{}).Count(&total)
+
+	offset := (page - 1) * limit
+	err := r.db.Preload("WorkingHour").Preload("BeautyCenterImage").Offset(offset).Limit(limit).Find(&centers).Error
+	return centers, total, err
 }
 
 func (r *BeautyCenterRepositoryImpl) FindAllActiveForClients() ([]models.BeautyCenter, error) {

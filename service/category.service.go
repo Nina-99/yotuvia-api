@@ -9,6 +9,6 @@ type CategoryService interface {
 	Create(req request.CreateCategoryRequest) error
 	Update(categoryID uint, req request.CreateCategoryRequest) error
 	Delete(categoryID uint) error
-	FindAll() ([]models.Category, error)
+	FindAll(page, limit int) ([]models.Category, int64, error)
 	FindById(categoryID uint) (*models.Category, error)
 }

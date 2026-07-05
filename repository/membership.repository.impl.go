@@ -39,10 +39,15 @@ func (r *MembershipRepositoryImpl) FindByID(id uint) (*models.Membership, error)
 }
 
 // FindAll implements MembershipRepository
-func (r *MembershipRepositoryImpl) FindAll() ([]models.Membership, error) {
+func (r *MembershipRepositoryImpl) FindAll(page, limit int) ([]models.Membership, int64, error) {
 	var memberships []models.Membership
-	err := r.db.Preload("BeautyCenter").Find(&memberships).Error
-	return memberships, err
+	var total int64
+
+	r.db.Model(&models.Membership{}).Count(&total)
+
+	offset := (page - 1) * limit
+	err := r.db.Preload("BeautyCenter").Offset(offset).Limit(limit).Find(&memberships).Error
+	return memberships, total, err
 }
 
 // FindByBeautyCenterID implements MembershipRepository

@@ -37,11 +37,16 @@ func (r *CategoryRepositoryImpl) FindById(categoryID uint) (*models.Category, er
 	return &category, nil
 }
 
-func (r *CategoryRepositoryImpl) FindAll() ([]models.Category, error) {
+func (r *CategoryRepositoryImpl) FindAll(page, limit int) ([]models.Category, int64, error) {
 	var category []models.Category
-	err := r.db.Preload("Service").Find(&category).Error
+	var total int64
+
+	r.db.Model(&models.Category{}).Count(&total)
+
+	offset := (page - 1) * limit
+	err := r.db.Preload("Service").Offset(offset).Limit(limit).Find(&category).Error
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
-	return category, nil
+	return category, total, nil
 }

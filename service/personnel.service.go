@@ -9,5 +9,5 @@ type PersonnelService interface {
 	Update(id uint, req request.UpdatePersonnelRequest) (response.PersonnelResponse, error)
 	Delete(id uint) error
 	FindByID(id uint) (response.PersonnelResponse, error)
-	FindAll(beautyCenterID uint) ([]response.PersonnelResponse, error)
+	FindAll(beautyCenterID uint, page, limit int) ([]response.PersonnelResponse, int64, error)
 }

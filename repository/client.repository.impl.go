@@ -29,10 +29,15 @@ func (r *ClientRepositoryImpl) Delete(client *models.Client) error {
 }
 
 // FindAll implements ClientRepository
-func (r *ClientRepositoryImpl) FindAll() ([]models.Client, error) {
+func (r *ClientRepositoryImpl) FindAll(page, limit int) ([]models.Client, int64, error) {
 	var users []models.Client
-	err := r.db.Find(&users).Error
-	return users, err
+	var total int64
+
+	r.db.Model(&models.Client{}).Count(&total)
+
+	offset := (page - 1) * limit
+	err := r.db.Offset(offset).Limit(limit).Find(&users).Error
+	return users, total, err
 }
 
 // FindById implements ClientRepository

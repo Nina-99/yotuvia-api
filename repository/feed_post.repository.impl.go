@@ -39,10 +39,15 @@ func (r *FeedPostRepositoryImpl) FindByID(id uint) (*models.FeedPost, error) {
 }
 
 // FindAll implements FeedPostRepository
-func (r *FeedPostRepositoryImpl) FindAll() ([]models.FeedPost, error) {
+func (r *FeedPostRepositoryImpl) FindAll(page, limit int) ([]models.FeedPost, int64, error) {
 	var posts []models.FeedPost
-	err := r.db.Preload("BeautyCenter").Preload("Likes").Preload("Service").Preload("Personnel").Order("created_at desc").Find(&posts).Error
-	return posts, err
+	var total int64
+
+	r.db.Model(&models.FeedPost{}).Count(&total)
+
+	offset := (page - 1) * limit
+	err := r.db.Preload("BeautyCenter").Preload("Likes").Preload("Service").Preload("Personnel").Order("created_at desc").Offset(offset).Limit(limit).Find(&posts).Error
+	return posts, total, err
 }
 
 // FindByBeautyCenterID implements FeedPostRepository

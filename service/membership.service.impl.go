@@ -72,10 +72,10 @@ func (s *MembershipServiceImpl) FindByID(id uint) (response.MembershipResponse, 
 	}, nil
 }
 
-func (s *MembershipServiceImpl) FindAll() ([]response.MembershipResponse, error) {
-	memberships, err := s.MembershipRepository.FindAll()
+func (s *MembershipServiceImpl) FindAll(page, limit int) ([]response.MembershipResponse, int64, error) {
+	memberships, total, err := s.MembershipRepository.FindAll(page, limit)
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
 
 	var res []response.MembershipResponse
@@ -87,5 +87,5 @@ func (s *MembershipServiceImpl) FindAll() ([]response.MembershipResponse, error)
 			IsActive:    m.IsActive,
 		})
 	}
-	return res, nil
+	return res, total, nil
 }

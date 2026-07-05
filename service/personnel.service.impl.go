@@ -93,17 +93,17 @@ func (s *PersonnelServiceImpl) FindByID(id uint) (response.PersonnelResponse, er
 }
 
 // FindAll implements PersonnelService
-func (s *PersonnelServiceImpl) FindAll(beautyCenterID uint) ([]response.PersonnelResponse, error) {
-	list, err := s.repo.FindAll(beautyCenterID)
+func (s *PersonnelServiceImpl) FindAll(beautyCenterID uint, page, limit int) ([]response.PersonnelResponse, int64, error) {
+	list, total, err := s.repo.FindAll(beautyCenterID, page, limit)
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
 
 	var res []response.PersonnelResponse
 	for _, p := range list {
 		res = append(res, s.mapToResponse(p))
 	}
-	return res, nil
+	return res, total, nil
 }
 
 func (s *PersonnelServiceImpl) mapToResponse(p models.Personnel) response.PersonnelResponse {

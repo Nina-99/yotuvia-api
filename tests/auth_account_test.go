@@ -85,9 +85,10 @@ func TestAuthAccountRepository(t *testing.T) {
 	})
 
 	t.Run("Find All AuthAccounts", func(t *testing.T) {
-		accounts, err := repo.FindAll()
+		accounts, total, err := repo.FindAll(1, 20)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, accounts)
+		assert.Equal(t, int64(1), total)
 		assert.Equal(t, "test@user.com", accounts[0].Client.Email)
 	})
 

@@ -71,7 +71,16 @@ func (c *ReservationController) Delete(ctx *gin.Context) {
 }
 
 func (c *ReservationController) FindAll(ctx *gin.Context) {
-	reservations, err := c.reservationService.FindAll()
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	reservations, total, err := c.reservationService.FindAll(page, limit)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -81,7 +90,12 @@ func (c *ReservationController) FindAll(ctx *gin.Context) {
 	for _, reservation := range reservations {
 		res = append(res, response.ReservationResponse{ID: reservation.ID, BeautyCenterID: reservation.BeautyCenterID, ClientID: reservation.ClientID, Date: reservation.Date, StartTime: reservation.StartTime, EndTime: reservation.EndTime, Status: reservation.Status})
 	}
-	ctx.JSON(http.StatusOK, res)
+	ctx.JSON(http.StatusOK, response.PaginatedResponse{
+		Data:  res,
+		Total: total,
+		Page:  page,
+		Limit: limit,
+	})
 }
 
 func (c *ReservationController) FindById(ctx *gin.Context) {

@@ -8,6 +8,6 @@ import (
 type ClientService interface {
 	Update(clientID uint, req request.UpdateClientRequest) error
 	Delete(clientID uint) error
-	FindAll() ([]models.Client, error)
+	FindAll(page, limit int) ([]models.Client, int64, error)
 	FindEmail(email string) (*models.Client, error)
 }

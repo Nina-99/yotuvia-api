@@ -7,5 +7,5 @@ type ServiceRepository interface {
 	Update(service *models.Service) error
 	Delete(service *models.Service) error
 	FindById(serviceID uint) (*models.Service, error)
-	FindAll() ([]models.Service, error)
+	FindAll(page, limit int) ([]models.Service, int64, error)
 }

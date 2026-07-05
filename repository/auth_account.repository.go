@@ -6,7 +6,7 @@ type AuthAccountRepository interface {
 	Create(account *models.AuthAccount) error
 	Update(account *models.AuthAccount) error
 	Delete(id uint) error
-	FindAll() ([]models.AuthAccount, error)
+	FindAll(page, limit int) ([]models.AuthAccount, int64, error)
 	FindById(id uint) (*models.AuthAccount, error)
 	FindByProvider(provider, providerId string) (*models.AuthAccount, error)
 }

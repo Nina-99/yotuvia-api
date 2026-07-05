@@ -9,6 +9,6 @@ type ServiceService interface {
 	Create(req request.CreateServiceRequest) error
 	Update(serviceID uint, req request.UpdateServiceRequest) error
 	Delete(serviceID uint) error
-	FindAll() ([]models.Service, error)
+	FindAll(page, limit int) ([]models.Service, int64, error)
 	FindById(serviceID uint) (*models.Service, error)
 }

@@ -114,7 +114,16 @@ func (c *ServiceController) Delete(ctx *gin.Context) {
 // @Failure 500 {object} map[string]string
 // @Router /services [get]
 func (c *ServiceController) FindAll(ctx *gin.Context) {
-	services, err := c.serviceService.FindAll()
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	services, total, err := c.serviceService.FindAll(page, limit)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -141,7 +150,12 @@ func (c *ServiceController) FindAll(ctx *gin.Context) {
 		})
 	}
 
-	ctx.JSON(http.StatusOK, res)
+	ctx.JSON(http.StatusOK, response.PaginatedResponse{
+		Data:  res,
+		Total: total,
+		Page:  page,
+		Limit: limit,
+	})
 }
 
 // FindById godoc

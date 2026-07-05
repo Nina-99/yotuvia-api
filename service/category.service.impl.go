@@ -64,8 +64,8 @@ func (s *CategoryServiceImpl) Delete(categoryID uint) error {
 	return s.CategoryRepository.Delete(category)
 }
 
-func (s *CategoryServiceImpl) FindAll() ([]models.Category, error) {
-	return s.CategoryRepository.FindAll()
+func (s *CategoryServiceImpl) FindAll(page, limit int) ([]models.Category, int64, error) {
+	return s.CategoryRepository.FindAll(page, limit)
 }
 
 func (s *CategoryServiceImpl) FindById(categoryID uint) (*models.Category, error) {

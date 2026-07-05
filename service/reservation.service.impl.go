@@ -99,8 +99,8 @@ func (s *ReservationServiceImpl) Delete(reservationID uint) error {
 	return s.ReservationRepository.Delete(reservation)
 }
 
-func (s *ReservationServiceImpl) FindAll() ([]models.Reservation, error) {
-	return s.ReservationRepository.FindAll()
+func (s *ReservationServiceImpl) FindAll(page, limit int) ([]models.Reservation, int64, error) {
+	return s.ReservationRepository.FindAll(page, limit)
 }
 
 func (s *ReservationServiceImpl) FindById(reservationID uint) (*models.Reservation, error) {

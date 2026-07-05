@@ -104,8 +104,8 @@ func (s *ServiceServiceImpl) Delete(serviceID uint) error {
 	return s.ServiceRepository.Delete(service)
 }
 
-func (s *ServiceServiceImpl) FindAll() ([]models.Service, error) {
-	return s.ServiceRepository.FindAll()
+func (s *ServiceServiceImpl) FindAll(page, limit int) ([]models.Service, int64, error) {
+	return s.ServiceRepository.FindAll(page, limit)
 }
 
 func (s *ServiceServiceImpl) FindById(serviceID uint) (*models.Service, error) {

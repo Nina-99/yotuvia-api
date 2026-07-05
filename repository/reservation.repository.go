@@ -13,7 +13,7 @@ type ReservationRepository interface {
 	FindById(reservationID uint) (*models.Reservation, error)
 	FindClientID(clientID uint) (*models.Reservation, error)
 	FindBeautyCenterId(beautyCenterID uint) (*models.Reservation, error)
-	FindAll() ([]models.Reservation, error)
+	FindAll(page, limit int) ([]models.Reservation, int64, error)
 	CheckOverlap(centerID uint, date time.Time, startTime, endTime string, excludeID uint) (bool, error)
 	FindByToken(token string) (*models.Reservation, error)
 }
