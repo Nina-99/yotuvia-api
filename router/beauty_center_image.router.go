@@ -16,15 +16,13 @@ func BeautyCenterImageRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validat
 	svc := service.NewBeautyCenterImageServiceImpl(repo, repoBC, validate)
 	ctrl := controller.NewBeautyCenterImageController(svc)
 
-	membershipRepo := repository.NewMembershipRepositoryImpl(db)
-	centerMembershipRepo := repository.NewCenterMembershipRepositoryImpl(db)
-	centerMembershipSvc := service.NewCenterMembershipServiceImpl(membershipRepo, centerMembershipRepo, validate)
-
 	beautyCenterImage := rg.Group("/beauty-image")
 	beautyCenterImage.Use(middleware.JWTAuthMiddleware())
-	beautyCenterImage.Use(middleware.RequireActiveMembership(centerMembershipSvc))
 	{
+		beautyCenterImage.POST("/upload", ctrl.Upload)
 		beautyCenterImage.POST("", ctrl.Create)
+		beautyCenterImage.PATCH("/reorder", ctrl.Reorder)
+		beautyCenterImage.PATCH("/:id", ctrl.Update)
 		beautyCenterImage.GET("/:id", ctrl.FindByID)
 		beautyCenterImage.DELETE("/:id", ctrl.Delete)
 		beautyCenterImage.GET("/beauty_center/:id", ctrl.FindByBeautyCenterID)

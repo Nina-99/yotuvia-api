@@ -88,6 +88,29 @@ func (c *ReviewController) Delete(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "review deleted successfully"})
 }
 
+func (c *ReviewController) CanReview(ctx *gin.Context) {
+	bcIDStr := ctx.Param("beautyCenterID")
+	bcID, err := strconv.ParseUint(bcIDStr, 10, 32)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid beauty center id"})
+		return
+	}
+
+	clientID, exists := ctx.Get("clientID")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	canReview, err := c.service.CanReview(clientID.(uint), uint(bcID))
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"can_review": canReview})
+}
+
 func (c *ReviewController) FindByID(ctx *gin.Context) {
 	reviewIDStr := ctx.Param("id")
 	reviewID, err := strconv.ParseUint(reviewIDStr, 10, 32)

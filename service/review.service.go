@@ -12,4 +12,5 @@ type ReviewService interface {
 	FindByID(id uint) (*response.ReviewResponse, error)
 	FindByBeautyCenterID(beautyCenterID uint) ([]response.ReviewResponse, error)
 	FindByClientID(clientID uint) ([]response.ReviewResponse, error)
+	CanReview(clientID, beautyCenterID uint) (bool, error)
 }

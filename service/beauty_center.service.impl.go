@@ -2,6 +2,12 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
@@ -50,8 +56,17 @@ func (s *BeautyCenterServiceImpl) Update(id uint, req request.UpdateBeautyCenter
 	if req.Description != "" {
 		center.Description = req.Description
 	}
+	if req.Currency != "" {
+		center.Currency = req.Currency
+	}
 	if req.IsActive != nil {
 		center.IsActive = *req.IsActive
+	}
+	if req.Latitude != nil {
+		center.Latitude = *req.Latitude
+	}
+	if req.Longitude != nil {
+		center.Longitude = *req.Longitude
 	}
 
 	if req.Email != "" && req.Email != center.Email {
@@ -87,11 +102,17 @@ func (s *BeautyCenterServiceImpl) Update(id uint, req request.UpdateBeautyCenter
 				Position:       imgReq.Position,
 			})
 		}
-		center.BeautyCenterImage = newImages
+		if err := s.repo.ReplaceImages(center.ID, newImages); err != nil {
+			return response.BeautyCenterResponse{}, err
+		}
 	}
 
 	// Update schedules (Replacement strategy)
 	if len(req.Schedules) > 0 {
+		if err := validateSchedules(req.Schedules); err != nil {
+			return response.BeautyCenterResponse{}, err
+		}
+
 		var newSchedules []models.WorkingHour
 		for _, schedReq := range req.Schedules {
 			newSchedules = append(newSchedules, models.WorkingHour{
@@ -101,10 +122,14 @@ func (s *BeautyCenterServiceImpl) Update(id uint, req request.UpdateBeautyCenter
 				EndTime:        schedReq.EndTime,
 			})
 		}
-		center.WorkingHour = newSchedules
+		if err := s.repo.ReplaceSchedules(center.ID, newSchedules); err != nil {
+			return response.BeautyCenterResponse{}, err
+		}
 	}
 
-	// Save changes
+	// Save basic fields (without associations)
+	center.WorkingHour = nil
+	center.BeautyCenterImage = nil
 	if err := s.repo.Update(center); err != nil {
 		return response.BeautyCenterResponse{}, err
 	}
@@ -140,6 +165,144 @@ func (s *BeautyCenterServiceImpl) FindAll(page, limit int) ([]response.BeautyCen
 	return resps, total, nil
 }
 
+// GetAvailableSlots implements BeautyCenterService
+func (s *BeautyCenterServiceImpl) GetAvailableSlots(centerID uint, date string, duration int, personnelID uint) (response.AvailableSlotsResponse, error) {
+	center, err := s.repo.FindByID(centerID)
+	if err != nil {
+		return response.AvailableSlotsResponse{}, errors.New("beauty center not found")
+	}
+
+	parsedDate, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return response.AvailableSlotsResponse{}, errors.New("invalid date format, use YYYY-MM-DD")
+	}
+	dayOfWeek := int(parsedDate.Weekday()) // 0=Sun
+
+	// Get working hours for that day (multiple blocks possible)
+	schedules, err := s.repo.FindWorkingHours(centerID, dayOfWeek)
+	if err != nil {
+		return response.AvailableSlotsResponse{}, err
+	}
+	if len(schedules) == 0 {
+		return response.AvailableSlotsResponse{Date: date, Currency: center.Currency, Slots: []response.AvailableSlot{}}, nil
+	}
+
+	// Get existing reservations for that date (excluding CANCELLED)
+	reservations, err := s.repo.FindReservationsForDate(centerID, parsedDate, personnelID)
+	if err != nil {
+		return response.AvailableSlotsResponse{}, err
+	}
+
+	// Helper to check if a time range overlaps with any reservation
+	isBooked := func(slotStart, slotEnd int) bool {
+		for _, r := range reservations {
+			rStart := parseMinutes(r.StartTime)
+			rEnd := parseMinutes(r.EndTime)
+			if slotStart < rEnd && slotEnd > rStart {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Get current time to filter past slots on today's date
+	now := time.Now()
+	nowMinutes := now.Hour()*60 + now.Minute()
+	isToday := parsedDate.Year() == now.Year() && parsedDate.YearDay() == now.YearDay()
+
+	stepMinutes := 30
+	slotStep := stepMinutes
+
+	// Generate slots: each candidate start time must have `duration` free minutes ahead
+	var slots []response.AvailableSlot
+	for _, schedule := range schedules {
+		startMinutes := parseMinutes(schedule.StartTime)
+		endMinutes := parseMinutes(schedule.EndTime)
+
+		for m := startMinutes; m+slotStep <= endMinutes; m += slotStep {
+			timeStr := fmt.Sprintf("%02d:%02d", m/60, m%60)
+
+			// Slot is only feasible if the full duration fits within this block
+			slotEnd := m + duration
+			if slotEnd > endMinutes {
+				// Duration doesn't fully fit → mark as unavailable
+				slots = append(slots, response.AvailableSlot{
+					Time:      timeStr,
+					Available: false,
+					Reason:    "closing",
+				})
+				continue
+			}
+
+			available := !isBooked(m, slotEnd)
+			if isToday && m < nowMinutes {
+				available = false
+			}
+			reason := ""
+			if !available && isBooked(m, m+duration) {
+				reason = "booked"
+			} else if !available && isToday && m < nowMinutes {
+				reason = "past"
+			}
+			slots = append(slots, response.AvailableSlot{
+				Time:      timeStr,
+				Available: available,
+				Reason:    reason,
+			})
+		}
+	}
+
+	return response.AvailableSlotsResponse{Date: date, Currency: center.Currency, Slots: slots}, nil
+}
+
+// validateSchedules valida formato HH:MM, StartTime < EndTime, y sin solapamientos por día.
+func validateSchedules(schedules []request.WorkingHourRequest) error {
+	timeRE := regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
+	byDay := make(map[int][]request.WorkingHourRequest)
+
+	for _, s := range schedules {
+		if !timeRE.MatchString(s.StartTime) {
+			return fmt.Errorf("invalid start_time format %q: expected HH:MM (00:00-23:59)", s.StartTime)
+		}
+		if !timeRE.MatchString(s.EndTime) {
+			return fmt.Errorf("invalid end_time format %q: expected HH:MM (00:00-23:59)", s.EndTime)
+		}
+		if parseMinutes(s.StartTime) >= parseMinutes(s.EndTime) {
+			return fmt.Errorf("start_time %s must be before end_time %s", s.StartTime, s.EndTime)
+		}
+		byDay[s.DayOfWeek] = append(byDay[s.DayOfWeek], s)
+	}
+
+	// Check for overlapping blocks per day
+	for day, blocks := range byDay {
+		sort.Slice(blocks, func(i, j int) bool {
+			return parseMinutes(blocks[i].StartTime) < parseMinutes(blocks[j].StartTime)
+		})
+		for i := 1; i < len(blocks); i++ {
+			prevEnd := parseMinutes(blocks[i-1].EndTime)
+			currStart := parseMinutes(blocks[i].StartTime)
+			if currStart < prevEnd {
+				return fmt.Errorf(
+					"overlapping schedules on day %d: %s-%s and %s-%s",
+					day,
+					blocks[i-1].StartTime, blocks[i-1].EndTime,
+					blocks[i].StartTime, blocks[i].EndTime,
+				)
+			}
+		}
+	}
+
+	return nil
+}
+
+// parseMinutes convierte "HH:MM" a minutos desde medianoche.
+func parseMinutes(timeStr string) int {
+	parts := strings.Split(timeStr, ":")
+	h, _ := strconv.Atoi(parts[0])
+	m, _ := strconv.Atoi(parts[1])
+	return h*60 + m
+}
+
 // Internal mapper
 func (s *BeautyCenterServiceImpl) mapToResponse(center models.BeautyCenter) response.BeautyCenterResponse {
 	resp := response.BeautyCenterResponse{
@@ -150,15 +313,22 @@ func (s *BeautyCenterServiceImpl) mapToResponse(center models.BeautyCenter) resp
 		Phone:       center.Phone,
 		Url:         center.Url,
 		Description: center.Description,
+		Latitude:    center.Latitude,
+		Longitude:   center.Longitude,
 		IsActive:    center.IsActive,
+		AvgRating:   center.AvgRating,
+		ReviewCount: center.ReviewCount,
+		Currency:    center.Currency,
+		SocialMedia: mapSocialMedia(center.SocialMedia),
 	}
 
 	for _, img := range center.BeautyCenterImage {
 		resp.Images = append(resp.Images, response.BeautyCenterImageResp{
-			ID:       img.ID,
-			ImageUrl: img.ImageUrl,
-			IsCover:  img.IsCover,
-			Position: img.Position,
+			ID:        img.ID,
+			ImageUrl:  img.ImageUrl,
+			IsCover:   img.IsCover,
+			IsProfile: img.IsProfile,
+			Position:  img.Position,
 		})
 	}
 
@@ -172,4 +342,59 @@ func (s *BeautyCenterServiceImpl) mapToResponse(center models.BeautyCenter) resp
 	}
 
 	return resp
+}
+
+func mapSocialMedia(sm []models.SocialMedia) *response.SocialMediaResp {
+	if len(sm) == 0 {
+		return nil
+	}
+	return &response.SocialMediaResp{
+		Google:    sm[0].Google,
+		Facebook:  sm[0].Facebook,
+		Instagram: sm[0].Instagram,
+		Twitter:   sm[0].Twitter,
+		TikTok:    sm[0].TikTok,
+	}
+}
+
+// Search implements BeautyCenterService
+func (s *BeautyCenterServiceImpl) Search(query string, page, limit int) ([]response.BeautyCenterResponse, int64, error) {
+	centers, total, err := s.repo.Search(query, page, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var resps []response.BeautyCenterResponse
+	for _, c := range centers {
+		resps = append(resps, s.mapToResponse(c))
+	}
+	return resps, total, nil
+}
+
+// FindTopRated implements BeautyCenterService
+func (s *BeautyCenterServiceImpl) FindTopRated(limit int) ([]response.BeautyCenterResponse, error) {
+	centers, err := s.repo.FindTopRated(limit)
+	if err != nil {
+		return nil, err
+	}
+
+	var resps []response.BeautyCenterResponse
+	for _, c := range centers {
+		resps = append(resps, s.mapToResponse(c))
+	}
+	return resps, nil
+}
+
+// FindNearby implements BeautyCenterService
+func (s *BeautyCenterServiceImpl) FindNearby(latitude, longitude float64, limit int) ([]response.BeautyCenterResponse, error) {
+	centers, err := s.repo.FindNearby(latitude, longitude, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	var resps []response.BeautyCenterResponse
+	for _, c := range centers {
+		resps = append(resps, s.mapToResponse(c))
+	}
+	return resps, nil
 }

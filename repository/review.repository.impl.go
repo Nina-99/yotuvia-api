@@ -45,3 +45,14 @@ func (r *ReviewRepositoryImpl) FindByClientID(clientID uint) ([]models.Review, e
 	err := r.db.Where("client_id = ?", clientID).Preload("Client").Preload("BeautyCenter").Find(&reviews).Error
 	return reviews, err
 }
+
+func (r *ReviewRepositoryImpl) HasCompletedReservation(clientID, beautyCenterID uint) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.Reservation{}).
+		Where("client_id = ? AND beauty_center_id = ? AND status = ?", clientID, beautyCenterID, "COMPLETED").
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}

@@ -31,6 +31,20 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	}
 	db.Create(&bc)
 
+	// Seed Personnel
+	personnel := models.Personnel{
+		BeautyCenterID: bc.ID,
+		FirstName:      "John",
+		LastName:       "Doe",
+		Email:          "john.doe@example.com",
+		Phone:          "555123456",
+		IsActive:       true,
+		PersonnelImage: []models.PersonnelImage{
+			{ImageUrl: "http://example.com/img1.jpg", IsCover: true, Position: 1},
+		},
+	}
+	db.Create(&personnel)
+
 	return db
 }
 
@@ -40,7 +54,11 @@ func TestPersonnelCRUD(t *testing.T) {
 	repo := repository.NewPersonnelRepositoryImpl(db)
 	svc := service.NewPersonnelServiceImpl(repo, validate)
 
-	var personnelID uint
+	var personnel models.Personnel
+	if err := db.First(&personnel).Error; err != nil {
+		t.Fatalf("Failed to load seeded personnel: %v", err)
+	}
+	personnelID := personnel.ID
 
 	t.Run("Find Personnel By ID", func(t *testing.T) {
 		res, err := svc.FindByID(personnelID)

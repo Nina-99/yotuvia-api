@@ -9,4 +9,5 @@ type ReviewRepository interface {
 	FindByID(id uint) (*models.Review, error)
 	FindByBeautyCenterID(beautyCenterID uint) ([]models.Review, error)
 	FindByClientID(clientID uint) ([]models.Review, error)
+	HasCompletedReservation(clientID, beautyCenterID uint) (bool, error)
 }

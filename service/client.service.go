@@ -10,4 +10,5 @@ type ClientService interface {
 	Delete(clientID uint) error
 	FindAll(page, limit int) ([]models.Client, int64, error)
 	FindEmail(email string) (*models.Client, error)
+	FindByID(clientID uint) (*models.Client, error)
 }

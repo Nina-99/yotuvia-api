@@ -13,6 +13,9 @@ func SetupRouter() *gin.Engine {
 	r := gin.Default()
 	r.Use(middleware.GinLogger())
 
+	// Serve uploaded files
+	r.Static("/uploads", "./uploads")
+
 	validate := validator.New()
 	db := configs.DB
 
@@ -26,14 +29,18 @@ func SetupRouter() *gin.Engine {
 		FavoriteRoutes(api, db, validate)
 		FeedPostRoutes(api, db, validate)
 		LoyaltyRoutes(api, db, validate)
-		MembershipRoutes(api, db, validate)
+		TokenRoutes(api, db, validate)
 		PersonnelRoutes(api, db, validate)
+		PersonnelInvitationRoutes(api, db, validate)
 		PersonnelImageRoutes(api, db, validate)
+		PersonnelServiceRoutes(api, db, validate)
 		PostLikeRoutes(api, db, validate)
 		ReservationRoutes(api, db, validate)
 		ReviewRoutes(api, db, validate)
+		NotificationRoutes(api, db)
 		ServiceRoutes(api, db, validate)
 		SocialMediaRoutes(api, db, validate)
+		VideoRoutes(api, db, validate)
 	}
 	return r
 }

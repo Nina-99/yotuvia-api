@@ -16,25 +16,23 @@ func NewReservationRepositoryImpl(db *gorm.DB) ReservationRepository {
 	return &ReservationRepositoryImpl{db: db}
 }
 
-// Create implements ReservationRepository
 func (r *ReservationRepositoryImpl) Create(reservation *models.Reservation) error {
-	return r.db.Create(&reservation).Error
+	return r.db.Create(reservation).Error
 }
 
-// Update implements ReservationRepository
 func (r *ReservationRepositoryImpl) Update(reservation *models.Reservation) error {
 	return r.db.Save(reservation).Error
 }
 
-// Delete implements ReservationRepository
 func (r *ReservationRepositoryImpl) Delete(reservation *models.Reservation) error {
-	return r.db.Delete(&reservation).Error
+	return r.db.Delete(reservation).Error
 }
 
-// FindById implements ReservationRepository
 func (r *ReservationRepositoryImpl) FindById(reservationID uint) (*models.Reservation, error) {
 	var reservation models.Reservation
-	err := r.db.Preload("Client").Preload("Personnel").Preload("Service").Preload("BeautyCenter").First(&reservation, reservationID).Error
+	err := r.db.
+		Preload("ReservationServices.Service.Category").Preload("Client").Preload("Personnel").Preload("BeautyCenter").
+		First(&reservation, reservationID).Error
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -45,21 +43,39 @@ func (r *ReservationRepositoryImpl) FindById(reservationID uint) (*models.Reserv
 	return &reservation, nil
 }
 
-// FindClientID implements ReservationRepository
-func (r *ReservationRepositoryImpl) FindClientID(clientID uint) (*models.Reservation, error) {
+func (r *ReservationRepositoryImpl) FindUpcomingByClientID(clientID uint) (*models.Reservation, error) {
 	var reservation models.Reservation
-	err := r.db.Where("client_id = ?", clientID).First(&reservation).Error
-	return &reservation, err
+	today := time.Now().Format("2006-01-02")
+	err := r.db.
+		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
+		Where("client_id = ? AND date >= ? AND status NOT IN (?)", clientID, today, []string{"COMPLETED", "CANCELLED"}).
+		Order("date ASC, start_time ASC").
+		First(&reservation).Error
+	if err != nil {
+		return nil, err
+	}
+	return &reservation, nil
 }
 
-// FindBeautyCenterId implements ReservationRepository
-func (r *ReservationRepositoryImpl) FindBeautyCenterId(beautyCenterID uint) (*models.Reservation, error) {
-	var reservation models.Reservation
-	err := r.db.Where("beauty_center_id = ?", beautyCenterID).First(&reservation).Error
-	return &reservation, err
+func (r *ReservationRepositoryImpl) FindByClientID(clientID uint) ([]models.Reservation, error) {
+	var reservations []models.Reservation
+	err := r.db.
+		Preload("ReservationServices.Service.Category").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
+		Where("client_id = ?", clientID).
+		Order("date DESC, start_time DESC").
+		Find(&reservations).Error
+	return reservations, err
 }
 
-// FindAll implements ReservationRepository
+func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint) ([]models.Reservation, error) {
+	var reservations []models.Reservation
+	err := r.db.
+		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
+		Where("beauty_center_id = ?", beautyCenterID).
+		Find(&reservations).Error
+	return reservations, err
+}
+
 func (r *ReservationRepositoryImpl) FindAll(page, limit int) ([]models.Reservation, int64, error) {
 	var reservations []models.Reservation
 	var total int64
@@ -67,11 +83,15 @@ func (r *ReservationRepositoryImpl) FindAll(page, limit int) ([]models.Reservati
 	r.db.Model(&models.Reservation{}).Count(&total)
 
 	offset := (page - 1) * limit
-	err := r.db.Preload("Client").Preload("Personnel").Preload("Service").Preload("BeautyCenter").Offset(offset).Limit(limit).Find(&reservations).Error
+	err := r.db.
+		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
+		Offset(offset).
+		Limit(limit).
+		Find(&reservations).Error
 	return reservations, total, err
 }
 
-func (r *ReservationRepositoryImpl) CheckOverlap(centerID uint, date time.Time, startTime, endTime string, excludeID uint) (bool, error) {
+func (r *ReservationRepositoryImpl) CheckOverlap(centerID uint, date time.Time, startTime, endTime string, personnelID, excludeID uint) (bool, error) {
 	var count int64
 	query := r.db.Model(&models.Reservation{}).
 		Where("beauty_center_id = ? AND date = ? AND status != 'CANCELLED'", centerID, date).
@@ -82,17 +102,33 @@ func (r *ReservationRepositoryImpl) CheckOverlap(centerID uint, date time.Time, 
 		query = query.Where("id != ?", excludeID)
 	}
 
+	if personnelID > 0 {
+		query = query.Where("personnel_id = ?", personnelID)
+	}
+
 	err := query.Count(&count).Error
 	return count > 0, err
 }
 
-// FindByToken implements  ReservationRepository
+func (r *ReservationRepositoryImpl) UpdatePersonnelID(reservationID uint, personnelID uint) error {
+	return r.db.Model(&models.Reservation{}).
+		Where("id = ?", reservationID).
+		Update("personnel_id", personnelID).Error
+}
+
+func (r *ReservationRepositoryImpl) DeleteReservationServices(reservationID uint) error {
+	return r.db.Where("reservation_id = ?", reservationID).Delete(&models.ReservationService{}).Error
+}
+
 func (r *ReservationRepositoryImpl) FindByToken(token string) (*models.Reservation, error) {
 	var reservation models.Reservation
-	err := r.db.Where("verification_token = ?", token).First(&reservation).Error
+	err := r.db.
+		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
+		Where("verification_token = ?", token).
+		First(&reservation).Error
 
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, err

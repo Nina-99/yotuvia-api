@@ -11,11 +11,12 @@ import (
 )
 
 type AuthAccountServiceImpl struct {
-	AuthRepo      repository.AuthAccountRepository
-	ClientRepo    repository.ClientRepository
-	PersonnelRepo repository.PersonnelRepository
-	CenterRepo    repository.BeautyCenterRepository
-	Validate      *validator.Validate
+	AuthRepo        repository.AuthAccountRepository
+	ClientRepo      repository.ClientRepository
+	PersonnelRepo   repository.PersonnelRepository
+	CenterRepo      repository.BeautyCenterRepository
+	TokenAccountSvc TokenAccountService
+	Validate        *validator.Validate
 }
 
 func NewAuthAccountServiceImpl(
@@ -23,86 +24,310 @@ func NewAuthAccountServiceImpl(
 	clientRepo repository.ClientRepository,
 	personnelRepo repository.PersonnelRepository,
 	centerRepo repository.BeautyCenterRepository,
+	tokenAccountSvc TokenAccountService,
 	validate *validator.Validate,
 ) AuthAccountService {
 	return &AuthAccountServiceImpl{
-		AuthRepo:      authRepo,
-		ClientRepo:    clientRepo,
-		PersonnelRepo: personnelRepo,
-		CenterRepo:    centerRepo,
-		Validate:      validate,
+		AuthRepo:        authRepo,
+		ClientRepo:      clientRepo,
+		PersonnelRepo:   personnelRepo,
+		CenterRepo:      centerRepo,
+		TokenAccountSvc: tokenAccountSvc,
+		Validate:        validate,
 	}
 }
 
-// 1. LOGIN CLASIC (Email/Username + Password)
-func (s *AuthAccountServiceImpl) Login(req request.LoginRequest) (string, error) {
+// ──────────────────────────────────────────────
+//  CHECK EMAIL
+// ──────────────────────────────────────────────
+
+func (s *AuthAccountServiceImpl) CheckEmail(req request.CheckEmailRequest) (bool, error) {
 	if err := s.Validate.Struct(req); err != nil {
-		return "", err
+		return false, err
+	}
+
+	client, _ := s.ClientRepo.FindByEmail(req.Email)
+	if client != nil {
+		return true, nil
+	}
+
+	center, _ := s.CenterRepo.FindByEmail(req.Email)
+	if center != nil {
+		return true, nil
+	}
+
+	personnel, _ := s.PersonnelRepo.FindByEmail(req.Email)
+	if personnel != nil {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// ──────────────────────────────────────────────
+//  LOGIN
+// ──────────────────────────────────────────────
+
+func (s *AuthAccountServiceImpl) Login(req request.LoginRequest) (AuthResult, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return AuthResult{}, err
+	}
+
+	if req.UserType != "" {
+		return s.loginByType(req.Identifier, req.Password, req.UserType)
+	}
+
+	result, err := s.tryLoginAllTypes(req.Identifier, req.Password)
+	if err != nil {
+		return AuthResult{}, err
+	}
+
+	return result, nil
+}
+
+func (s *AuthAccountServiceImpl) loginByType(identifier, password, userType string) (AuthResult, error) {
+	var userID uint
+	var centerID uint
+	var email string
+	var username string
+	var firstName string
+	var lastName string
+	var passwordHash string
+
+	switch userType {
+	case "client":
+		var client *models.Client
+		var err error
+		if utils.IsEmail(identifier) {
+			client, err = s.ClientRepo.FindByEmail(identifier)
+		} else {
+			client, err = s.ClientRepo.FindByUsername(identifier)
+		}
+		if err != nil || client == nil {
+			return AuthResult{}, errors.New("invalid credentials")
+		}
+		userID = client.ID
+		centerID = 0
+		email = client.Email
+		username = client.Username
+		firstName = client.FirstName
+		lastName = client.LastName
+		passwordHash = client.Password
+
+	case "personnel":
+		personnel, err := s.PersonnelRepo.FindByEmail(identifier)
+		if err != nil || personnel == nil {
+			return AuthResult{}, errors.New("invalid credentials")
+		}
+		userID = personnel.ID
+		centerID = personnel.BeautyCenterID
+		email = personnel.Email
+		username = personnel.FirstName
+		firstName = personnel.FirstName
+		lastName = personnel.LastName
+		passwordHash = personnel.Password
+
+	case "beauty_center":
+		center, err := s.CenterRepo.FindByEmail(identifier)
+		if err != nil || center == nil {
+			return AuthResult{}, errors.New("invalid credentials")
+		}
+		userID = center.ID
+		centerID = center.ID
+		email = center.Email
+		username = center.Name
+		firstName = center.Name
+		lastName = ""
+		passwordHash = center.Password
+	}
+
+	if passwordHash == "" {
+		return AuthResult{}, errors.New("please log in using your social account or set a password first")
+	}
+
+	if !utils.VerifyPassword(password, passwordHash) {
+		return AuthResult{}, errors.New("invalid credentials")
+	}
+
+	utils.Log.Infof("[AUTH] Classic Login successful. UserType: %s, ID: %d", userType, userID)
+	token, err := utils.GenerateJWT(userID, centerID, userType, email, username)
+	if err != nil {
+		return AuthResult{}, err
+	}
+
+	return AuthResult{
+		Token:     token,
+		UserID:    userID,
+		Email:     email,
+		FirstName: firstName,
+		LastName:  lastName,
+		Role:      userType,
+	}, nil
+}
+
+func (s *AuthAccountServiceImpl) tryLoginAllTypes(identifier, password string) (AuthResult, error) {
+	types := []string{"client", "beauty_center", "personnel"}
+
+	var lastErr error
+	for _, userType := range types {
+		result, err := s.loginByType(identifier, password, userType)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+	}
+
+	utils.Log.Warnf("[AUTH] Login failed for %s: %v", identifier, lastErr)
+	return AuthResult{}, errors.New("invalid credentials")
+}
+
+// ──────────────────────────────────────────────
+//  REGISTER
+// ──────────────────────────────────────────────
+
+func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResult, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return AuthResult{}, err
+	}
+
+	hashedPassword, err := utils.HashPassword(req.Password)
+	if err != nil {
+		return AuthResult{}, err
 	}
 
 	var userID uint
 	var centerID uint
 	var email string
 	var username string
-	var passwordHash string
+	var firstName string
+	var lastName string
 
 	switch req.UserType {
 	case "client":
-		var client *models.Client
-		var err error
-		if utils.IsEmail(req.Identifier) {
-			client, err = s.ClientRepo.FindByEmail(req.Identifier)
-		} else {
-			client, err = s.ClientRepo.FindByUsername(req.Identifier)
+		existingEmail, _ := s.ClientRepo.FindByEmail(req.Email)
+		if existingEmail != nil {
+			return AuthResult{}, errors.New("email already exists")
 		}
-		if err != nil || client == nil {
-			return "", errors.New("invalid credentials")
+		usernameVal := req.Username
+		if usernameVal == "" {
+			usernameVal = req.Email
+		}
+		existingUsername, _ := s.ClientRepo.FindByUsername(usernameVal)
+		if existingUsername != nil {
+			return AuthResult{}, errors.New("username already exists")
+		}
+		client := models.Client{
+			FirstName: req.FirstName,
+			LastName:  req.LastName,
+			Username:  usernameVal,
+			Email:     req.Email,
+			Phone:     req.Phone,
+			Password:  hashedPassword,
+			IsActive:  true,
+		}
+		if err := s.ClientRepo.Create(&client); err != nil {
+			return AuthResult{}, err
 		}
 		userID = client.ID
 		centerID = 0
 		email = client.Email
 		username = client.Username
-		passwordHash = client.Password
+		firstName = client.FirstName
+		lastName = client.LastName
 
 	case "personnel":
-		personnel, err := s.PersonnelRepo.FindByEmail(req.Identifier)
-		if err != nil || personnel == nil {
-			return "", errors.New("invalid credentials")
+		existingEmail, _ := s.PersonnelRepo.FindByEmail(req.Email)
+		if existingEmail != nil {
+			return AuthResult{}, errors.New("email already exists")
+		}
+		personnel := models.Personnel{
+			FirstName: req.FirstName,
+			LastName:  req.LastName,
+			Email:     req.Email,
+			Phone:     req.Phone,
+			Password:  hashedPassword,
+			IsActive:  false,
+		}
+		if err := s.PersonnelRepo.Create(&personnel); err != nil {
+			return AuthResult{}, err
 		}
 		userID = personnel.ID
 		centerID = personnel.BeautyCenterID
 		email = personnel.Email
 		username = personnel.FirstName
-		passwordHash = personnel.Password
+		firstName = personnel.FirstName
+		lastName = personnel.LastName
 
 	case "beauty_center":
-		center, err := s.CenterRepo.FindByEmail(req.Identifier)
-		if err != nil || center == nil {
-			return "", errors.New("invalid credentials")
+		existingEmail, _ := s.CenterRepo.FindByEmail(req.Email)
+		if existingEmail != nil {
+			return AuthResult{}, errors.New("email already exists")
+		}
+		// Generate unique referral code
+		refCode, err := utils.GenerateReferralCode()
+		if err != nil {
+			return AuthResult{}, errors.New("failed to generate referral code")
+		}
+		center := models.BeautyCenter{
+			Name:         req.FirstName,
+			Address:      req.Address,
+			Email:        req.Email,
+			Phone:        req.Phone,
+			Password:     hashedPassword,
+			Url:          req.Email,
+			Latitude:     req.Latitude,
+			Longitude:    req.Longitude,
+			IsActive:     false,
+			ReferralCode: refCode,
+		}
+		if err := s.CenterRepo.Create(&center); err != nil {
+			return AuthResult{}, err
 		}
 		userID = center.ID
 		centerID = center.ID
 		email = center.Email
 		username = center.Name
-		passwordHash = center.Password
+		firstName = center.Name
+		lastName = ""
+
+		// ── Welcome bonus: 25 free YOTTUs ──
+		if s.TokenAccountSvc != nil {
+			if _, err := s.TokenAccountSvc.GetOrCreate(center.ID, center.Currency); err != nil {
+				utils.Log.Errorf("[AUTH] Failed to create token account for center %d: %v", center.ID, err)
+			} else if err := s.TokenAccountSvc.AddTokens(center.ID, 25, "bonus", 0, "Welcome bonus: 25 free YOTTUs"); err != nil {
+				utils.Log.Errorf("[AUTH] Failed to add welcome YOTTUs for center %d: %v", center.ID, err)
+			} else {
+				utils.Log.Infof("[AUTH] Welcome bonus: 25 YOTTUs credited to center %d", center.ID)
+			}
+		}
+
+	default:
+		return AuthResult{}, errors.New("invalid user type")
 	}
 
-	if passwordHash == "" {
-		return "", errors.New("please log in using your social account or set a password first")
+	utils.Log.Infof("[AUTH] New %s registered successfully. ID: %d, Email: %s", req.UserType, userID, email)
+	token, err := utils.GenerateJWT(userID, centerID, req.UserType, email, username)
+	if err != nil {
+		return AuthResult{}, err
 	}
 
-	if !utils.VerifyPassword(req.Password, passwordHash) {
-		return "", errors.New("invalid credentials")
-	}
-
-	utils.Log.Infof("[AUTH] Classic Login successful. UserType: %s, ID: %d", req.UserType, userID)
-	return utils.GenerateJWT(userID, centerID, req.UserType, email, username)
+	return AuthResult{
+		Token:     token,
+		UserID:    userID,
+		Email:     email,
+		FirstName: firstName,
+		LastName:  lastName,
+		Role:      req.UserType,
+	}, nil
 }
 
-// 2. SOCIAL LOGIN (Google/Facebook OAuth) con Account Linking
-func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (string, error) {
+// ──────────────────────────────────────────────
+//  SOCIAL LOGIN
+// ──────────────────────────────────────────────
+
+func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (AuthResult, error) {
 	if err := s.Validate.Struct(req); err != nil {
-		return "", err
+		return AuthResult{}, err
 	}
 
 	var providerID string
@@ -111,11 +336,10 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (st
 	var lastName string
 	var picture string
 
-	// 1. Validate the token
 	if req.Provider == "google" {
 		userInfo, err := utils.VerifyGoogleToken(req.AccessToken)
 		if err != nil {
-			return "", err
+			return AuthResult{}, err
 		}
 		providerID = userInfo.ID
 		email = userInfo.Email
@@ -125,7 +349,7 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (st
 	} else {
 		userInfo, err := utils.VerifyFacebookToken(req.AccessToken)
 		if err != nil {
-			return "", err
+			return AuthResult{}, err
 		}
 		providerID = userInfo.ID
 		email = userInfo.Email
@@ -134,19 +358,16 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (st
 		picture = userInfo.Picture.Data.URL
 	}
 
-	// 2. We search if the account exist in the DB
 	account, err := s.AuthRepo.FindByProvider(req.Provider, providerID)
 	if err != nil {
-		return "", err
+		return AuthResult{}, err
 	}
 
-	// 3. Case A: The account exist. Generate JWT and login of one
 	if account != nil {
 		utils.Log.Infof("[AUTH] Social Login successful. UserType: %s, Provider: %s", account.UserType, req.Provider)
 		return s.generateTokenForUser(account)
 	}
 
-	// Case B: The Caccount not exist. Register automatic progresive
 	utils.Log.Infof("[AUTH] Social Account not found. Creating new %s via %s", req.UserType, req.Provider)
 	newAccount := models.AuthAccount{
 		Provider:   req.Provider,
@@ -165,7 +386,7 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (st
 			IsActive:  true,
 		}
 		if err := s.ClientRepo.Create(&client); err != nil {
-			return "", err
+			return AuthResult{}, err
 		}
 		newAccount.ClientID = &client.ID
 
@@ -174,7 +395,7 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (st
 			FirstName: firstName,
 			LastName:  lastName,
 			Email:     email,
-			IsActive:  false, // Waiting for invitation
+			IsActive:  false,
 			PersonnelImage: []models.PersonnelImage{
 				{
 					ImageUrl: picture,
@@ -184,15 +405,15 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (st
 			},
 		}
 		if err := s.PersonnelRepo.Create(&personnel); err != nil {
-			return "", err
+			return AuthResult{}, err
 		}
 		newAccount.PersonnelID = &personnel.ID
 
 	case "beauty_center":
 		center := models.BeautyCenter{
-			Name:     firstName + " " + lastName,
-			Email:    email,
-			IsActive: false, // Flag IsOnBoard = false
+			Name: firstName + " " + lastName,
+			Email: email,
+			IsActive: false,
 			BeautyCenterImage: []models.BeautyCenterImage{
 				{
 					ImageUrl: picture,
@@ -202,24 +423,65 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (st
 			},
 		}
 		if err := s.CenterRepo.Create(&center); err != nil {
-			return "", err
+			return AuthResult{}, err
 		}
 		newAccount.BeautyCenterID = &center.ID
-
 	}
+
 	if err := s.AuthRepo.Create(&newAccount); err != nil {
-		return "", err
+		return AuthResult{}, err
 	}
 
 	utils.Log.Infof("[AUTH] Created new social link and logged in. UserType: %s", req.UserType)
 	return s.generateTokenForUser(&newAccount)
 }
+// ──────────────────────────────────────────────
+//  REGISTER PERSONNEL (admin)
+// ──────────────────────────────────────────────
 
-func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccount) (string, error) {
+func (s *AuthAccountServiceImpl) RegisterPersonnel(req request.RegisterPersonnelRequest) error {
+	if err := s.Validate.Struct(req); err != nil {
+		return err
+	}
+
+	// Check existing email
+	existing, _ := s.PersonnelRepo.FindByEmail(req.Email)
+	if existing != nil {
+		return errors.New("email already exists")
+	}
+
+	hashedPassword, err := utils.HashPassword(req.Password)
+	if err != nil {
+		return err
+	}
+
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+
+	personnel := models.Personnel{
+		BeautyCenterID: req.BeautyCenterID,
+		FirstName:      req.FirstName,
+		LastName:       req.LastName,
+		Email:          req.Email,
+		Phone:          req.Phone,
+		Password:       hashedPassword,
+		IsActive:       isActive,
+	}
+
+	utils.Log.Infof("[AUTH] New personnel registered via admin. Email: %s, CenterID: %d", req.Email, req.BeautyCenterID)
+	return s.PersonnelRepo.Create(&personnel)
+}
+
+
+func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccount) (AuthResult, error) {
 	var userID uint
 	var centerID uint
 	var email string
 	var username string
+	var firstName string
+	var lastName string
 
 	switch account.UserType {
 	case "client":
@@ -230,6 +492,8 @@ func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccoun
 			if client != nil {
 				email = client.Email
 				username = client.Username
+				firstName = client.FirstName
+				lastName = client.LastName
 			}
 		}
 	case "personnel":
@@ -239,6 +503,8 @@ func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccoun
 			if personnel != nil {
 				email = personnel.Email
 				username = personnel.FirstName
+				firstName = personnel.FirstName
+				lastName = personnel.LastName
 				centerID = personnel.BeautyCenterID
 			}
 		}
@@ -250,105 +516,27 @@ func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccoun
 			if center != nil {
 				email = center.Email
 				username = center.Name
+				firstName = center.Name
+				lastName = ""
 			}
 		}
 	}
 
 	if userID == 0 {
-		return "", errors.New("falied to identify user ID associated with this social account")
+		return AuthResult{}, errors.New("failed to identify user ID associated with this social account")
 	}
 
-	return utils.GenerateJWT(userID, centerID, account.UserType, email, username)
-}
-
-func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (string, error) {
-	if err := s.Validate.Struct(req); err != nil {
-		return "", err
-	}
-	// 1. Dplicate control according to role and insertion in the DB
-	var userID uint
-	var centerID uint
-	var email string
-	var name string
-
-	hashedPassword, err := utils.HashPassword(req.Password)
+	token, err := utils.GenerateJWT(userID, centerID, account.UserType, email, username)
 	if err != nil {
-		return "", err
+		return AuthResult{}, err
 	}
-	switch req.UserType {
-	case "client":
-		// A. Verify duplicate email in Clients
-		existingEmail, _ := s.ClientRepo.FindByEmail(req.Email)
-		if existingEmail != nil {
-			return "", errors.New("email already exists")
-		}
-		usernameVal := req.Username
-		if usernameVal == "" {
-			usernameVal = req.Email
-		}
-		// B. Verify duplicate username in Clients
-		existingUsername, _ := s.ClientRepo.FindByUsername(usernameVal)
-		if existingUsername != nil {
-			return "", errors.New("username already exists")
-		}
-		client := models.Client{
-			FirstName: req.FirstName,
-			LastName:  req.LastName,
-			Username:  usernameVal,
-			Email:     req.Email,
-			Phone:     req.Phone,
-			Password:  hashedPassword,
-			IsActive:  true,
-		}
-		if err := s.ClientRepo.Create(&client); err != nil {
-			return "", err
-		}
-		userID = client.ID
-		centerID = 0
-		email = client.Email
-		name = client.Username
 
-	case "personnel":
-		existingEmail, _ := s.PersonnelRepo.FindByEmail(req.Email)
-		if existingEmail != nil {
-			return "", errors.New("email already exists")
-		}
-		personnel := models.Personnel{
-			FirstName: req.FirstName,
-			LastName:  req.LastName,
-			Email:     req.Email,
-			Phone:     req.Phone,
-			Password:  hashedPassword,
-			IsActive:  false, // Awaiting partnership/invitation
-		}
-		if err := s.PersonnelRepo.Create(&personnel); err != nil {
-			return "", err
-		}
-		userID = personnel.ID
-		centerID = personnel.BeautyCenterID
-		email = personnel.Email
-		name = personnel.FirstName
-
-	case "beauty_center":
-		existingEmail, _ := s.CenterRepo.FindByEmail(req.Email)
-		if existingEmail != nil {
-			return "", errors.New("email already exists")
-		}
-		center := models.BeautyCenter{
-			Name:     req.FirstName + " " + req.LastName,
-			Email:    req.Email,
-			Phone:    req.Phone,
-			Password: hashedPassword,
-			IsActive: false, // Flag de Onboarding pendiente
-		}
-		if err := s.CenterRepo.Create(&center); err != nil {
-			return "", err
-		}
-		userID = center.ID
-		centerID = center.ID
-		email = center.Email
-		name = center.Name
-	}
-	utils.Log.Infof("[AUTH] New %s registered successfully. ID: %d, Email: %s", req.UserType, userID, email)
-	return utils.GenerateJWT(userID, centerID, req.UserType, email, name)
+	return AuthResult{
+		Token:     token,
+		UserID:    userID,
+		Email:     email,
+		FirstName: firstName,
+		LastName:  lastName,
+		Role:      account.UserType,
+	}, nil
 }

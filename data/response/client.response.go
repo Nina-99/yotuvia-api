@@ -7,8 +7,6 @@ type ClientResponse struct {
 	Username  string `json:"username"`
 	Email     string `json:"email"`
 	Phone     string `json:"phone"`
-}
-
-type AuthResponse struct {
-	Token string `json:"token"`
+	AvatarURL string `json:"avatar_url"`
+	IsActive  bool   `json:"is_active"`
 }

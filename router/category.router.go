@@ -21,6 +21,7 @@ func CategoryRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 		category.POST("", ctrl.Create)
 		category.PUT("/:id", ctrl.Update)
 		category.DELETE("/:id", ctrl.Delete)
+		category.GET("/templates", ctrl.Templates)
 		category.GET("", ctrl.FindAll)
 		category.GET("/:id", ctrl.FindById)
 	}
