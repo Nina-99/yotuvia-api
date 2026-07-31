@@ -2,6 +2,7 @@ package router
 
 import (
 	"github.com/Nina-99/yottu-api/controller"
+	"github.com/Nina-99/yottu-api/middleware"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/service"
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,7 @@ func NotificationRoutes(rg *gin.RouterGroup, db *gorm.DB) {
 
 	// Notifications (client auth)
 	notifications := rg.Group("/notifications")
+	notifications.Use(middleware.JWTAuthMiddleware())
 	{
 		notifications.GET("/client/:clientId", ctrl.GetByClient)
 		notifications.GET("/client/:clientId/unread", ctrl.GetUnreadByClient)
@@ -26,6 +28,7 @@ func NotificationRoutes(rg *gin.RouterGroup, db *gorm.DB) {
 
 	// Push devices (client auth)
 	push := rg.Group("/push-devices")
+	push.Use(middleware.JWTAuthMiddleware())
 	{
 		push.POST("/register", ctrl.RegisterPushDevice)
 	}
