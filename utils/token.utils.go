@@ -2,6 +2,7 @@ package utils
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -52,6 +53,12 @@ func ValidateToken(signedToken string) (*JWTClaim, error) {
 		signedToken,
 		&JWTClaim{},
 		func(token *jwt.Token) (interface{}, error) {
+			// Algorithm confusion guard: only HS256 is accepted. Pointer identity
+			// rejects alg=none, RS/ES/PS (type mismatch), and HS384/HS512 (different
+			// method pointer) before the secret is ever used.
+			if token.Method != jwt.SigningMethodHS256 {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Method.Alg())
+			}
 			secret, err := getJWTSecret()
 			if err != nil {
 				return nil, err

@@ -19,7 +19,7 @@ func ClientRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate
 	client.Use(middleware.JWTAuthMiddleware())
 	{
 		client.GET("/me", ctrl.FindMe)
-		client.GET("", ctrl.FindAll)
+		client.GET("", middleware.RequireRole("beauty_center"), ctrl.FindAll)
 		client.GET("/:id", ctrl.FindByID)
 		client.DELETE("/:id", ctrl.Delete)
 		client.PUT("/:id", ctrl.Update)

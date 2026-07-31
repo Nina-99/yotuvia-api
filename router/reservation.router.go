@@ -38,17 +38,37 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	reservation.Use(middleware.JWTAuthMiddleware())
 	{
 		reservation.POST("/", ctrl.Create)
-		reservation.PUT("/:id", ctrl.Update)
-		reservation.DELETE("/:id", ctrl.Delete)
-		reservation.GET("", ctrl.FindAll)
-		reservation.GET("/client/:clientId", ctrl.FindByClient)
-		reservation.GET("/client/:clientId/upcoming", ctrl.FindUpcomingByClient)
-		reservation.GET("/center/:centerId", ctrl.FindByBeautyCenter)
-		reservation.GET("/:id", ctrl.FindById)
-		reservation.PATCH("/:id/status", ctrl.UpdateStatus)
-		reservation.PATCH("/:id/assign", ctrl.AssignPersonnel)
-		reservation.PATCH("/:id/cancel", ctrl.Cancel)
-		reservation.POST("/generate-qr/:id", ctrl.GenerateQR)
-		reservation.GET("/verify-qr", ctrl.VerifyQR)
+
+		// client-only: owner of the reservation
+		clientOnly := reservation.Group("/client", middleware.RequireRole("client"))
+		{
+			clientOnly.GET("/:clientId", ctrl.FindByClient)
+			clientOnly.GET("/:clientId/upcoming", ctrl.FindUpcomingByClient)
+		}
+		reservation.PATCH("/:id/cancel", middleware.RequireRole("client"), ctrl.Cancel)
+
+		// beauty_center-only (admin)
+		admin := reservation.Group("", middleware.RequireRole("beauty_center"))
+		{
+			admin.GET("", ctrl.FindAll)
+			admin.PATCH("/:id/status", ctrl.UpdateStatus)
+			admin.PATCH("/:id/assign", ctrl.AssignPersonnel)
+			admin.GET("/verify-qr", ctrl.VerifyQR)
+		}
+
+		// beauty_center + personnel (center staff)
+		staff := reservation.Group("/center", middleware.RequireRole("beauty_center", "personnel"))
+		{
+			staff.GET("/:centerId", ctrl.FindByBeautyCenter)
+		}
+
+		// client + beauty_center (owner client OR owner center)
+		owner := reservation.Group("", middleware.RequireRole("client", "beauty_center"))
+		{
+			owner.GET("/:id", ctrl.FindById)
+			owner.PUT("/:id", ctrl.Update)
+			owner.DELETE("/:id", ctrl.Delete)
+			owner.POST("/generate-qr/:id", ctrl.GenerateQR)
+		}
 	}
 }
