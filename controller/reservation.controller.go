@@ -1,10 +1,10 @@
 package controller
 
 import (
-	"log"
 	"net/http"
 	"strconv"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/service"
@@ -19,6 +19,23 @@ func NewReservationController(service service.ReservationService) *ReservationCo
 	return &ReservationController{reservationService: service}
 }
 
+// writeError maps any service error through apperrors.MapToHTTP so clients get
+// the canonical status + stable message (403 for ownership, 404 for missing,
+// etc.) and internal details never leak.
+func (c *ReservationController) writeError(ctx *gin.Context, err error) {
+	status, msg := apperrors.MapToHTTP(err)
+	ctx.JSON(status, gin.H{"error": msg})
+}
+
+// parsePositiveID parses a path parameter that must be a positive integer.
+func parsePositiveID(raw string) (uint, bool) {
+	id, err := strconv.Atoi(raw)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return uint(id), true
+}
+
 // ──────────────────────────────────────────────
 //  CREATE
 // ──────────────────────────────────────────────
@@ -28,15 +45,14 @@ func (c *ReservationController) Create(ctx *gin.Context) {
 
 	var req request.CreateReservationRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
 	req.ClientID = clientID
 
 	if err := c.reservationService.Create(req); err != nil {
-		log.Printf("Error creating reservation: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -48,23 +64,26 @@ func (c *ReservationController) Create(ctx *gin.Context) {
 // ──────────────────────────────────────────────
 
 func (c *ReservationController) Update(ctx *gin.Context) {
-	idParam := ctx.Param("id")
-	reservationID, err := strconv.Atoi(idParam)
-	if err != nil || reservationID <= 0 {
+	reservationID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
 
 	var req request.CreateReservationRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
-	req.ClientID = ctx.GetUint("clientID")
-
-	if err := c.reservationService.Update(uint(reservationID), req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.reservationService.Update(
+		reservationID,
+		req,
+		ctx.GetUint("clientID"),
+		ctx.GetUint("centerID"),
+		ctx.GetString("role"),
+	); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -77,26 +96,21 @@ func (c *ReservationController) Update(ctx *gin.Context) {
 
 func (c *ReservationController) Cancel(ctx *gin.Context) {
 	clientID := ctx.GetUint("clientID")
-	if clientID == 0 {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "client ID not found in token"})
-		return
-	}
 
-	idParam := ctx.Param("id")
-	reservationID, err := strconv.Atoi(idParam)
-	if err != nil || reservationID <= 0 {
+	reservationID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
 
 	var req request.CancelReservationRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
-	if err := c.reservationService.Cancel(uint(reservationID), clientID, req.Reason); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.reservationService.Cancel(reservationID, clientID, req.Reason); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -108,15 +122,19 @@ func (c *ReservationController) Cancel(ctx *gin.Context) {
 // ──────────────────────────────────────────────
 
 func (c *ReservationController) Delete(ctx *gin.Context) {
-	idParam := ctx.Param("id")
-	reservationID, err := strconv.Atoi(idParam)
-	if err != nil || reservationID <= 0 {
+	reservationID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
 
-	if err := c.reservationService.Delete(uint(reservationID)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.reservationService.Delete(
+		reservationID,
+		ctx.GetUint("clientID"),
+		ctx.GetUint("centerID"),
+		ctx.GetString("role"),
+	); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -137,9 +155,10 @@ func (c *ReservationController) FindAll(ctx *gin.Context) {
 		limit = 20
 	}
 
-	reservations, total, err := c.reservationService.FindAll(page, limit)
+	// Scoped to the caller's centerID claim — never the global list.
+	reservations, total, err := c.reservationService.FindAll(page, limit, ctx.GetUint("centerID"))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -152,16 +171,20 @@ func (c *ReservationController) FindAll(ctx *gin.Context) {
 }
 
 func (c *ReservationController) FindById(ctx *gin.Context) {
-	idParam := ctx.Param("id")
-	reservationID, err := strconv.Atoi(idParam)
-	if err != nil || reservationID <= 0 {
+	reservationID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
 
-	reservation, err := c.reservationService.FindById(uint(reservationID))
+	reservation, err := c.reservationService.FindById(
+		reservationID,
+		ctx.GetUint("clientID"),
+		ctx.GetUint("centerID"),
+		ctx.GetString("role"),
+	)
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "Reservation not found"})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -169,16 +192,15 @@ func (c *ReservationController) FindById(ctx *gin.Context) {
 }
 
 func (c *ReservationController) FindByClient(ctx *gin.Context) {
-	clientIDParam := ctx.Param("clientId")
-	clientID, err := strconv.Atoi(clientIDParam)
-	if err != nil || clientID <= 0 {
+	clientID, ok := parsePositiveID(ctx.Param("clientId"))
+	if !ok {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid client ID format"})
 		return
 	}
 
-	reservations, err := c.reservationService.FindByClientID(uint(clientID))
+	reservations, err := c.reservationService.FindByClientID(clientID, ctx.GetUint("clientID"))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -186,16 +208,15 @@ func (c *ReservationController) FindByClient(ctx *gin.Context) {
 }
 
 func (c *ReservationController) FindUpcomingByClient(ctx *gin.Context) {
-	clientIDParam := ctx.Param("clientId")
-	clientID, err := strconv.Atoi(clientIDParam)
-	if err != nil || clientID <= 0 {
+	clientID, ok := parsePositiveID(ctx.Param("clientId"))
+	if !ok {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid client ID format"})
 		return
 	}
 
-	reservation, err := c.reservationService.FindUpcomingByClientID(uint(clientID))
+	reservation, err := c.reservationService.FindUpcomingByClientID(clientID, ctx.GetUint("clientID"))
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "No upcoming reservation found"})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -203,16 +224,15 @@ func (c *ReservationController) FindUpcomingByClient(ctx *gin.Context) {
 }
 
 func (c *ReservationController) FindByBeautyCenter(ctx *gin.Context) {
-	centerIDParam := ctx.Param("centerId")
-	centerID, err := strconv.Atoi(centerIDParam)
-	if err != nil || centerID <= 0 {
+	centerID, ok := parsePositiveID(ctx.Param("centerId"))
+	if !ok {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid center ID format"})
 		return
 	}
 
-	reservations, err := c.reservationService.FindByBeautyCenterID(uint(centerID))
+	reservations, err := c.reservationService.FindByBeautyCenterID(centerID, ctx.GetUint("centerID"))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -224,9 +244,8 @@ func (c *ReservationController) FindByBeautyCenter(ctx *gin.Context) {
 // ──────────────────────────────────────────────
 
 func (c *ReservationController) UpdateStatus(ctx *gin.Context) {
-	idParam := ctx.Param("id")
-	reservationID, err := strconv.Atoi(idParam)
-	if err != nil || reservationID <= 0 {
+	reservationID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
@@ -235,12 +254,12 @@ func (c *ReservationController) UpdateStatus(ctx *gin.Context) {
 		Status string `json:"status"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
-	if err := c.reservationService.UpdateStatus(uint(reservationID), req.Status); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.reservationService.UpdateStatus(reservationID, req.Status, ctx.GetUint("centerID")); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -252,9 +271,8 @@ func (c *ReservationController) UpdateStatus(ctx *gin.Context) {
 // ──────────────────────────────────────────────
 
 func (c *ReservationController) AssignPersonnel(ctx *gin.Context) {
-	idParam := ctx.Param("id")
-	reservationID, err := strconv.Atoi(idParam)
-	if err != nil || reservationID <= 0 {
+	reservationID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
@@ -263,12 +281,12 @@ func (c *ReservationController) AssignPersonnel(ctx *gin.Context) {
 		PersonnelID uint `json:"personnel_id"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
-	if err := c.reservationService.AssignPersonnel(uint(reservationID), req.PersonnelID); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.reservationService.AssignPersonnel(reservationID, req.PersonnelID, ctx.GetUint("centerID")); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -280,16 +298,20 @@ func (c *ReservationController) AssignPersonnel(ctx *gin.Context) {
 // ──────────────────────────────────────────────
 
 func (c *ReservationController) GenerateQR(ctx *gin.Context) {
-	idParam := ctx.Param("id")
-	reservationID, err := strconv.Atoi(idParam)
-	if err != nil || reservationID <= 0 {
+	reservationID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
 
-	token, err := c.reservationService.GenerateVerificationToken(uint(reservationID))
+	token, err := c.reservationService.GenerateVerificationToken(
+		reservationID,
+		ctx.GetUint("clientID"),
+		ctx.GetUint("centerID"),
+		ctx.GetString("role"),
+	)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -306,7 +328,7 @@ func (c *ReservationController) VerifyQR(ctx *gin.Context) {
 	beautyCenterID := ctx.GetUint("centerID")
 
 	if err := c.reservationService.VerifyQR(token, beautyCenterID); err != nil {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 

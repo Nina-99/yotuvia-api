@@ -76,15 +76,19 @@ func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint) ([
 	return reservations, err
 }
 
-func (r *ReservationRepositoryImpl) FindAll(page, limit int) ([]models.Reservation, int64, error) {
+func (r *ReservationRepositoryImpl) FindAll(page, limit int, centerID uint) ([]models.Reservation, int64, error) {
 	var reservations []models.Reservation
 	var total int64
 
-	r.db.Model(&models.Reservation{}).Count(&total)
+	base := r.db.Model(&models.Reservation{}).Where("beauty_center_id = ?", centerID)
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 
 	offset := (page - 1) * limit
 	err := r.db.
 		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
+		Where("beauty_center_id = ?", centerID).
 		Offset(offset).
 		Limit(limit).
 		Find(&reservations).Error
@@ -134,4 +138,21 @@ func (r *ReservationRepositoryImpl) FindByToken(token string) (*models.Reservati
 		return nil, err
 	}
 	return &reservation, nil
+}
+
+// CompleteVerification performs the atomic exactly-once update: only a
+// reservation that is still PENDING or CONFIRMED is completed, the token and
+// expiry are cleared, and the status is persisted in canonical UPPERCASE.
+func (r *ReservationRepositoryImpl) CompleteVerification(reservation *models.Reservation) (bool, error) {
+	result := r.db.Model(&models.Reservation{}).
+		Where("id = ? AND status IN ?", reservation.ID, []string{"PENDING", "CONFIRMED"}).
+		Updates(map[string]interface{}{
+			"status":             "COMPLETED",
+			"verification_token": gorm.Expr("NULL"),
+			"token_expires_at":   gorm.Expr("NULL"),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
 }

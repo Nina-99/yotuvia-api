@@ -7,16 +7,23 @@ import (
 
 type ReservationService interface {
 	Create(req request.CreateReservationRequest) error
-	Update(reservationID uint, req request.CreateReservationRequest) error
-	Delete(reservationID uint) error
-	UpdateStatus(reservationID uint, status string) error
+	// Update/Delete/FindById/GenerateVerificationToken take actor params
+	// (clientID, centerID, role claims) and enforce ownership: a client may act
+	// on its own reservation, a center on its own center's reservation.
+	Update(reservationID uint, req request.CreateReservationRequest, clientID, centerID uint, role string) error
+	Delete(reservationID uint, clientID, centerID uint, role string) error
+	UpdateStatus(reservationID uint, status string, centerID uint) error
 	Cancel(reservationID uint, clientID uint, reason string) error
-	FindAll(page, limit int) ([]models.Reservation, int64, error)
-	FindById(categoryID uint) (*models.Reservation, error)
-	FindByClientID(clientID uint) ([]models.Reservation, error)
-	FindUpcomingByClientID(clientID uint) (*models.Reservation, error)
-	FindByBeautyCenterID(beautyCenterID uint) ([]models.Reservation, error)
-	GenerateVerificationToken(reservationID uint) (string, error)
+	// FindAll is scoped to the caller's centerID claim (beauty_center only).
+	FindAll(page, limit int, centerID uint) ([]models.Reservation, int64, error)
+	FindById(reservationID uint, clientID, centerID uint, role string) (*models.Reservation, error)
+	// FindByClientID/FindUpcomingByClientID reject a path clientID that does not
+	// match the actor's clientID claim.
+	FindByClientID(clientID, actorClientID uint) ([]models.Reservation, error)
+	FindUpcomingByClientID(clientID, actorClientID uint) (*models.Reservation, error)
+	// FindByBeautyCenterID allows center staff only for their own centerID.
+	FindByBeautyCenterID(beautyCenterID, actorCenterID uint) ([]models.Reservation, error)
+	GenerateVerificationToken(reservationID uint, clientID, centerID uint, role string) (string, error)
 	VerifyQR(token string, authBeautyCenterID uint) error
-	AssignPersonnel(reservationID uint, personnelID uint) error
+	AssignPersonnel(reservationID uint, personnelID uint, centerID uint) error
 }
