@@ -36,12 +36,13 @@ func (c *ServiceController) Create(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.serviceService.Create(req); err != nil {
+	createdID, err := c.serviceService.Create(req)
+	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx.JSON(http.StatusCreated, gin.H{"message": "Created"})
+	ctx.JSON(http.StatusCreated, gin.H{"id": createdID})
 }
 
 // Update godoc
@@ -107,13 +108,49 @@ func (c *ServiceController) Delete(ctx *gin.Context) {
 
 // FindAll godoc
 // @Summary List all services
-// @Description Get a list of all services
+// @Description Get a list of all services with optional filters by beauty_center_id, category_id, and is_active
 // @Tags services
 // @Produce json
-// @Success 200 {array} response.ServiceResponse
+// @Param beauty_center_id query int false "Filter by beauty center ID"
+// @Param category_id query int false "Filter by category ID"
+// @Param is_active query bool false "Filter by active status"
+// @Param page query int false "Page number (default: 1)"
+// @Param limit query int false "Items per page (default: 20, max: 100)"
+// @Success 200 {object} response.PaginatedResponse
+// @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Router /services [get]
 func (c *ServiceController) FindAll(ctx *gin.Context) {
+	var beautyCenterID, categoryID uint
+
+	if beautyCenterIDParam := ctx.Query("beauty_center_id"); beautyCenterIDParam != "" {
+		id, err := strconv.Atoi(beautyCenterIDParam)
+		if err != nil || id <= 0 {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid beauty_center_id"})
+			return
+		}
+		beautyCenterID = uint(id)
+	}
+
+	if categoryIDParam := ctx.Query("category_id"); categoryIDParam != "" {
+		id, err := strconv.Atoi(categoryIDParam)
+		if err != nil || id <= 0 {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid category_id"})
+			return
+		}
+		categoryID = uint(id)
+	}
+
+	var isActive *bool
+	if isActiveParam := ctx.Query("is_active"); isActiveParam != "" {
+		val, err := strconv.ParseBool(isActiveParam)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid is_active, use true/false"})
+			return
+		}
+		isActive = &val
+	}
+
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
 	if page < 1 {
@@ -123,7 +160,7 @@ func (c *ServiceController) FindAll(ctx *gin.Context) {
 		limit = 20
 	}
 
-	services, total, err := c.serviceService.FindAll(page, limit)
+	services, total, err := c.serviceService.FindAll(beautyCenterID, categoryID, isActive, page, limit)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -201,4 +238,43 @@ func (c *ServiceController) FindById(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, res)
+}
+
+// Templates godoc
+// @Summary Get suggested service names by category
+// @Description Returns suggested service names for a given category, in the requested language
+// @Tags services
+// @Produce json
+// @Param category_id query int true "Category ID to get suggestions for"
+// @Param lang query string false "Language: es (default) or en"
+// @Success 200 {array} service.ServiceTemplate
+// @Failure 400 {object} map[string]string
+// @Router /services/templates [get]
+func (c *ServiceController) Templates(ctx *gin.Context) {
+	categoryIDParam := ctx.Query("category_id")
+	if categoryIDParam == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "category_id is required"})
+		return
+	}
+
+	categoryID, err := strconv.Atoi(categoryIDParam)
+	if err != nil || categoryID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid category_id"})
+		return
+	}
+
+	lang := ctx.DefaultQuery("lang", "es")
+
+	suggestions, err := c.serviceService.GetServiceTemplates(uint(categoryID), lang)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	if suggestions == nil {
+		ctx.JSON(http.StatusOK, []service.ServiceTemplate{})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, suggestions)
 }

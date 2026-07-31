@@ -23,6 +23,7 @@ func ServiceRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validat
 		services.PUT("/:id", ctrl.Update)
 		services.DELETE("/:id", ctrl.Delete)
 		services.GET("", ctrl.FindAll)
+		services.GET("/templates", ctrl.Templates)
 		services.GET("/:id", ctrl.FindById)
 	}
 }

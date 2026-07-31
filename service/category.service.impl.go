@@ -21,7 +21,6 @@ func NewCategoryServiceImpl(categoryRepository repository.CategoryRepository, va
 	}
 }
 
-// Login implements CategoryService
 func (s *CategoryServiceImpl) Create(req request.CreateCategoryRequest) error {
 	if err := s.Validate.Struct(req); err != nil {
 		return err
@@ -31,12 +30,12 @@ func (s *CategoryServiceImpl) Create(req request.CreateCategoryRequest) error {
 		BeautyCenterID: req.BeautyCenterID,
 		Name:           req.Name,
 		Description:    req.Description,
+		Icon:        req.Icon,
 	}
 
 	return s.CategoryRepository.Create(&category)
 }
 
-// Update implements CategoryService
 func (s *CategoryServiceImpl) Update(categoryID uint, req request.CreateCategoryRequest) error {
 	if err := s.Validate.Struct(req); err != nil {
 		return err
@@ -50,11 +49,11 @@ func (s *CategoryServiceImpl) Update(categoryID uint, req request.CreateCategory
 	category.BeautyCenterID = req.BeautyCenterID
 	category.Name = req.Name
 	category.Description = req.Description
+	category.Icon = req.Icon
 
 	return s.CategoryRepository.Update(category)
 }
 
-// Delete category implements CategoryService
 func (s *CategoryServiceImpl) Delete(categoryID uint) error {
 	category, err := s.CategoryRepository.FindById(categoryID)
 	if err != nil || category == nil {
@@ -64,8 +63,8 @@ func (s *CategoryServiceImpl) Delete(categoryID uint) error {
 	return s.CategoryRepository.Delete(category)
 }
 
-func (s *CategoryServiceImpl) FindAll(page, limit int) ([]models.Category, int64, error) {
-	return s.CategoryRepository.FindAll(page, limit)
+func (s *CategoryServiceImpl) FindAll(beautyCenterID uint, page, limit int) ([]models.Category, int64, error) {
+	return s.CategoryRepository.FindAll(beautyCenterID, page, limit)
 }
 
 func (s *CategoryServiceImpl) FindById(categoryID uint) (*models.Category, error) {

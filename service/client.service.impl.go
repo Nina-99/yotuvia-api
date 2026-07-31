@@ -22,7 +22,6 @@ func NewClientServiceImpl(clientRepository repository.ClientRepository, validate
 	}
 }
 
-// Update implements ClientServiceImpl
 func (s *ClientServiceImpl) Update(clientID uint, req request.UpdateClientRequest) error {
 	utils.Log.Infof("Updating client with ID: %d", clientID)
 	if err := s.Validate.Struct(req); err != nil {
@@ -84,7 +83,6 @@ func (s *ClientServiceImpl) Update(clientID uint, req request.UpdateClientReques
 	return nil
 }
 
-// Delete user implements ClientService
 func (s *ClientServiceImpl) Delete(clientID uint) error {
 	user, err := s.ClientRepository.FindById(clientID)
 	if err != nil {
@@ -93,12 +91,10 @@ func (s *ClientServiceImpl) Delete(clientID uint) error {
 	return s.ClientRepository.Delete(user)
 }
 
-// FindAll user implements ClientService
 func (s *ClientServiceImpl) FindAll(page, limit int) ([]models.Client, int64, error) {
 	return s.ClientRepository.FindAll(page, limit)
 }
 
-// FindEmail user implements ClientService
 func (s *ClientServiceImpl) FindEmail(Email string) (*models.Client, error) {
 	client, err := s.ClientRepository.FindByEmail(Email)
 	if err != nil {
@@ -107,6 +103,9 @@ func (s *ClientServiceImpl) FindEmail(Email string) (*models.Client, error) {
 	if client == nil {
 		return nil, errors.New("Client not found")
 	}
-
 	return client, nil
+}
+
+func (s *ClientServiceImpl) FindByID(clientID uint) (*models.Client, error) {
+	return s.ClientRepository.FindById(clientID)
 }

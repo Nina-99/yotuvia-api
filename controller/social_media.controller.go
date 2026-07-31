@@ -88,7 +88,7 @@ func (c *SocialMediaController) FindByID(ctx *gin.Context) {
 }
 
 func (c *SocialMediaController) FindByBeautyCenterID(ctx *gin.Context) {
-	centerIdParam := ctx.Param("center_id")
+	centerIdParam := ctx.Param("id")
 	centerId, err := strconv.Atoi(centerIdParam)
 	if err != nil || centerId <= 0 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Beauty Center ID format"})

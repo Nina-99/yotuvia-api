@@ -28,23 +28,33 @@ func DBConnection() {
 		&models.AuthAccount{},
 		&models.BeautyCenter{},
 		&models.BeautyCenterImage{},
-		&models.CenterMembership{},
 		&models.Category{},
+		&models.TokenAccount{},
+		&models.TokenTopUp{},
+		&models.TokenTransaction{},
+		&models.TokenMission{},
+		&models.TokenMissionProgress{},
+		&models.Referral{},
 		&models.Client{},
 		&models.CustomerPunchCard{},
 		&models.Favorite{},
 		&models.FeedPost{},
 		&models.LoyaltyProgram{},
-		&models.Membership{},
 		&models.Personnel{},
 		&models.PersonnelImage{},
+		&models.PersonnelService{},
 		&models.PostLike{},
 		&models.PunchHistory{},
 		&models.Reservation{},
+		&models.ReservationService{},
 		&models.Review{},
 		&models.Service{},
 		&models.SocialMedia{},
 		&models.WorkingHour{},
+		&models.Video{},
+		&models.PersonnelInvitation{},
+		&models.Notification{},
+		&models.PushDevice{},
 	}
 
 	for _, model := range list_models {
@@ -54,4 +64,6 @@ func DBConnection() {
 	}
 
 	DB = db
+
+	SeedDefaultMissions()
 }

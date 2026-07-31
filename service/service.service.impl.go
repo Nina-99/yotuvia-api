@@ -6,6 +6,7 @@ import (
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yottu-api/utils"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -27,15 +28,15 @@ func NewServiceServiceImpl(
 	}
 }
 
-func (s *ServiceServiceImpl) Create(req request.CreateServiceRequest) error {
+func (s *ServiceServiceImpl) Create(req request.CreateServiceRequest) (uint, error) {
 	if err := s.Validate.Struct(req); err != nil {
-		return err
+		return 0, err
 	}
 
 	// Validate category existence
 	category, err := s.CategoryRepository.FindById(req.CategoryID)
 	if err != nil || category == nil {
-		return errors.New("category not found")
+		return 0, errors.New("category not found")
 	}
 
 	service := models.Service{
@@ -49,7 +50,11 @@ func (s *ServiceServiceImpl) Create(req request.CreateServiceRequest) error {
 		IsActive:       req.IsActive,
 	}
 
-	return s.ServiceRepository.Create(&service)
+	if err := s.ServiceRepository.Create(&service); err != nil {
+		return 0, err
+	}
+
+	return service.ID, nil
 }
 
 func (s *ServiceServiceImpl) Update(serviceID uint, req request.UpdateServiceRequest) error {
@@ -104,10 +109,31 @@ func (s *ServiceServiceImpl) Delete(serviceID uint) error {
 	return s.ServiceRepository.Delete(service)
 }
 
-func (s *ServiceServiceImpl) FindAll(page, limit int) ([]models.Service, int64, error) {
-	return s.ServiceRepository.FindAll(page, limit)
+func (s *ServiceServiceImpl) FindAll(beautyCenterID uint, categoryID uint, isActive *bool, page, limit int) ([]models.Service, int64, error) {
+	return s.ServiceRepository.FindAll(beautyCenterID, categoryID, isActive, page, limit)
 }
 
 func (s *ServiceServiceImpl) FindById(serviceID uint) (*models.Service, error) {
 	return s.ServiceRepository.FindById(serviceID)
+}
+
+func (s *ServiceServiceImpl) GetServiceTemplates(categoryID uint, lang string) ([]ServiceTemplate, error) {
+	category, err := s.CategoryRepository.FindById(categoryID)
+	if err != nil || category == nil {
+		return nil, errors.New("category not found")
+	}
+
+	suggestions := utils.GetServiceTemplates(category.Name, lang)
+	if suggestions == nil {
+		return nil, nil
+	}
+
+	result := make([]ServiceTemplate, len(suggestions))
+	for i, t := range suggestions {
+		result[i] = ServiceTemplate{
+			Name:        t.Name,
+			Description: t.Description,
+		}
+	}
+	return result, nil
 }

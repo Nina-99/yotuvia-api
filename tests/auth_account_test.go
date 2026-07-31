@@ -61,7 +61,7 @@ func TestAuthAccountRepository(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, account)
 		assert.Equal(t, accountID, account.ID)
-		assert.Equal(t, uint(1), account.ClientID)
+		assert.Equal(t, uint(1), *account.ClientID)
 		assert.NotNil(t, account.Client)
 		assert.Equal(t, "test@user.com", account.Client.Email)
 	})

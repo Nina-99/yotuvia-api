@@ -94,3 +94,54 @@ func (c *ClientController) GetUserByEmail(ctx *gin.Context) {
 	res = append(res, response.ClientResponse{ID: client.ID, FirstName: client.FirstName, LastName: client.LastName, Username: client.Username, Email: client.Email})
 	ctx.JSON(http.StatusOK, res)
 }
+
+func (c *ClientController) FindMe(ctx *gin.Context) {
+	clientID := ctx.GetUint("clientID")
+	if clientID == 0 {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "client ID not found in token"})
+		return
+	}
+
+	client, err := c.clientService.FindByID(clientID)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Client not found"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response.ClientResponse{
+		ID:        client.ID,
+		FirstName: client.FirstName,
+		LastName:  client.LastName,
+		Username:  client.Username,
+		Email:     client.Email,
+		Phone:     client.Phone,
+		AvatarURL: client.AvatarURL,
+		IsActive:  client.IsActive,
+	})
+}
+
+func (c *ClientController) FindByID(ctx *gin.Context) {
+	idParam := ctx.Param("id")
+	clientID, err := strconv.Atoi(idParam)
+	if err != nil || clientID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Format of ID invalid"})
+		return
+	}
+
+	client, err := c.clientService.FindByID(uint(clientID))
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Client not found"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response.ClientResponse{
+		ID:        client.ID,
+		FirstName: client.FirstName,
+		LastName:  client.LastName,
+		Username:  client.Username,
+		Email:     client.Email,
+		Phone:     client.Phone,
+		AvatarURL: client.AvatarURL,
+		IsActive:  client.IsActive,
+	})
+}

@@ -21,6 +21,7 @@ vendor/
 
 # Local data directories
 postgres_data/
+uploads/
 
 # OS generated files
 .DS_Store

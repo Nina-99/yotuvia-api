@@ -23,6 +23,27 @@ func (s *ReviewServiceImpl) Create(clientID uint, req request.CreateReviewReques
 	if err := s.Validate.Struct(req); err != nil {
 		return err
 	}
+
+	// Strict verification: only clients with a COMPLETED reservation can review
+	hasCompleted, err := s.repo.HasCompletedReservation(clientID, req.BeautyCenterID)
+	if err != nil {
+		return errors.New("error verifying reservation")
+	}
+	if !hasCompleted {
+		return errors.New("debes completar un turno antes de dejar una reseña")
+	}
+
+	// Prevent duplicate reviews
+	existing, err := s.repo.FindByClientID(clientID)
+	if err != nil {
+		return err
+	}
+	for _, r := range existing {
+		if r.BeautyCenterID == req.BeautyCenterID {
+			return errors.New("ya dejaste una reseña para este centro")
+		}
+	}
+
 	review := &models.Review{
 		ClientID:       clientID,
 		BeautyCenterID: req.BeautyCenterID,
@@ -30,6 +51,25 @@ func (s *ReviewServiceImpl) Create(clientID uint, req request.CreateReviewReques
 		Comment:        req.Comment,
 	}
 	return s.repo.Create(review)
+}
+
+func (s *ReviewServiceImpl) CanReview(clientID, beautyCenterID uint) (bool, error) {
+	// Check completed reservation
+	hasCompleted, err := s.repo.HasCompletedReservation(clientID, beautyCenterID)
+	if err != nil || !hasCompleted {
+		return false, err
+	}
+	// Check no existing review
+	existing, err := s.repo.FindByClientID(clientID)
+	if err != nil {
+		return false, err
+	}
+	for _, r := range existing {
+		if r.BeautyCenterID == beautyCenterID {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (s *ReviewServiceImpl) Update(clientID uint, reviewID uint, req request.UpdateReviewRequest) error {

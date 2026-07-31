@@ -23,12 +23,13 @@ type CustomerPunchCard struct {
 	LoyaltyProgram   LoyaltyProgram `gorm:"foreignKey:LoyaltyProgramID" json:"loyalty_program"`
 
 	CurrentSteps int    `gorm:"not null;default:0" json:"current_steps"`
-	Status       string `gorm:"size:20;default:'active'" json:"status"` // "active", "completed", "claimed"
+	Status       string `gorm:"size:20;default:'active'" json:"status"`
 }
 
 type PunchHistory struct {
+	gorm.Model
 	CustomerPunchCardID uint              `gorm:"not null" json:"customer_punch_card_id"`
-	CustomerPunchCard   CustomerPunchCard `gorm:"foreignKey" json:"-"`
+	CustomerPunchCard   CustomerPunchCard `json:"-"`
 	ReservationID       uint              `gorm:"not null" json:"reservation_id"`
-	Reservation         Reservation       `gorm:"foreignKey" json:"-"`
+	Reservation         Reservation       `json:"-"`
 }

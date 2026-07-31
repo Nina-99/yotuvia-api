@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
@@ -18,20 +19,33 @@ func NewReservationController(service service.ReservationService) *ReservationCo
 	return &ReservationController{reservationService: service}
 }
 
+// ──────────────────────────────────────────────
+//  CREATE
+// ──────────────────────────────────────────────
+
 func (c *ReservationController) Create(ctx *gin.Context) {
+	clientID := ctx.GetUint("clientID")
+
 	var req request.CreateReservationRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	req.ClientID = clientID
+
 	if err := c.reservationService.Create(req); err != nil {
+		log.Printf("Error creating reservation: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx.JSON(http.StatusCreated, gin.H{"message": "Created"})
+	ctx.JSON(http.StatusCreated, gin.H{"message": "Reservation created successfully"})
 }
+
+// ──────────────────────────────────────────────
+//  UPDATE
+// ──────────────────────────────────────────────
 
 func (c *ReservationController) Update(ctx *gin.Context) {
 	idParam := ctx.Param("id")
@@ -40,20 +54,58 @@ func (c *ReservationController) Update(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
-	var req request.CreateReservationRequest
 
+	var req request.CreateReservationRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	req.ClientID = ctx.GetUint("clientID")
 
 	if err := c.reservationService.Update(uint(reservationID), req); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Update"})
+	ctx.JSON(http.StatusOK, gin.H{"message": "Reservation updated successfully"})
 }
+
+// ──────────────────────────────────────────────
+//  CANCEL — Client cancels own reservation
+// ──────────────────────────────────────────────
+
+func (c *ReservationController) Cancel(ctx *gin.Context) {
+	clientID := ctx.GetUint("clientID")
+	if clientID == 0 {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "client ID not found in token"})
+		return
+	}
+
+	idParam := ctx.Param("id")
+	reservationID, err := strconv.Atoi(idParam)
+	if err != nil || reservationID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	var req request.CancelReservationRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := c.reservationService.Cancel(uint(reservationID), clientID, req.Reason); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Reservation cancelled successfully"})
+}
+
+// ──────────────────────────────────────────────
+//  DELETE
+// ──────────────────────────────────────────────
 
 func (c *ReservationController) Delete(ctx *gin.Context) {
 	idParam := ctx.Param("id")
@@ -67,8 +119,13 @@ func (c *ReservationController) Delete(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"message": "Deleted"})
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Reservation deleted successfully"})
 }
+
+// ──────────────────────────────────────────────
+//  FIND
+// ──────────────────────────────────────────────
 
 func (c *ReservationController) FindAll(ctx *gin.Context) {
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
@@ -86,12 +143,8 @@ func (c *ReservationController) FindAll(ctx *gin.Context) {
 		return
 	}
 
-	var res []response.ReservationResponse
-	for _, reservation := range reservations {
-		res = append(res, response.ReservationResponse{ID: reservation.ID, BeautyCenterID: reservation.BeautyCenterID, ClientID: reservation.ClientID, Date: reservation.Date, StartTime: reservation.StartTime, EndTime: reservation.EndTime, Status: reservation.Status})
-	}
 	ctx.JSON(http.StatusOK, response.PaginatedResponse{
-		Data:  res,
+		Data:  reservations,
 		Total: total,
 		Page:  page,
 		Limit: limit,
@@ -106,31 +159,131 @@ func (c *ReservationController) FindById(ctx *gin.Context) {
 		return
 	}
 
-	s, err := c.reservationService.FindById(uint(reservationID))
-	if err != nil || s == nil {
+	reservation, err := c.reservationService.FindById(uint(reservationID))
+	if err != nil {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Reservation not found"})
 		return
 	}
 
-	res := response.ReservationResponse{
-		ID:             s.ID,
-		BeautyCenterID: s.BeautyCenterID,
-		ClientID:       s.ClientID,
-		Date:           s.Date,
-		StartTime:      s.StartTime,
-		EndTime:        s.EndTime,
-		Status:         s.Status,
-	}
-
-	ctx.JSON(http.StatusOK, res)
+	ctx.JSON(http.StatusOK, reservation)
 }
 
-// GenrateQR
-func (c *ReservationController) GenrateQR(ctx *gin.Context) {
+func (c *ReservationController) FindByClient(ctx *gin.Context) {
+	clientIDParam := ctx.Param("clientId")
+	clientID, err := strconv.Atoi(clientIDParam)
+	if err != nil || clientID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid client ID format"})
+		return
+	}
+
+	reservations, err := c.reservationService.FindByClientID(uint(clientID))
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, reservations)
+}
+
+func (c *ReservationController) FindUpcomingByClient(ctx *gin.Context) {
+	clientIDParam := ctx.Param("clientId")
+	clientID, err := strconv.Atoi(clientIDParam)
+	if err != nil || clientID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid client ID format"})
+		return
+	}
+
+	reservation, err := c.reservationService.FindUpcomingByClientID(uint(clientID))
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "No upcoming reservation found"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, reservation)
+}
+
+func (c *ReservationController) FindByBeautyCenter(ctx *gin.Context) {
+	centerIDParam := ctx.Param("centerId")
+	centerID, err := strconv.Atoi(centerIDParam)
+	if err != nil || centerID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid center ID format"})
+		return
+	}
+
+	reservations, err := c.reservationService.FindByBeautyCenterID(uint(centerID))
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, reservations)
+}
+
+// ──────────────────────────────────────────────
+//  STATUS — Beauty center updates status
+// ──────────────────────────────────────────────
+
+func (c *ReservationController) UpdateStatus(ctx *gin.Context) {
 	idParam := ctx.Param("id")
 	reservationID, err := strconv.Atoi(idParam)
 	if err != nil || reservationID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := c.reservationService.UpdateStatus(uint(reservationID), req.Status); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Status updated successfully"})
+}
+
+// ──────────────────────────────────────────────
+//  ASSIGN PERSONNEL
+// ──────────────────────────────────────────────
+
+func (c *ReservationController) AssignPersonnel(ctx *gin.Context) {
+	idParam := ctx.Param("id")
+	reservationID, err := strconv.Atoi(idParam)
+	if err != nil || reservationID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	var req struct {
+		PersonnelID uint `json:"personnel_id"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := c.reservationService.AssignPersonnel(uint(reservationID), req.PersonnelID); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Personnel assigned successfully"})
+}
+
+// ──────────────────────────────────────────────
+//  QR
+// ──────────────────────────────────────────────
+
+func (c *ReservationController) GenerateQR(ctx *gin.Context) {
+	idParam := ctx.Param("id")
+	reservationID, err := strconv.Atoi(idParam)
+	if err != nil || reservationID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
 
@@ -140,32 +293,22 @@ func (c *ReservationController) GenrateQR(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"verification_token": token})
+	ctx.JSON(http.StatusOK, gin.H{"token": token})
 }
 
-type VerifyQRRequest struct {
-	Token string `json:"token" validate:"required"`
-}
-
-// VerifyQR, retrieve of the salon (or personnel) performing the action
 func (c *ReservationController) VerifyQR(ctx *gin.Context) {
-	var req VerifyQRRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	token := ctx.Query("token")
+	if token == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "token query param is required"})
 		return
 	}
 
-	authBeautyCenterID, exists := ctx.Get("beautyCenterID")
-	if !exists {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing salon identify"})
+	beautyCenterID := ctx.GetUint("centerID")
+
+	if err := c.reservationService.VerifyQR(token, beautyCenterID); err != nil {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
-	err := c.reservationService.VerifyQR(req.Token, authBeautyCenterID.(uint))
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{"message": "Reservation verified and loyalty ounch added successfully"})
+	ctx.JSON(http.StatusOK, gin.H{"message": "Reservation verified successfully"})
 }

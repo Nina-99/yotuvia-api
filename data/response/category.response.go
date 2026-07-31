@@ -5,4 +5,5 @@ type CategoryResponse struct {
 	BeautyCenterID uint   `json:"beauty_center_id"`
 	Name           string `json:"name"`
 	Description    string `json:"description"`
+	Icon           string `json:"icon"`
 }

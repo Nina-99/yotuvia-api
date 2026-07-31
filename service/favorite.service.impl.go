@@ -62,6 +62,9 @@ func (s *FavoriteServiceImpl) FindByClientID(clientID uint) ([]response.Favorite
 		}
 		r.BeautyCenter.ID = f.BeautyCenter.ID
 		r.BeautyCenter.Name = f.BeautyCenter.Name
+		r.BeautyCenter.Address = f.BeautyCenter.Address
+		r.BeautyCenter.Phone = f.BeautyCenter.Phone
+		r.BeautyCenter.Description = f.BeautyCenter.Description
 		res = append(res, r)
 	}
 	return res, nil
