@@ -1,9 +1,9 @@
 package repository
 
 import (
-	"time"
 	"github.com/Nina-99/yottu-api/models"
 	"gorm.io/gorm"
+	"time"
 )
 
 type NotificationRepositoryImpl struct {
@@ -32,6 +32,16 @@ func (r *NotificationRepositoryImpl) FindUnreadByClientID(clientID uint) ([]mode
 		Order("created_at DESC").
 		Find(&notifications).Error
 	return notifications, err
+}
+
+// FindByID implements NotificationRepository — used by the service to verify
+// notification ownership before MarkAsRead.
+func (r *NotificationRepositoryImpl) FindByID(notificationID uint) (*models.Notification, error) {
+	var notif models.Notification
+	if err := r.db.First(&notif, notificationID).Error; err != nil {
+		return nil, err
+	}
+	return &notif, nil
 }
 
 func (r *NotificationRepositoryImpl) MarkAsRead(notificationID uint) error {

@@ -3,12 +3,15 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
+	"gorm.io/gorm"
 )
 
 type NotificationServiceImpl struct {
@@ -41,23 +44,47 @@ func (s *NotificationServiceImpl) Create(clientID uint, notifType, title, messag
 	return s.NotificationRepo.Create(notif)
 }
 
-func (s *NotificationServiceImpl) GetByClientID(clientID uint) ([]models.Notification, error) {
+func (s *NotificationServiceImpl) GetByClientID(clientID, actorClientID uint) ([]models.Notification, error) {
+	// Owner-only: the path clientId must match the actor's clientID claim.
+	if actorClientID != clientID {
+		return nil, apperrors.ErrForbidden
+	}
 	return s.NotificationRepo.FindByClientID(clientID)
 }
 
-func (s *NotificationServiceImpl) GetUnreadByClientID(clientID uint) ([]models.Notification, error) {
+func (s *NotificationServiceImpl) GetUnreadByClientID(clientID, actorClientID uint) ([]models.Notification, error) {
+	if actorClientID != clientID {
+		return nil, apperrors.ErrForbidden
+	}
 	return s.NotificationRepo.FindUnreadByClientID(clientID)
 }
 
-func (s *NotificationServiceImpl) MarkAsRead(notificationID uint) error {
+func (s *NotificationServiceImpl) MarkAsRead(notificationID, actorClientID uint) error {
+	notif, err := s.NotificationRepo.FindByID(notificationID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperrors.ErrNotFound
+		}
+		return err
+	}
+	// Owner-only: the notification must belong to the actor's client.
+	if notif.ClientID != actorClientID {
+		return apperrors.ErrForbidden
+	}
 	return s.NotificationRepo.MarkAsRead(notificationID)
 }
 
-func (s *NotificationServiceImpl) MarkAllAsRead(clientID uint) error {
+func (s *NotificationServiceImpl) MarkAllAsRead(clientID, actorClientID uint) error {
+	if actorClientID != clientID {
+		return apperrors.ErrForbidden
+	}
 	return s.NotificationRepo.MarkAllAsRead(clientID)
 }
 
-func (s *NotificationServiceImpl) CountUnread(clientID uint) (int64, error) {
+func (s *NotificationServiceImpl) CountUnread(clientID, actorClientID uint) (int64, error) {
+	if actorClientID != clientID {
+		return 0, apperrors.ErrForbidden
+	}
 	return s.NotificationRepo.CountUnread(clientID)
 }
 

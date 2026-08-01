@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
@@ -19,6 +20,14 @@ func NewNotificationController(service service.NotificationService) *Notificatio
 	return &NotificationController{notificationService: service}
 }
 
+// writeError maps any service error through apperrors.MapToHTTP so clients get
+// the canonical status + stable message (403 for ownership, 404 for missing,
+// etc.) and internal details never leak.
+func (c *NotificationController) writeError(ctx *gin.Context, err error) {
+	status, msg := apperrors.MapToHTTP(err)
+	ctx.JSON(status, gin.H{"error": msg})
+}
+
 // GET /notifications/client/:clientId
 func (c *NotificationController) GetByClient(ctx *gin.Context) {
 	clientIDStr := ctx.Param("clientId")
@@ -28,9 +37,9 @@ func (c *NotificationController) GetByClient(ctx *gin.Context) {
 		return
 	}
 
-	notifications, err := c.notificationService.GetByClientID(uint(clientID))
+	notifications, err := c.notificationService.GetByClientID(uint(clientID), ctx.GetUint("clientID"))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -46,9 +55,9 @@ func (c *NotificationController) GetUnreadByClient(ctx *gin.Context) {
 		return
 	}
 
-	notifications, err := c.notificationService.GetUnreadByClientID(uint(clientID))
+	notifications, err := c.notificationService.GetUnreadByClientID(uint(clientID), ctx.GetUint("clientID"))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -64,9 +73,9 @@ func (c *NotificationController) CountUnread(ctx *gin.Context) {
 		return
 	}
 
-	count, err := c.notificationService.CountUnread(uint(clientID))
+	count, err := c.notificationService.CountUnread(uint(clientID), ctx.GetUint("clientID"))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -82,8 +91,8 @@ func (c *NotificationController) MarkAsRead(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.notificationService.MarkAsRead(uint(notifID)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.notificationService.MarkAsRead(uint(notifID), ctx.GetUint("clientID")); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -99,8 +108,8 @@ func (c *NotificationController) MarkAllAsRead(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.notificationService.MarkAllAsRead(uint(clientID)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.notificationService.MarkAllAsRead(uint(clientID), ctx.GetUint("clientID")); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -115,14 +124,14 @@ func (c *NotificationController) RegisterPushDevice(ctx *gin.Context) {
 		return
 	}
 
-	clientID, exists := ctx.Get("clientID")
-	if !exists {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	clientID := ctx.GetUint("clientID")
+	if clientID == 0 {
+		c.writeError(ctx, apperrors.ErrUnauthorized)
 		return
 	}
 
-	if err := c.notificationService.RegisterPushDevice(clientID.(uint), req.PushToken, req.Platform); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.notificationService.RegisterPushDevice(clientID, req.PushToken, req.Platform); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 
