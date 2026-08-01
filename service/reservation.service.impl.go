@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
@@ -15,14 +17,14 @@ import (
 )
 
 type ReservationServiceImpl struct {
-	PersonnelRepository    repository.PersonnelRepository
-	ReservationRepository  repository.ReservationRepository
-	ServiceRepository      repository.ServiceRepository
-	NotificationService    NotificationService
-	LoyaltyService         LoyaltyService
-	TokenAccountService    TokenAccountService
-	MissionService         TokenMissionService
-	Validate               *validator.Validate
+	PersonnelRepository   repository.PersonnelRepository
+	ReservationRepository repository.ReservationRepository
+	ServiceRepository     repository.ServiceRepository
+	NotificationService   NotificationService
+	LoyaltyService        LoyaltyService
+	TokenAccountService   TokenAccountService
+	MissionService        TokenMissionService
+	Validate              *validator.Validate
 }
 
 func NewReservationServiceImpl(
@@ -45,6 +47,28 @@ func NewReservationServiceImpl(
 		MissionService:        missionService,
 		Validate:              validate,
 	}
+}
+
+// ownsReservation enforces per-role ownership on the /:id family: a client may
+// access only its own reservations (clientID claim == ClientID), while a center
+// (or its staff) only its own center's (centerID claim == BeautyCenterID). The
+// "owner client OR owner center" matrix rule is applied across roles, not
+// within one actor — a client token can never ride a centerID claim.
+func ownsReservation(r *models.Reservation, clientID, centerID uint, role string) bool {
+	switch role {
+	case "client":
+		return clientID == r.ClientID
+	case "beauty_center", "personnel":
+		return centerID != 0 && centerID == r.BeautyCenterID
+	default:
+		return clientID == r.ClientID || (centerID != 0 && centerID == r.BeautyCenterID)
+	}
+}
+
+// normalizeStatus canonicalizes status strings to UPPERCASE so legacy lowercase
+// rows (e.g. "completed") compare and persist correctly.
+func normalizeStatus(status string) string {
+	return strings.ToUpper(status)
 }
 
 // ──────────────────────────────────────────────
@@ -131,33 +155,37 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 //  UPDATE
 // ──────────────────────────────────────────────
 
-func (s *ReservationServiceImpl) Update(reservationID uint, req request.CreateReservationRequest) error {
+func (s *ReservationServiceImpl) Update(reservationID uint, req request.CreateReservationRequest, clientID, centerID uint, role string) error {
+	// Ownership at entry: fetch the resource, then prove the caller may touch it.
+	reservation, err := s.ReservationRepository.FindById(reservationID)
+	if err != nil || reservation == nil {
+		return apperrors.ErrNotFound
+	}
+	if !ownsReservation(reservation, clientID, centerID, role) {
+		return apperrors.ErrForbidden
+	}
+
 	if err := s.Validate.Struct(req); err != nil {
-		return err
+		return apperrors.ErrValidation
 	}
 
 	// Parse date string into time.Time
 	parsedDate, err := time.Parse("2006-01-02", req.Date)
 	if err != nil {
-		return errors.New("invalid date format, use YYYY-MM-DD")
-	}
-
-	reservation, err := s.ReservationRepository.FindById(reservationID)
-	if err != nil || reservation == nil {
-		return errors.New("reservation not found")
+		return apperrors.ErrBadRequest
 	}
 
 	// Fetch services and recalculate
 	services, err := s.ServiceRepository.FindByIDs(req.ServiceIDs)
 	if err != nil || len(services) != len(req.ServiceIDs) {
-		return errors.New("one or more services not found")
+		return apperrors.ErrBadRequest
 	}
 
 	var totalPrice float64
 	var totalDuration int
 	for _, svc := range services {
 		if svc.BeautyCenterID != req.BeautyCenterID {
-			return errors.New("all services must belong to the same beauty center")
+			return apperrors.ErrBadRequest
 		}
 		totalPrice += svc.Price
 		totalDuration += svc.Duration
@@ -173,12 +201,14 @@ func (s *ReservationServiceImpl) Update(reservationID uint, req request.CreateRe
 			return err
 		}
 		if overlap {
-			return errors.New("overlapping reservation exists")
+			return apperrors.ErrConflict
 		}
 	}
 
+	// ClientID is never rewritten from the request: ownership was already proven
+	// against the actor's claim, and the body may carry an arbitrary client_id
+	// that must not reassign the reservation to someone else.
 	reservation.BeautyCenterID = req.BeautyCenterID
-	reservation.ClientID = req.ClientID
 	reservation.PersonnelID = req.PersonnelID
 	reservation.Date = parsedDate
 	reservation.StartTime = req.StartTime
@@ -206,25 +236,30 @@ func (s *ReservationServiceImpl) Update(reservationID uint, req request.CreateRe
 //  ASSIGN PERSONNEL
 // ──────────────────────────────────────────────
 
-func (s *ReservationServiceImpl) AssignPersonnel(reservationID uint, personnelID uint) error {
+func (s *ReservationServiceImpl) AssignPersonnel(reservationID uint, personnelID uint, centerID uint) error {
 	// Find the reservation
 	reservation, err := s.ReservationRepository.FindById(reservationID)
 	if err != nil || reservation == nil {
-		return errors.New("reservation not found")
+		return apperrors.ErrNotFound
+	}
+
+	// Admin-only: the acting center must own the reservation.
+	if centerID != reservation.BeautyCenterID {
+		return apperrors.ErrForbidden
 	}
 
 	// Cannot reassign completed or cancelled
 	if reservation.Status == "COMPLETED" || reservation.Status == "CANCELLED" {
-		return errors.New("cannot reassign personnel for " + reservation.Status + " reservations")
+		return apperrors.ErrConflict
 	}
 
 	// Verify personnel exists and belongs to the same beauty center
 	personnel, err := s.PersonnelRepository.FindByID(personnelID)
 	if err != nil || personnel == nil {
-		return errors.New("personnel not found")
+		return apperrors.ErrNotFound
 	}
 	if personnel.BeautyCenterID != reservation.BeautyCenterID {
-		return errors.New("personnel does not belong to the same beauty center")
+		return apperrors.ErrBadRequest
 	}
 
 	// Check for overlaps with the new personnel
@@ -240,7 +275,7 @@ func (s *ReservationServiceImpl) AssignPersonnel(reservationID uint, personnelID
 		return err
 	}
 	if overlap {
-		return errors.New("the new personnel has an overlapping reservation at the same time")
+		return apperrors.ErrConflict
 	}
 
 	// Update personnel directly
@@ -270,10 +305,15 @@ func (s *ReservationServiceImpl) AssignPersonnel(reservationID uint, personnelID
 //  UPDATE STATUS
 // ──────────────────────────────────────────────
 
-func (s *ReservationServiceImpl) UpdateStatus(reservationID uint, status string) error {
+func (s *ReservationServiceImpl) UpdateStatus(reservationID uint, status string, centerID uint) error {
 	reservation, err := s.ReservationRepository.FindById(reservationID)
 	if err != nil || reservation == nil {
-		return errors.New("reservation not found")
+		return apperrors.ErrNotFound
+	}
+
+	// Admin-only: the acting center must own the reservation.
+	if centerID != reservation.BeautyCenterID {
+		return apperrors.ErrForbidden
 	}
 
 	// State machine: valid transitions
@@ -288,10 +328,10 @@ func (s *ReservationServiceImpl) UpdateStatus(reservationID uint, status string)
 
 	allowed, ok := validTransitions[reservation.Status]
 	if !ok {
-		return errors.New("reservation is already " + reservation.Status + " and cannot be changed")
+		return apperrors.ErrConflict
 	}
 	if !allowed[status] {
-		return errors.New("cannot transition from " + reservation.Status + " to " + status)
+		return apperrors.ErrConflict
 	}
 
 	reservation.Status = status
@@ -305,15 +345,15 @@ func (s *ReservationServiceImpl) UpdateStatus(reservationID uint, status string)
 func (s *ReservationServiceImpl) Cancel(reservationID uint, clientID uint, reason string) error {
 	reservation, err := s.ReservationRepository.FindById(reservationID)
 	if err != nil || reservation == nil {
-		return errors.New("reservation not found")
+		return apperrors.ErrNotFound
 	}
 
 	if reservation.ClientID != clientID {
-		return errors.New("you can only cancel your own reservations")
+		return apperrors.ErrForbidden
 	}
 
 	if reservation.Status != "PENDING" && reservation.Status != "CONFIRMED" {
-		return errors.New("only PENDING or CONFIRMED reservations can be cancelled")
+		return apperrors.ErrConflict
 	}
 
 	reservation.Status = "CANCELLED"
@@ -328,10 +368,13 @@ func (s *ReservationServiceImpl) Cancel(reservationID uint, clientID uint, reaso
 //  DELETE
 // ──────────────────────────────────────────────
 
-func (s *ReservationServiceImpl) Delete(reservationID uint) error {
+func (s *ReservationServiceImpl) Delete(reservationID uint, clientID, centerID uint, role string) error {
 	reservation, err := s.ReservationRepository.FindById(reservationID)
 	if err != nil || reservation == nil {
-		return errors.New("reservation not found")
+		return apperrors.ErrNotFound
+	}
+	if !ownsReservation(reservation, clientID, centerID, role) {
+		return apperrors.ErrForbidden
 	}
 	return s.ReservationRepository.Delete(reservation)
 }
@@ -340,23 +383,45 @@ func (s *ReservationServiceImpl) Delete(reservationID uint) error {
 //  FIND
 // ──────────────────────────────────────────────
 
-func (s *ReservationServiceImpl) FindAll(page, limit int) ([]models.Reservation, int64, error) {
-	return s.ReservationRepository.FindAll(page, limit)
+func (s *ReservationServiceImpl) FindAll(page, limit int, centerID uint) ([]models.Reservation, int64, error) {
+	return s.ReservationRepository.FindAll(page, limit, centerID)
 }
 
-func (s *ReservationServiceImpl) FindById(reservationID uint) (*models.Reservation, error) {
-	return s.ReservationRepository.FindById(reservationID)
+func (s *ReservationServiceImpl) FindById(reservationID uint, clientID, centerID uint, role string) (*models.Reservation, error) {
+	reservation, err := s.ReservationRepository.FindById(reservationID)
+	if err != nil || reservation == nil {
+		return nil, apperrors.ErrNotFound
+	}
+	if !ownsReservation(reservation, clientID, centerID, role) {
+		return nil, apperrors.ErrForbidden
+	}
+	return reservation, nil
 }
 
-func (s *ReservationServiceImpl) FindByClientID(clientID uint) ([]models.Reservation, error) {
+func (s *ReservationServiceImpl) FindByClientID(clientID, actorClientID uint) ([]models.Reservation, error) {
+	if actorClientID != clientID {
+		return nil, apperrors.ErrForbidden
+	}
 	return s.ReservationRepository.FindByClientID(clientID)
 }
 
-func (s *ReservationServiceImpl) FindUpcomingByClientID(clientID uint) (*models.Reservation, error) {
-	return s.ReservationRepository.FindUpcomingByClientID(clientID)
+func (s *ReservationServiceImpl) FindUpcomingByClientID(clientID, actorClientID uint) (*models.Reservation, error) {
+	if actorClientID != clientID {
+		return nil, apperrors.ErrForbidden
+	}
+	reservation, err := s.ReservationRepository.FindUpcomingByClientID(clientID)
+	if err != nil {
+		// No upcoming reservation (or a lookup failure) is surfaced as NotFound
+		// to keep the endpoint's 404 contract stable.
+		return nil, apperrors.ErrNotFound
+	}
+	return reservation, nil
 }
 
-func (s *ReservationServiceImpl) FindByBeautyCenterID(beautyCenterID uint) ([]models.Reservation, error) {
+func (s *ReservationServiceImpl) FindByBeautyCenterID(beautyCenterID, actorCenterID uint) ([]models.Reservation, error) {
+	if actorCenterID != beautyCenterID {
+		return nil, apperrors.ErrForbidden
+	}
 	return s.ReservationRepository.FindByBeautyCenterId(beautyCenterID)
 }
 
@@ -374,14 +439,21 @@ func generateSecureToken() string {
 	return string(result)
 }
 
-func (s *ReservationServiceImpl) GenerateVerificationToken(reservationID uint) (string, error) {
+func (s *ReservationServiceImpl) GenerateVerificationToken(reservationID uint, clientID, centerID uint, role string) (string, error) {
 	reservation, err := s.ReservationRepository.FindById(reservationID)
 	if err != nil || reservation == nil {
-		return "", errors.New("reservation not found")
+		return "", apperrors.ErrNotFound
 	}
 
-	if reservation.Status == "completed" || reservation.Status == "cancelled" {
-		return "", errors.New("cannot generate QR for a completed or cancelled reservation")
+	// Owner client or owner center only.
+	if !ownsReservation(reservation, clientID, centerID, role) {
+		return "", apperrors.ErrForbidden
+	}
+
+	// Terminal states must never issue a token. normalizeStatus covers legacy
+	// lowercase rows written by the old code.
+	if status := normalizeStatus(reservation.Status); status == "COMPLETED" || status == "CANCELLED" {
+		return "", apperrors.ErrConflict
 	}
 
 	var token string
@@ -408,38 +480,53 @@ func (s *ReservationServiceImpl) GenerateVerificationToken(reservationID uint) (
 func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint) error {
 	reservation, err := s.ReservationRepository.FindByToken(token)
 	if err != nil || reservation == nil {
-		return errors.New("invalid or expired QR code")
+		return apperrors.ErrNotFound
 	}
 
 	if reservation.BeautyCenterID != authBeautyCenterID {
 		utils.Log.Warnf("[SECURITY ALERT] Intrusion attempt! Salon ID %d tried to verify QR for Reservation ID %d (owned by Salon %d)", authBeautyCenterID, reservation.ID, reservation.BeautyCenterID)
-		return errors.New("unauthorized: this reservation does not belong to your beauty center")
+		return apperrors.ErrForbidden
 	}
 
 	if reservation.TokenExpiresAt != nil && time.Now().After(*reservation.TokenExpiresAt) {
-		return errors.New("QR code has expired. Please refresh the app to generate a new one")
+		return apperrors.ErrBadRequest
 	}
 
-	if reservation.Status == "completed" {
-		return errors.New("reservation is already completed")
+	// Idempotency: a COMPLETED reservation (including legacy lowercase rows) is
+	// a no-op success — never a second charge, punch, or mission trigger. A
+	// CANCELLED reservation is terminal and must not complete.
+	switch normalizeStatus(reservation.Status) {
+	case "COMPLETED":
+		return nil
+	case "CANCELLED":
+		return apperrors.ErrConflict
 	}
 
 	// ── Token consumption check ──
 	charge := reservation.TotalPrice * 0.035
 	canConsume, err := s.TokenAccountService.CanConsume(authBeautyCenterID, charge)
 	if err != nil {
-		return errors.New("failed to check token balance: " + err.Error())
+		return err
 	}
 	if !canConsume {
-		return errors.New("insufficient YOTTU balance. Please top up to complete this reservation")
+		return apperrors.ErrInsufficientBalance
 	}
 
-	reservation.Status = "completed"
+	// ── Exactly-once persistence ──
+	// The conditional update only completes reservations still in a non-terminal
+	// state; a concurrent scan that already completed this one hits 0 rows and
+	// becomes a no-op success. Status is persisted UPPERCASE.
+	reservation.Status = "COMPLETED"
 	reservation.VerificationToken = nil
 	reservation.TokenExpiresAt = nil
 
-	if err := s.ReservationRepository.Update(reservation); err != nil {
+	completed, err := s.ReservationRepository.CompleteVerification(reservation)
+	if err != nil {
 		return err
+	}
+	if !completed {
+		utils.Log.Infof("[QR] Reservation ID %d already completed by another scan — no-op", reservation.ID)
+		return nil
 	}
 
 	// ── Deduct YOTTUs ──
