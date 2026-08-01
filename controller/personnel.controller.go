@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/service"
@@ -16,6 +17,14 @@ type PersonnelController struct {
 
 func NewPersonnelController(service service.PersonnelService) *PersonnelController {
 	return &PersonnelController{personnelService: service}
+}
+
+// writeError maps any service error through apperrors.MapToHTTP so clients get
+// the canonical status + stable message (404 for missing personnel, etc.) and
+// internal details never leak.
+func (c *PersonnelController) writeError(ctx *gin.Context, err error) {
+	status, msg := apperrors.MapToHTTP(err)
+	ctx.JSON(status, gin.H{"error": msg})
 }
 
 func (c *PersonnelController) Update(ctx *gin.Context) {
@@ -34,11 +43,7 @@ func (c *PersonnelController) Update(ctx *gin.Context) {
 
 	res, err := c.personnelService.Update(uint(id), req)
 	if err != nil {
-		if err.Error() == "personnel not found" {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -54,11 +59,7 @@ func (c *PersonnelController) Delete(ctx *gin.Context) {
 	}
 
 	if err := c.personnelService.Delete(uint(id)); err != nil {
-		if err.Error() == "personnel not found" {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -75,11 +76,7 @@ func (c *PersonnelController) FindByID(ctx *gin.Context) {
 
 	res, err := c.personnelService.FindByID(uint(id))
 	if err != nil {
-		if err.Error() == "personnel not found" {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -109,7 +106,7 @@ func (c *PersonnelController) FindAll(ctx *gin.Context) {
 
 	res, total, err := c.personnelService.FindAll(beautyCenterID, page, limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 

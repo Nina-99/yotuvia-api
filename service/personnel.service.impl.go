@@ -3,12 +3,14 @@ package service
 import (
 	"errors"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/utils"
 	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
 )
 
 type PersonnelServiceImpl struct {
@@ -23,10 +25,13 @@ func NewPersonnelServiceImpl(repo repository.PersonnelRepository, validate *vali
 // Update implements PersonnelService
 func (s *PersonnelServiceImpl) Update(id uint, req request.UpdatePersonnelRequest) (response.PersonnelResponse, error) {
 	if err := s.Validate.Struct(req); err != nil {
-		return response.PersonnelResponse{}, err
+		return response.PersonnelResponse{}, apperrors.ErrValidation
 	}
 	personnel, err := s.repo.FindByID(id)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.PersonnelResponse{}, apperrors.ErrNotFound
+		}
 		return response.PersonnelResponse{}, err
 	}
 
@@ -41,7 +46,7 @@ func (s *PersonnelServiceImpl) Update(id uint, req request.UpdatePersonnelReques
 		// Check uniqueness
 		existing, _ := s.repo.FindByEmail(req.Email)
 		if existing != nil {
-			return response.PersonnelResponse{}, errors.New("email already in use")
+			return response.PersonnelResponse{}, apperrors.ErrConflict
 		}
 		personnel.Email = req.Email
 	}
@@ -80,6 +85,12 @@ func (s *PersonnelServiceImpl) Update(id uint, req request.UpdatePersonnelReques
 
 // Delete implements PersonnelService
 func (s *PersonnelServiceImpl) Delete(id uint) error {
+	if _, err := s.repo.FindByID(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperrors.ErrNotFound
+		}
+		return err
+	}
 	return s.repo.Delete(id)
 }
 
@@ -87,6 +98,9 @@ func (s *PersonnelServiceImpl) Delete(id uint) error {
 func (s *PersonnelServiceImpl) FindByID(id uint) (response.PersonnelResponse, error) {
 	personnel, err := s.repo.FindByID(id)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.PersonnelResponse{}, apperrors.ErrNotFound
+		}
 		return response.PersonnelResponse{}, err
 	}
 	return s.mapToResponse(*personnel), nil

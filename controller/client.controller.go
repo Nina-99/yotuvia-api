@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/service"
@@ -16,6 +17,14 @@ type ClientController struct {
 
 func NewClientController(service service.ClientService) *ClientController {
 	return &ClientController{clientService: service}
+}
+
+// writeError maps any service error through apperrors.MapToHTTP so clients get
+// the canonical status + stable message (403 for ownership, 404 for missing,
+// etc.) and internal details never leak.
+func (c *ClientController) writeError(ctx *gin.Context, err error) {
+	status, msg := apperrors.MapToHTTP(err)
+	ctx.JSON(status, gin.H{"error": msg})
 }
 
 func (c *ClientController) Update(ctx *gin.Context) {
@@ -32,8 +41,8 @@ func (c *ClientController) Update(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.clientService.Update(uint(clientId), req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.clientService.Update(uint(clientId), ctx.GetUint("clientID"), req); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -47,8 +56,8 @@ func (c *ClientController) Delete(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Format of ID invalid"})
 		return
 	}
-	if err := c.clientService.Delete(uint(clientId)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.clientService.Delete(uint(clientId), ctx.GetUint("clientID")); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "Deleted"})
@@ -66,7 +75,7 @@ func (c *ClientController) FindAll(ctx *gin.Context) {
 
 	clients, total, err := c.clientService.FindAll(page, limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -86,7 +95,7 @@ func (c *ClientController) GetUserByEmail(ctx *gin.Context) {
 	Email := ctx.Param("email")
 	client, err := c.clientService.FindEmail(Email)
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -98,13 +107,13 @@ func (c *ClientController) GetUserByEmail(ctx *gin.Context) {
 func (c *ClientController) FindMe(ctx *gin.Context) {
 	clientID := ctx.GetUint("clientID")
 	if clientID == 0 {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "client ID not found in token"})
+		c.writeError(ctx, apperrors.ErrUnauthorized)
 		return
 	}
 
-	client, err := c.clientService.FindByID(clientID)
+	client, err := c.clientService.FindByID(clientID, clientID)
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "Client not found"})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -128,9 +137,9 @@ func (c *ClientController) FindByID(ctx *gin.Context) {
 		return
 	}
 
-	client, err := c.clientService.FindByID(uint(clientID))
+	client, err := c.clientService.FindByID(uint(clientID), ctx.GetUint("clientID"))
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "Client not found"})
+		c.writeError(ctx, err)
 		return
 	}
 

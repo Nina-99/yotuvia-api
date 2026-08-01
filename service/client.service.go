@@ -6,9 +6,12 @@ import (
 )
 
 type ClientService interface {
-	Update(clientID uint, req request.UpdateClientRequest) error
-	Delete(clientID uint) error
+	// Update/Delete/FindByID are owner-only: the actorClientID claim must equal
+	// the :id path parameter, enforced at the service entry point (defense in
+	// depth — controllers pass the claim from ctx).
+	Update(id uint, actorClientID uint, req request.UpdateClientRequest) error
+	Delete(id uint, actorClientID uint) error
+	FindByID(id uint, actorClientID uint) (*models.Client, error)
 	FindAll(page, limit int) ([]models.Client, int64, error)
 	FindEmail(email string) (*models.Client, error)
-	FindByID(clientID uint) (*models.Client, error)
 }
