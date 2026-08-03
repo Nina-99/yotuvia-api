@@ -3,10 +3,12 @@ package controller
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
+	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/service"
 	"github.com/gin-gonic/gin"
 )
@@ -163,7 +165,7 @@ func (c *ReservationController) FindAll(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, response.PaginatedResponse{
-		Data:  reservations,
+		Data:  mapReservationsToResponses(reservations),
 		Total: total,
 		Page:  page,
 		Limit: limit,
@@ -188,7 +190,7 @@ func (c *ReservationController) FindById(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, reservation)
+	ctx.JSON(http.StatusOK, mapToReservationResponse(reservation))
 }
 
 func (c *ReservationController) FindByClient(ctx *gin.Context) {
@@ -236,7 +238,7 @@ func (c *ReservationController) FindByBeautyCenter(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, reservations)
+	ctx.JSON(http.StatusOK, mapReservationsToResponses(reservations))
 }
 
 // ──────────────────────────────────────────────
@@ -333,4 +335,68 @@ func (c *ReservationController) VerifyQR(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Reservation verified successfully"})
+}
+
+// ──────────────────────────────────────────────
+//  DTO MAPPING
+// ──────────────────────────────────────────────
+
+// mapToReservationResponse flattens a Reservation (with preloaded Client,
+// Personnel, BeautyCenter and ReservationServices) into the public
+// ReservationResponse DTO so GORM model internals (verification token,
+// timestamps, soft-delete, nested entities) never reach the wire. The DTO's
+// omitempty semantics are preserved: personnel and cancel_reason are omitted
+// when absent.
+func mapToReservationResponse(r *models.Reservation) response.ReservationResponse {
+	resp := response.ReservationResponse{
+		ID:               r.ID,
+		BeautyCenterID:   r.BeautyCenterID,
+		BeautyCenterName: r.BeautyCenter.Name,
+		ClientID:         r.ClientID,
+		ClientName:       strings.TrimSpace(r.Client.FirstName + " " + r.Client.LastName),
+		Currency:         r.BeautyCenter.Currency,
+		PersonnelID:      r.PersonnelID,
+		Date:             r.Date,
+		StartTime:        r.StartTime,
+		EndTime:          r.EndTime,
+		TotalPrice:       r.TotalPrice,
+		Status:           r.Status,
+		CancelReason:     r.CancelReason,
+	}
+
+	for _, svc := range r.ReservationServices {
+		resp.Services = append(resp.Services, response.ReservationServiceResponse{
+			ServiceID:   svc.ServiceID,
+			ServiceName: svc.ServiceName,
+			Price:       svc.Price,
+			Duration:    svc.Duration,
+		})
+	}
+
+	if r.Client.ID != 0 {
+		resp.Client = &response.ClientLite{
+			FirstName: r.Client.FirstName,
+			LastName:  r.Client.LastName,
+			Phone:     r.Client.Phone,
+		}
+	}
+
+	if r.Personnel.ID != 0 {
+		resp.Personnel = &response.PersonnelLite{
+			FirstName: r.Personnel.FirstName,
+			LastName:  r.Personnel.LastName,
+		}
+	}
+
+	return resp
+}
+
+// mapReservationsToResponses maps a reservation slice to DTOs, always returning
+// a non-nil slice so an empty result serializes as [] instead of null.
+func mapReservationsToResponses(reservations []models.Reservation) []response.ReservationResponse {
+	resp := make([]response.ReservationResponse, 0, len(reservations))
+	for i := range reservations {
+		resp = append(resp, mapToReservationResponse(&reservations[i]))
+	}
+	return resp
 }
