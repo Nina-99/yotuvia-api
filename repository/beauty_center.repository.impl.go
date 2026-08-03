@@ -7,6 +7,27 @@ import (
 	"gorm.io/gorm"
 )
 
+// ratingSelect is the shared SELECT fragment appended to every beauty-center
+// listing/detail query: the base columns plus the avg_rating and review_count
+// subqueries against reviews.
+const ratingSelect = "beauty_centers.*, " +
+	"COALESCE((SELECT AVG(rating)::numeric(10,2) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as avg_rating, " +
+	"COALESCE((SELECT COUNT(*) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as review_count"
+
+// withAverageRating is a GORM scope that selects the base beauty_centers columns
+// plus the rating subqueries, replacing the duplicated inline expressions. A
+// trailing SELECT expression with bind arguments (e.g. the distance calculation
+// in FindNearby) is appended verbatim after the rating subqueries.
+func withAverageRating(extraSelect string, args ...interface{}) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		selects := ratingSelect
+		if extraSelect != "" {
+			selects += ", " + extraSelect
+		}
+		return db.Select(selects, args...)
+	}
+}
+
 type BeautyCenterRepositoryImpl struct {
 	db *gorm.DB
 }
@@ -34,9 +55,7 @@ func (r *BeautyCenterRepositoryImpl) Delete(id uint) error {
 func (r *BeautyCenterRepositoryImpl) FindByID(id uint) (*models.BeautyCenter, error) {
 	var center models.BeautyCenter
 	err := r.db.
-		Select("beauty_centers.*, "+
-			"COALESCE((SELECT AVG(rating)::numeric(10,2) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as avg_rating, "+
-			"COALESCE((SELECT COUNT(*) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as review_count").
+		Scopes(withAverageRating("")).
 		Preload("SocialMedia").
 		Preload("WorkingHour").
 		Preload("BeautyCenterImage").
@@ -45,7 +64,7 @@ func (r *BeautyCenterRepositoryImpl) FindByID(id uint) (*models.BeautyCenter, er
 		return nil, err
 	}
 	return &center, nil
-}// FindAll implements BeautyCenterRepository
+} // FindAll implements BeautyCenterRepository
 func (r *BeautyCenterRepositoryImpl) FindAll(page, limit int) ([]models.BeautyCenter, int64, error) {
 	var centers []models.BeautyCenter
 	var total int64
@@ -54,9 +73,7 @@ func (r *BeautyCenterRepositoryImpl) FindAll(page, limit int) ([]models.BeautyCe
 
 	offset := (page - 1) * limit
 	err := r.db.
-		Select("beauty_centers.*, "+
-			"COALESCE((SELECT AVG(rating)::numeric(10,2) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as avg_rating, "+
-			"COALESCE((SELECT COUNT(*) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as review_count").
+		Scopes(withAverageRating("")).
 		Preload("BeautyCenterImage").
 		Offset(offset).Limit(limit).
 		Find(&centers).Error
@@ -152,9 +169,7 @@ func (r *BeautyCenterRepositoryImpl) Search(query string, page, limit int) ([]mo
 	}
 
 	err := base.
-		Select("beauty_centers.*, "+
-			"COALESCE((SELECT AVG(rating)::numeric(10,2) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as avg_rating, "+
-			"COALESCE((SELECT COUNT(*) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as review_count").
+		Scopes(withAverageRating("")).
 		Preload("BeautyCenterImage").
 		Offset(offset).Limit(limit).
 		Find(&centers).Error
@@ -167,9 +182,7 @@ func (r *BeautyCenterRepositoryImpl) FindTopRated(limit int) ([]models.BeautyCen
 	var centers []models.BeautyCenter
 
 	err := r.db.
-		Select("beauty_centers.*, "+
-			"COALESCE((SELECT AVG(rating)::numeric(10,2) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as avg_rating, "+
-			"COALESCE((SELECT COUNT(*) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as review_count").
+		Scopes(withAverageRating("")).
 		Preload("BeautyCenterImage").
 		Order("avg_rating DESC, review_count DESC").
 		Limit(limit).
@@ -183,11 +196,9 @@ func (r *BeautyCenterRepositoryImpl) FindNearby(latitude, longitude float64, lim
 	var centers []models.BeautyCenter
 
 	err := r.db.
-		Select("beauty_centers.*, "+
-			"COALESCE((SELECT AVG(rating)::numeric(10,2) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as avg_rating, "+
-			"COALESCE((SELECT COUNT(*) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as review_count, "+
+		Scopes(withAverageRating(
 			"(6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance",
-			latitude, longitude, latitude).
+			latitude, longitude, latitude)).
 		Preload("BeautyCenterImage").
 		Where("latitude != 0 AND longitude != 0").
 		Order("distance ASC").
