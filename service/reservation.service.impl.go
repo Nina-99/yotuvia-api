@@ -504,7 +504,7 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 
 	// ── Token consumption check ──
 	charge := reservation.TotalPrice * 0.035
-	canConsume, err := s.TokenAccountService.CanConsume(authBeautyCenterID, charge)
+	canConsume, err := s.TokenAccountService.CanConsume(authBeautyCenterID, utils.ToMilli(charge))
 	if err != nil {
 		return err
 	}
@@ -530,11 +530,14 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 	}
 
 	// ── Deduct YOTTUs ──
-	consumeErr := s.TokenAccountService.Consume(authBeautyCenterID, charge, reservation.ID,
+	// The charge is converted to milli and deducted atomically (balance + ledger
+	// row in one transaction). A failure propagates to the caller — there is no
+	// grace mechanism and no partial state.
+	consumeErr := s.TokenAccountService.Consume(authBeautyCenterID, utils.ToMilli(charge), reservation.ID,
 		fmt.Sprintf("Reservation #%d completed — 3.5%% of %.2f", reservation.ID, reservation.TotalPrice))
 	if consumeErr != nil {
-		utils.Log.Errorf("[TOKEN GRACE] Failed to deduct tokens for reservation %d: %v", reservation.ID, consumeErr)
-		// Reservation is already completed — grace tx was logged inside Consume
+		utils.Log.Errorf("[TOKEN] Failed to deduct tokens for reservation %d: %v", reservation.ID, consumeErr)
+		return consumeErr
 	}
 
 	// ── Loyalty stamps ──

@@ -48,23 +48,27 @@ func createTestCenter(db *gorm.DB, id uint) {
 	})
 }
 
+// newTokenTestService wires the account service against the in-memory DB.
+func newTokenTestService(db *gorm.DB) TokenAccountService {
+	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
+	topUpRepo := repository.NewTokenTopUpRepositoryImpl(db)
+	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
+	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
+	missionSvc := NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
+	return NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
+}
+
 func TestTokenAccountService_GetOrCreate(t *testing.T) {
 	db := setupTokenTestDB(t)
 	createTestCenter(db, 1)
 
-	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
-	topUpRepo := repository.NewTokenTopUpRepositoryImpl(db)
-	txRepo := repository.NewTokenTransactionRepositoryImpl(db)
-	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
-	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
-	missionSvc := NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
-	svc := NewTokenAccountServiceImpl(accountRepo, topUpRepo, txRepo, centerRepo, missionSvc)
+	svc := newTokenTestService(db)
 
 	// First call should create
 	account, err := svc.GetOrCreate(1, "USD")
 	assert.NoError(t, err)
 	assert.NotNil(t, account)
-	assert.Equal(t, 0.0, account.Balance)
+	assert.Equal(t, int64(0), account.Balance)
 	assert.Equal(t, "USD", account.Currency)
 
 	// Second call should return existing
@@ -75,53 +79,53 @@ func TestTokenAccountService_GetOrCreate(t *testing.T) {
 
 func TestTokenAccountService_CanConsume(t *testing.T) {
 	tests := []struct {
-		name        string
-		balance     float64
-		overdraft   float64
-		charge      float64
-		canConsume  bool
-		purchased   float64
-		topups      int
-		daysActive  int
+		name       string
+		balance    int64 // milli
+		overdraft  int64 // milli
+		charge     int64 // milli
+		canConsume bool
+		purchased  int64 // milli
+		topups     int
+		daysActive int
 	}{
 		{
 			name:       "positive balance covers charge",
-			balance:    100,
-			charge:     50,
+			balance:    100_000,
+			charge:     50_000,
 			canConsume: true,
 		},
 		{
 			name:       "exact balance matches charge",
-			balance:    50,
-			charge:     50,
+			balance:    50_000,
+			charge:     50_000,
 			canConsume: true,
 		},
 		{
 			name:       "overdraft covers deficit",
-			balance:    2,
-			charge:     5,
-			canConsume: true, // 2 + 5 (new overdraft) >= 5
+			balance:    2_000,
+			charge:     5_000,
+			canConsume: true, // 2000 + 5000 (new overdraft) >= 5000
 			daysActive: 1,
 		},
 		{
 			name:       "premium overdraft covers bigger deficit",
-			balance:    10,
-			charge:     35,
-			canConsume: true, // 10 + 30 (premium) >= 35
-			purchased:  600,
+			balance:    10_000,
+			charge:     35_000,
+			canConsume: true, // 10000 + 30000 (premium) >= 35000
+			purchased:  600_000,
 			topups:     5,
 		},
 		{
 			name:       "insufficient even with overdraft",
-			balance:    1,
-			charge:     50,
+			balance:    1_000,
+			charge:     50_000,
 			canConsume: false,
 		},
 		{
 			name:       "zero balance with new overdraft",
 			balance:    0,
-			charge:     5,
-			canConsume: true, // 0 + 5 >= 5
+			charge:     5_000,
+			canConsume: true, // 0 + 5000 >= 5000
 			daysActive: 1,
 		},
 	}
@@ -133,10 +137,10 @@ func TestTokenAccountService_CanConsume(t *testing.T) {
 
 			accountRepo := repository.NewTokenAccountRepositoryImpl(db)
 			topUpRepo := repository.NewTokenTopUpRepositoryImpl(db)
-			txRepo := repository.NewTokenTransactionRepositoryImpl(db)
 			centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 			missionRepo := repository.NewTokenMissionRepositoryImpl(db)
 			missionSvc := NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
+			svc := NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
 
 			// Create account with specific created_at for overdraft tier
 			createdAt := time.Now().AddDate(0, 0, -tt.daysActive)
@@ -154,13 +158,11 @@ func TestTokenAccountService_CanConsume(t *testing.T) {
 				topUpRepo.Create(&models.TokenTopUp{
 					BeautyCenterID: 1,
 					AmountBs:       100,
-					TokensReceived: 100,
+					TokensReceived: 100_000,
 					Status:         "approved",
 					ReceiptURL:     "http://test.com/receipt",
 				})
 			}
-
-			svc := NewTokenAccountServiceImpl(accountRepo, topUpRepo, txRepo, centerRepo, missionSvc)
 
 			canConsume, err := svc.CanConsume(1, tt.charge)
 			assert.NoError(t, err)
@@ -173,32 +175,26 @@ func TestTokenAccountService_AddTokens(t *testing.T) {
 	db := setupTokenTestDB(t)
 	createTestCenter(db, 1)
 
-	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
-	topUpRepo := repository.NewTokenTopUpRepositoryImpl(db)
-	txRepo := repository.NewTokenTransactionRepositoryImpl(db)
-	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
-	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
-	missionSvc := NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
-	svc := NewTokenAccountServiceImpl(accountRepo, topUpRepo, txRepo, centerRepo, missionSvc)
+	svc := newTokenTestService(db)
 
 	// Create account
 	svc.GetOrCreate(1, "USD")
 
-	// Add 100 tokens
-	err := svc.AddTokens(1, 100, "topup", 1, "Test top-up")
+	// Add 100 tokens (100_000 milli)
+	err := svc.AddTokens(1, 100_000, "topup", 1, "Test top-up")
 	assert.NoError(t, err)
 
 	balance, _, _, err := svc.GetBalance(1)
 	assert.NoError(t, err)
-	assert.Equal(t, 100.0, balance)
+	assert.Equal(t, int64(100_000), balance)
 
-	// Add 50 more
-	err = svc.AddTokens(1, 50, "bonus", 1, "Test bonus")
+	// Add 50 more (50_000 milli)
+	err = svc.AddTokens(1, 50_000, "bonus", 1, "Test bonus")
 	assert.NoError(t, err)
 
 	balance, _, _, err = svc.GetBalance(1)
 	assert.NoError(t, err)
-	assert.Equal(t, 150.0, balance)
+	assert.Equal(t, int64(150_000), balance)
 
 	// Check transaction log
 	txRepo2 := repository.NewTokenTransactionRepositoryImpl(db)
@@ -211,11 +207,11 @@ func TestTokenAccountService_AddTokens(t *testing.T) {
 
 func TestCalculateTier(t *testing.T) {
 	tests := []struct {
-		name          string
-		amount        float64
-		wantTokens    float64
-		wantBonus     float64
-		wantTotal     float64
+		name       string
+		amount     float64
+		wantTokens float64
+		wantBonus  float64
+		wantTotal  float64
 	}{
 		{"50 Bs (no bonus)", 50, 50, 0, 50},
 		{"100 Bs (+5%)", 100, 100, 5, 105},
@@ -243,23 +239,22 @@ func TestTokenAccountService_OverdraftTiers(t *testing.T) {
 
 	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
 	topUpRepo := repository.NewTokenTopUpRepositoryImpl(db)
-	txRepo := repository.NewTokenTransactionRepositoryImpl(db)
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
 	missionSvc := NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
-	svc := NewTokenAccountServiceImpl(accountRepo, topUpRepo, txRepo, centerRepo, missionSvc)
+	svc := NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
 
 	// Center 1: New (just created)
 	svc.GetOrCreate(1, "USD")
 	balance, overdraft, _, err := svc.GetBalance(1)
 	assert.NoError(t, err)
-	assert.Equal(t, 0.0, balance)
-	assert.Equal(t, float64(5), overdraft) // new tier = -5
+	assert.Equal(t, int64(0), balance)
+	assert.Equal(t, int64(5000), overdraft) // new tier = -5 YOTTUs
 
 	// Center 2: Active (30+ days old)
 	oldAccount := &models.TokenAccount{
 		BeautyCenterID: 2,
-		Balance:        10,
+		Balance:        10_000,
 		Currency:       "USD",
 	}
 	oldAccount.CreatedAt = time.Now().AddDate(0, 0, -45)
@@ -270,7 +265,7 @@ func TestTokenAccountService_OverdraftTiers(t *testing.T) {
 		topUpRepo.Create(&models.TokenTopUp{
 			BeautyCenterID: 2,
 			AmountBs:       100,
-			TokensReceived: 100,
+			TokensReceived: 100_000,
 			Status:         "approved",
 			ReceiptURL:     "http://test.com/receipt",
 		})
@@ -278,13 +273,13 @@ func TestTokenAccountService_OverdraftTiers(t *testing.T) {
 
 	balance, overdraft, _, err = svc.GetBalance(2)
 	assert.NoError(t, err)
-	assert.Equal(t, float64(15), overdraft) // active tier = -15
+	assert.Equal(t, int64(15_000), overdraft) // active tier = -15 YOTTUs
 
-	// Center 3: Premium (500+ purchased)
+	// Center 3: Premium (500+ purchased = 500_000+ milli)
 	premAccount := &models.TokenAccount{
 		BeautyCenterID: 3,
-		Balance:        200,
-		TotalPurchased: 600,
+		Balance:        200_000,
+		TotalPurchased: 600_000,
 		Currency:       "USD",
 	}
 	premAccount.CreatedAt = time.Now().AddDate(0, 0, -5)
@@ -295,7 +290,7 @@ func TestTokenAccountService_OverdraftTiers(t *testing.T) {
 		topUpRepo.Create(&models.TokenTopUp{
 			BeautyCenterID: 3,
 			AmountBs:       200,
-			TokensReceived: 200,
+			TokensReceived: 200_000,
 			Status:         "approved",
 			ReceiptURL:     "http://test.com/receipt",
 		})
@@ -303,5 +298,5 @@ func TestTokenAccountService_OverdraftTiers(t *testing.T) {
 
 	balance, overdraft, _, err = svc.GetBalance(3)
 	assert.NoError(t, err)
-	assert.Equal(t, float64(30), overdraft) // premium tier = -30
+	assert.Equal(t, int64(30_000), overdraft) // premium tier = -30 YOTTUs
 }

@@ -12,7 +12,7 @@ func SeedDefaultMissions() {
 			Description:  "Complete your first reservation",
 			TriggerType:  "reservation_completed",
 			TriggerCount: 1,
-			RewardTokens: 10,
+			RewardTokens: 10000,
 			Icon:         "🎯",
 			IsActive:     true,
 			SortOrder:    1,
@@ -22,7 +22,7 @@ func SeedDefaultMissions() {
 			Description:  "Complete 50 reservations in a month",
 			TriggerType:  "reservation_completed",
 			TriggerCount: 50,
-			RewardTokens: 25,
+			RewardTokens: 25000,
 			Icon:         "🏆",
 			IsActive:     true,
 			SortOrder:    2,
@@ -32,7 +32,7 @@ func SeedDefaultMissions() {
 			Description:  "Activate a stamp card promotion",
 			TriggerType:  "stamp_activated",
 			TriggerCount: 1,
-			RewardTokens: 15,
+			RewardTokens: 15000,
 			Icon:         "🎟️",
 			IsActive:     true,
 			SortOrder:    3,
@@ -42,7 +42,7 @@ func SeedDefaultMissions() {
 			Description:  "Complete your profile with photo and description",
 			TriggerType:  "profile_completed",
 			TriggerCount: 1,
-			RewardTokens: 5,
+			RewardTokens: 5000,
 			Icon:         "⭐",
 			IsActive:     true,
 			SortOrder:    4,
@@ -52,7 +52,7 @@ func SeedDefaultMissions() {
 			Description:  "Respond to 5 reviews",
 			TriggerType:  "review_responded",
 			TriggerCount: 5,
-			RewardTokens: 3,
+			RewardTokens: 3000,
 			Icon:         "💬",
 			IsActive:     true,
 			SortOrder:    5,
@@ -66,7 +66,7 @@ func SeedDefaultMissions() {
 			if err := DB.Create(&mission).Error; err != nil {
 				utils.Log.Errorf("[SEED] Failed to create mission %s: %v", mission.Name, err)
 			} else {
-				utils.Log.Infof("[SEED] Created mission: %s (+%.0f YOTTUs)", mission.Name, mission.RewardTokens)
+				utils.Log.Infof("[SEED] Created mission: %s (+%.0f YOTTUs)", mission.Name, utils.FromMilli(mission.RewardTokens))
 			}
 		}
 	}

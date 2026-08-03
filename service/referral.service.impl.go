@@ -67,8 +67,8 @@ func (s *ReferralServiceImpl) CreateReferralByCode(enteredByCenterID uint, code 
 		ReferrerID:     referrer.ID,
 		ReferredID:     referredID,
 		Status:         "pending",
-		RewardReferrer: 20,
-		RewardReferred: 10,
+		RewardReferrer: 20000, // 20 YOTTUs in milli
+		RewardReferred: 10000, // 10 YOTTUs in milli
 	}
 
 	if err := s.referralRepo.Create(referral); err != nil {
@@ -110,7 +110,7 @@ func (s *ReferralServiceImpl) ProcessReferralReward(referredID uint) error {
 	}
 
 	utils.Log.Infof("[REFERRAL] Referral %d credited: referrer +%.0f, referred +%.0f YOTTUs",
-		referral.ID, referral.RewardReferrer, referral.RewardReferred)
+		referral.ID, utils.FromMilli(referral.RewardReferrer), utils.FromMilli(referral.RewardReferred))
 	return nil
 }
 

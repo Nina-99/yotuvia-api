@@ -1,6 +1,11 @@
 package response
 
-import "time"
+import (
+	"time"
+
+	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yottu-api/utils"
+)
 
 type TokenBalanceResponse struct {
 	Balance        float64 `json:"balance"`
@@ -56,4 +61,59 @@ type ReferralResponse struct {
 	Status     string    `json:"status"`
 	Reward     float64   `json:"reward"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+// The wire format stays decimal YOTTUs; these constructors convert the stored
+// int64 milli-YOTTUs to decimal on serialization so clients never see millis.
+
+// NewTokenBalanceResponse builds a balance payload from milli values.
+func NewTokenBalanceResponse(balanceMilli, overdraftMilli int64, currency string) TokenBalanceResponse {
+	return TokenBalanceResponse{
+		Balance:        utils.FromMilli(balanceMilli),
+		OverdraftLimit: utils.FromMilli(overdraftMilli),
+		Currency:       currency,
+	}
+}
+
+// NewTokenTransactionResponse converts a stored ledger row (milli) to decimal.
+func NewTokenTransactionResponse(tx models.TokenTransaction) TokenTransactionResponse {
+	return TokenTransactionResponse{
+		ID:            tx.ID,
+		Amount:        utils.FromMilli(tx.Amount),
+		Type:          tx.Type,
+		BalanceBefore: utils.FromMilli(tx.BalanceBefore),
+		BalanceAfter:  utils.FromMilli(tx.BalanceAfter),
+		Description:   tx.Description,
+		CreatedAt:     tx.CreatedAt,
+	}
+}
+
+// NewTokenTopUpResponse converts tokens to decimal; AmountBs is bolivares, not
+// part of the YOTTU ledger, and stays untouched.
+func NewTokenTopUpResponse(topup models.TokenTopUp) TokenTopUpResponse {
+	return TokenTopUpResponse{
+		ID:             topup.ID,
+		AmountBs:       topup.AmountBs,
+		TokensReceived: utils.FromMilli(topup.TokensReceived),
+		BonusTokens:    utils.FromMilli(topup.BonusTokens),
+		ReceiptURL:     topup.ReceiptURL,
+		Status:         topup.Status,
+		CreatedAt:      topup.CreatedAt,
+		ValidatedAt:    topup.ValidatedAt,
+	}
+}
+
+// NewTokenMissionResponse converts the mission reward (milli) to decimal.
+func NewTokenMissionResponse(progress models.TokenMissionProgress) TokenMissionResponse {
+	return TokenMissionResponse{
+		ID:            progress.MissionID,
+		Name:          progress.Mission.Name,
+		Description:   progress.Mission.Description,
+		RewardTokens:  utils.FromMilli(progress.Mission.RewardTokens),
+		Icon:          progress.Mission.Icon,
+		CurrentCount:  progress.CurrentCount,
+		TargetCount:   progress.TargetCount,
+		Completed:     progress.CompletedAt != nil,
+		RewardClaimed: progress.RewardClaimed,
+	}
 }

@@ -23,7 +23,7 @@ func TokenRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate)
 	missionSvc := service.NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
 	txSvc := service.NewTokenTransactionServiceImpl(txRepo)
 	referralSvc := service.NewReferralServiceImpl(referralRepo, centerRepo, nil)
-	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, txRepo, centerRepo, missionSvc)
+	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
 
 	// Wire circular refs
 	missionSvc = service.NewTokenMissionServiceImpl(missionRepo, accountSvc, accountRepo)

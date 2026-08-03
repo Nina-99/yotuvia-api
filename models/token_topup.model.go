@@ -16,8 +16,8 @@ type TokenTopUp struct {
 	BeautyCenter   BeautyCenter `gorm:"foreignKey:BeautyCenterID" json:"beauty_center,omitempty"`
 
 	AmountBs       float64 `gorm:"type:decimal(12,2);not null" json:"amount_bs"`
-	TokensReceived float64 `gorm:"type:decimal(12,2);not null" json:"tokens_received"`
-	BonusTokens    float64 `gorm:"type:decimal(12,2);default:0" json:"bonus_tokens"`
+	TokensReceived int64   `gorm:"type:bigint;not null" json:"tokens_received"`
+	BonusTokens    int64   `gorm:"type:bigint;default:0" json:"bonus_tokens"`
 	ReceiptURL     string  `gorm:"type:text;not null" json:"receipt_url"`
 	Status         string  `gorm:"size:20;default:pending" json:"status"` // pending, approved, rejected
 

@@ -54,11 +54,7 @@ func (c *TokenController) GetBalance(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, response.TokenBalanceResponse{
-		Balance:        balance,
-		OverdraftLimit: overdraft,
-		Currency:       currency,
-	})
+	ctx.JSON(http.StatusOK, response.NewTokenBalanceResponse(balance, overdraft, currency))
 }
 
 // GET /api/v1/tokens/history
@@ -80,15 +76,7 @@ func (c *TokenController) GetHistory(ctx *gin.Context) {
 
 	var txResponses []response.TokenTransactionResponse
 	for _, tx := range txs {
-		txResponses = append(txResponses, response.TokenTransactionResponse{
-			ID:            tx.ID,
-			Amount:        tx.Amount,
-			Type:          tx.Type,
-			BalanceBefore: tx.BalanceBefore,
-			BalanceAfter:  tx.BalanceAfter,
-			Description:   tx.Description,
-			CreatedAt:     tx.CreatedAt,
-		})
+		txResponses = append(txResponses, response.NewTokenTransactionResponse(tx))
 	}
 
 	ctx.JSON(http.StatusOK, response.TokenHistoryResponse{
@@ -131,8 +119,8 @@ func (c *TokenController) CreateTopUp(ctx *gin.Context) {
 	topup := &models.TokenTopUp{
 		BeautyCenterID: centerID.(uint),
 		AmountBs:       req.AmountBs,
-		TokensReceived: tokens,
-		BonusTokens:    bonus,
+		TokensReceived: utils.ToMilli(tokens),
+		BonusTokens:    utils.ToMilli(bonus),
 		ReceiptURL:     req.ReceiptURL,
 		Status:         "pending",
 	}
@@ -143,12 +131,13 @@ func (c *TokenController) CreateTopUp(ctx *gin.Context) {
 		return
 	}
 
+	// The wire format stays decimal YOTTUs; the stored values are milli.
 	ctx.JSON(http.StatusCreated, gin.H{
 		"message":         "Top-up request created",
 		"topup_id":        topup.ID,
-		"tokens_received": tokens,
-		"bonus_tokens":    bonus,
-		"total_tokens":    tokens + bonus,
+		"tokens_received": utils.FromMilli(topup.TokensReceived),
+		"bonus_tokens":    utils.FromMilli(topup.BonusTokens),
+		"total_tokens":    utils.FromMilli(topup.TokensReceived + topup.BonusTokens),
 	})
 }
 
@@ -168,17 +157,7 @@ func (c *TokenController) GetMissions(ctx *gin.Context) {
 
 	var resp []response.TokenMissionResponse
 	for _, p := range progress {
-		resp = append(resp, response.TokenMissionResponse{
-			ID:            p.MissionID,
-			Name:          p.Mission.Name,
-			Description:   p.Mission.Description,
-			RewardTokens:  p.Mission.RewardTokens,
-			Icon:          p.Mission.Icon,
-			CurrentCount:  p.CurrentCount,
-			TargetCount:   p.TargetCount,
-			Completed:     p.CompletedAt != nil,
-			RewardClaimed: p.RewardClaimed,
-		})
+		resp = append(resp, response.NewTokenMissionResponse(p))
 	}
 
 	ctx.JSON(http.StatusOK, resp)
@@ -278,16 +257,7 @@ func (c *TokenController) AdminListTopUps(ctx *gin.Context) {
 
 	var resp []response.TokenTopUpResponse
 	for _, t := range topups {
-		resp = append(resp, response.TokenTopUpResponse{
-			ID:             t.ID,
-			AmountBs:       t.AmountBs,
-			TokensReceived: t.TokensReceived,
-			BonusTokens:    t.BonusTokens,
-			ReceiptURL:     t.ReceiptURL,
-			Status:         t.Status,
-			CreatedAt:      t.CreatedAt,
-			ValidatedAt:    t.ValidatedAt,
-		})
+		resp = append(resp, response.NewTokenTopUpResponse(t))
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{

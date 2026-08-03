@@ -18,7 +18,7 @@ type Referral struct {
 	Referred   BeautyCenter `gorm:"foreignKey:ReferredID" json:"referred,omitempty"`
 
 	Status         string     `gorm:"size:20;default:pending" json:"status"` // pending, credited, expired
-	RewardReferrer float64    `gorm:"type:decimal(12,2);default:0" json:"reward_referrer"`
-	RewardReferred float64    `gorm:"type:decimal(12,2);default:0" json:"reward_referred"`
+	RewardReferrer int64      `gorm:"type:bigint;default:0" json:"reward_referrer"`
+	RewardReferred int64      `gorm:"type:bigint;default:0" json:"reward_referred"`
 	CreditedAt     *time.Time `json:"credited_at,omitempty"`
 }

@@ -10,9 +10,9 @@ import (
 )
 
 type TokenMissionServiceImpl struct {
-	missionRepo  repository.TokenMissionRepository
-	accountSvc   TokenAccountService
-	accountRepo  repository.TokenAccountRepository
+	missionRepo repository.TokenMissionRepository
+	accountSvc  TokenAccountService
+	accountRepo repository.TokenAccountRepository
 }
 
 func NewTokenMissionServiceImpl(
@@ -128,11 +128,12 @@ func (s *TokenMissionServiceImpl) ClaimReward(beautyCenterID, missionID uint) er
 		return err
 	}
 
-	// Award tokens
+	// Award tokens — RewardTokens is already milli-YOTTUs, passed through
+	// unchanged to the atomic AddTokens.
 	if err := s.accountSvc.AddTokens(beautyCenterID, mission.RewardTokens, "mission", mission.ID, "Mission reward: "+mission.Name); err != nil {
 		return err
 	}
 
-	utils.Log.Infof("[MISSION] Center %d claimed reward for %s: +%.2f YOTTUs", beautyCenterID, mission.Name, mission.RewardTokens)
+	utils.Log.Infof("[MISSION] Center %d claimed reward for %s: +%.2f YOTTUs", beautyCenterID, mission.Name, utils.FromMilli(mission.RewardTokens))
 	return nil
 }
