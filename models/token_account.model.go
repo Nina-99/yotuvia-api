@@ -15,9 +15,9 @@ type TokenAccount struct {
 	BeautyCenterID uint         `gorm:"not null;uniqueIndex" json:"beauty_center_id"`
 	BeautyCenter   BeautyCenter `gorm:"foreignKey:BeautyCenterID" json:"beauty_center,omitempty"`
 
-	Balance        float64 `gorm:"type:decimal(12,2);default:0" json:"balance"`
-	TotalPurchased float64 `gorm:"type:decimal(12,2);default:0" json:"total_purchased"`
-	TotalConsumed  float64 `gorm:"type:decimal(12,2);default:0" json:"total_consumed"`
+	Balance        int64   `gorm:"type:bigint;default:0" json:"balance"`
+	TotalPurchased int64   `gorm:"type:bigint;default:0" json:"total_purchased"`
+	TotalConsumed  int64   `gorm:"type:bigint;default:0" json:"total_consumed"`
 	OverdraftLimit float64 `gorm:"-" json:"-"` // computed dynamically
 	Currency       string  `gorm:"size:3;default:USD" json:"currency"`
 }

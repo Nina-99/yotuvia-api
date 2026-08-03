@@ -17,14 +17,15 @@ func (s *TokenTransactionServiceImpl) GetHistory(beautyCenterID uint, page, limi
 	return s.txRepo.FindByBeautyCenterID(beautyCenterID, page, limit)
 }
 
-func (s *TokenTransactionServiceImpl) GetSummary(beautyCenterID uint) (totalConsumed, totalTopUps float64, err error) {
+func (s *TokenTransactionServiceImpl) GetSummary(beautyCenterID uint) (totalConsumed, totalTopUps int64, err error) {
 	txs, _, err := s.txRepo.FindByBeautyCenterID(beautyCenterID, 1, 10000)
 	if err != nil {
 		return 0, 0, err
 	}
 
 	for _, tx := range txs {
-		if tx.Type == "consumption" || tx.Type == "grace" {
+		// Historical grace rows are read-only; they never count toward totals.
+		if tx.Type == "consumption" {
 			totalConsumed += -tx.Amount
 		} else if tx.Type == "topup" {
 			totalTopUps += tx.Amount

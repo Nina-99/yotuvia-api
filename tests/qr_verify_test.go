@@ -26,27 +26,27 @@ import (
 type stubTokenAccount struct {
 	canConsume    bool
 	consumeCalls  int
-	consumeAmount float64
+	consumeAmount int64 // milli
 }
 
 func (s *stubTokenAccount) GetOrCreate(uint, string) (*models.TokenAccount, error) {
 	return nil, nil
 }
-func (s *stubTokenAccount) GetBalance(uint) (float64, float64, string, error) {
+func (s *stubTokenAccount) GetBalance(uint) (int64, int64, string, error) {
 	return 0, 0, "", nil
 }
-func (s *stubTokenAccount) CanConsume(uint, float64) (bool, error) {
+func (s *stubTokenAccount) CanConsume(uint, int64) (bool, error) {
 	return s.canConsume, nil
 }
-func (s *stubTokenAccount) Consume(_ uint, amount float64, _ uint, _ string) error {
+func (s *stubTokenAccount) Consume(_ uint, amountMilli int64, _ uint, _ string) error {
 	s.consumeCalls++
-	s.consumeAmount = amount
+	s.consumeAmount = amountMilli
 	return nil
 }
 func (s *stubTokenAccount) ProcessTopUp(uint, uint, string) error {
 	return nil
 }
-func (s *stubTokenAccount) AddTokens(uint, float64, string, uint, string) error {
+func (s *stubTokenAccount) AddTokens(uint, int64, string, uint, string) error {
 	return nil
 }
 

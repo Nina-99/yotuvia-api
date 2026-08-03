@@ -24,11 +24,10 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	// Token services
 	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
 	topUpRepo := repository.NewTokenTopUpRepositoryImpl(db)
-	txRepo := repository.NewTokenTransactionRepositoryImpl(db)
 	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	missionSvc := service.NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
-	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, txRepo, centerRepo, missionSvc)
+	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
 	missionSvc = service.NewTokenMissionServiceImpl(missionRepo, accountSvc, accountRepo)
 
 	svc := service.NewReservationServiceImpl(repo, serviceRepo, personnelRepo, notifSvc, loyaltySvc, accountSvc, missionSvc, validate)

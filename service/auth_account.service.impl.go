@@ -294,7 +294,7 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		if s.TokenAccountSvc != nil {
 			if _, err := s.TokenAccountSvc.GetOrCreate(center.ID, center.Currency); err != nil {
 				utils.Log.Errorf("[AUTH] Failed to create token account for center %d: %v", center.ID, err)
-			} else if err := s.TokenAccountSvc.AddTokens(center.ID, 25, "bonus", 0, "Welcome bonus: 25 free YOTTUs"); err != nil {
+			} else if err := s.TokenAccountSvc.AddTokens(center.ID, utils.ToMilli(25), "bonus", 0, "Welcome bonus: 25 free YOTTUs"); err != nil {
 				utils.Log.Errorf("[AUTH] Failed to add welcome YOTTUs for center %d: %v", center.ID, err)
 			} else {
 				utils.Log.Infof("[AUTH] Welcome bonus: 25 YOTTUs credited to center %d", center.ID)
@@ -411,8 +411,8 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (Au
 
 	case "beauty_center":
 		center := models.BeautyCenter{
-			Name: firstName + " " + lastName,
-			Email: email,
+			Name:     firstName + " " + lastName,
+			Email:    email,
 			IsActive: false,
 			BeautyCenterImage: []models.BeautyCenterImage{
 				{
@@ -435,6 +435,7 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (Au
 	utils.Log.Infof("[AUTH] Created new social link and logged in. UserType: %s", req.UserType)
 	return s.generateTokenForUser(&newAccount)
 }
+
 // ──────────────────────────────────────────────
 //  REGISTER PERSONNEL (admin)
 // ──────────────────────────────────────────────
@@ -473,7 +474,6 @@ func (s *AuthAccountServiceImpl) RegisterPersonnel(req request.RegisterPersonnel
 	utils.Log.Infof("[AUTH] New personnel registered via admin. Email: %s, CenterID: %d", req.Email, req.BeautyCenterID)
 	return s.PersonnelRepo.Create(&personnel)
 }
-
 
 func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccount) (AuthResult, error) {
 	var userID uint

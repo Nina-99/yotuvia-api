@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -12,7 +13,6 @@ import (
 type TokenAccountServiceImpl struct {
 	accountRepo    repository.TokenAccountRepository
 	topUpRepo      repository.TokenTopUpRepository
-	txRepo         repository.TokenTransactionRepository
 	centerRepo     repository.BeautyCenterRepository
 	missionService TokenMissionService
 }
@@ -20,14 +20,12 @@ type TokenAccountServiceImpl struct {
 func NewTokenAccountServiceImpl(
 	accountRepo repository.TokenAccountRepository,
 	topUpRepo repository.TokenTopUpRepository,
-	txRepo repository.TokenTransactionRepository,
 	centerRepo repository.BeautyCenterRepository,
 	missionService TokenMissionService,
 ) TokenAccountService {
 	return &TokenAccountServiceImpl{
 		accountRepo:    accountRepo,
 		topUpRepo:      topUpRepo,
-		txRepo:         txRepo,
 		centerRepo:     centerRepo,
 		missionService: missionService,
 	}
@@ -55,7 +53,7 @@ func (s *TokenAccountServiceImpl) GetOrCreate(beautyCenterID uint, currency stri
 	return account, nil
 }
 
-func (s *TokenAccountServiceImpl) GetBalance(beautyCenterID uint) (balance, overdraftLimit float64, currency string, err error) {
+func (s *TokenAccountServiceImpl) GetBalance(beautyCenterID uint) (balance, overdraftLimit int64, currency string, err error) {
 	account, err := s.accountRepo.FindByBeautyCenterID(beautyCenterID)
 	if err != nil {
 		return 0, 0, "", err
@@ -72,7 +70,7 @@ func (s *TokenAccountServiceImpl) GetBalance(beautyCenterID uint) (balance, over
 		}
 	}
 
-	overdraftLimit = s.computeOverdraft(beautyCenterID)
+	overdraftLimit = utils.ToMilli(s.computeOverdraft(beautyCenterID))
 	return account.Balance, overdraftLimit, account.Currency, nil
 }
 
@@ -98,8 +96,8 @@ func (s *TokenAccountServiceImpl) computeOverdraft(beautyCenterID uint) float64 
 	createdAt := account.CreatedAt
 	daysActive := int(time.Since(createdAt).Hours() / 24)
 
-	// Premium: 3+ approved top-ups OR 500+ purchased
-	if approvedCount >= 3 || account.TotalPurchased >= 500 {
+	// Premium: 3+ approved top-ups OR 500+ purchased (500 YOTTUs = 500_000 milli)
+	if approvedCount >= 3 || account.TotalPurchased >= 500_000 {
 		utils.Log.Debugf("[OVERDRAFT] Center %d — Premium tier (-30)", beautyCenterID)
 		return 30
 	}
@@ -115,7 +113,7 @@ func (s *TokenAccountServiceImpl) computeOverdraft(beautyCenterID uint) float64 
 	return 5
 }
 
-func (s *TokenAccountServiceImpl) CanConsume(beautyCenterID uint, amount float64) (bool, error) {
+func (s *TokenAccountServiceImpl) CanConsume(beautyCenterID uint, amountMilli int64) (bool, error) {
 	account, err := s.accountRepo.FindByBeautyCenterID(beautyCenterID)
 	if err != nil {
 		return false, err
@@ -125,12 +123,12 @@ func (s *TokenAccountServiceImpl) CanConsume(beautyCenterID uint, amount float64
 	}
 
 	overdraft := s.computeOverdraft(beautyCenterID)
-	available := account.Balance + overdraft
+	available := account.Balance + utils.ToMilli(overdraft)
 
-	return available >= amount, nil
+	return available >= amountMilli, nil
 }
 
-func (s *TokenAccountServiceImpl) Consume(beautyCenterID uint, amount float64, referenceID uint, description string) error {
+func (s *TokenAccountServiceImpl) Consume(beautyCenterID uint, amountMilli int64, referenceID uint, description string) error {
 	account, err := s.accountRepo.FindByBeautyCenterID(beautyCenterID)
 	if err != nil {
 		return err
@@ -139,50 +137,23 @@ func (s *TokenAccountServiceImpl) Consume(beautyCenterID uint, amount float64, r
 		return errors.New("token account not found")
 	}
 
-	overdraft := s.computeOverdraft(beautyCenterID)
-	if account.Balance+overdraft < amount {
-		return errors.New("insufficient token balance")
+	var refPtr *uint
+	if referenceID != 0 {
+		ref := referenceID
+		refPtr = &ref
 	}
 
-	balanceBefore := account.Balance
-	account.Balance -= amount
-	account.TotalConsumed += amount
-
-	if err := s.accountRepo.Update(account); err != nil {
-		// Log grace transaction on failure
-		utils.Log.Errorf("[TOKEN GRACE] Failed to update balance for center %d: %v. Logging grace tx.", beautyCenterID, err)
-		graceTx := &models.TokenTransaction{
-			BeautyCenterID: beautyCenterID,
-			Amount:         -amount,
-			Type:           "grace",
-			ReferenceID:    &referenceID,
-			BalanceBefore:  balanceBefore,
-			BalanceAfter:   balanceBefore,
-			Description:    "GRACE: " + description + " (deduct failed)",
-		}
-		_ = s.txRepo.Create(graceTx)
+	updated, err := s.accountRepo.Consume(context.Background(), account.ID, amountMilli, "consumption", description, refPtr)
+	if err != nil {
 		return err
 	}
 
-	// Log successful consumption
-	tx := &models.TokenTransaction{
-		BeautyCenterID: beautyCenterID,
-		Amount:         -amount,
-		Type:           "consumption",
-		ReferenceID:    &referenceID,
-		BalanceBefore:  balanceBefore,
-		BalanceAfter:   account.Balance,
-		Description:    description,
-	}
-	if err := s.txRepo.Create(tx); err != nil {
-		utils.Log.Errorf("[TOKEN] Failed to log transaction for center %d: %v", beautyCenterID, err)
-	}
-
-	utils.Log.Infof("[TOKEN] Center %d consumed %.2f YOTTUs. Balance: %.2f", beautyCenterID, amount, account.Balance)
+	utils.Log.Infof("[TOKEN] Center %d consumed %.2f YOTTUs. Balance: %.2f",
+		beautyCenterID, utils.FromMilli(amountMilli), utils.FromMilli(updated.Balance))
 	return nil
 }
 
-func (s *TokenAccountServiceImpl) AddTokens(beautyCenterID uint, amount float64, txType string, referenceID uint, description string) error {
+func (s *TokenAccountServiceImpl) AddTokens(beautyCenterID uint, amountMilli int64, txType string, referenceID uint, description string) error {
 	account, err := s.accountRepo.FindByBeautyCenterID(beautyCenterID)
 	if err != nil {
 		return err
@@ -191,28 +162,19 @@ func (s *TokenAccountServiceImpl) AddTokens(beautyCenterID uint, amount float64,
 		return errors.New("token account not found")
 	}
 
-	balanceBefore := account.Balance
-	account.Balance += amount
-	account.TotalPurchased += amount
+	var refPtr *uint
+	if referenceID != 0 {
+		ref := referenceID
+		refPtr = &ref
+	}
 
-	if err := s.accountRepo.Update(account); err != nil {
+	updated, err := s.accountRepo.AddTokens(context.Background(), account.ID, amountMilli, txType, description, refPtr)
+	if err != nil {
 		return err
 	}
 
-	tx := &models.TokenTransaction{
-		BeautyCenterID: beautyCenterID,
-		Amount:         amount,
-		Type:           txType,
-		ReferenceID:    &referenceID,
-		BalanceBefore:  balanceBefore,
-		BalanceAfter:   account.Balance,
-		Description:    description,
-	}
-	if err := s.txRepo.Create(tx); err != nil {
-		utils.Log.Errorf("[TOKEN] Failed to log transaction for center %d: %v", beautyCenterID, err)
-	}
-
-	utils.Log.Infof("[TOKEN] Center %d received %.2f YOTTUs (type=%s). Balance: %.2f", beautyCenterID, amount, txType, account.Balance)
+	utils.Log.Infof("[TOKEN] Center %d received %.2f YOTTUs (type=%s). Balance: %.2f",
+		beautyCenterID, utils.FromMilli(amountMilli), txType, utils.FromMilli(updated.Balance))
 	return nil
 }
 
@@ -236,18 +198,9 @@ func (s *TokenAccountServiceImpl) ProcessTopUp(topUpID, adminID uint, status str
 		return s.topUpRepo.Update(topup)
 	}
 
-	// approved
+	// approved — credit exactly tokens_received + bonus_tokens; historical grace
+	// rows are read-only and never deducted here.
 	totalTokens := topup.TokensReceived + topup.BonusTokens
-
-	// Check for grace debt from previous failed consumptions
-	// Deduct any outstanding grace transactions first
-	account, err := s.accountRepo.FindByBeautyCenterID(topup.BeautyCenterID)
-	if err != nil {
-		return err
-	}
-	if account == nil {
-		return errors.New("token account not found")
-	}
 
 	topup.Status = "approved"
 	topup.ValidatedBy = &adminID
@@ -258,12 +211,12 @@ func (s *TokenAccountServiceImpl) ProcessTopUp(topUpID, adminID uint, status str
 		return err
 	}
 
-	// Add tokens to account (AddTokens will also log the transaction)
+	// AddTokens credits the balance and logs the ledger row atomically.
 	if err := s.AddTokens(topup.BeautyCenterID, totalTokens, "topup", topup.ID, "Top-up approved: "+topup.ReceiptURL); err != nil {
 		return err
 	}
 
 	utils.Log.Infof("[TOPUP] Center %d top-up approved: %.2f + %.2f bonus = %.2f YOTTUs",
-		topup.BeautyCenterID, topup.TokensReceived, topup.BonusTokens, totalTokens)
+		topup.BeautyCenterID, utils.FromMilli(topup.TokensReceived), utils.FromMilli(topup.BonusTokens), utils.FromMilli(totalTokens))
 	return nil
 }
