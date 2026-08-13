@@ -1,6 +1,8 @@
 package service
 
 import (
+	"time"
+
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/models"
 )
@@ -23,7 +25,15 @@ type ReservationService interface {
 	FindUpcomingByClientID(clientID, actorClientID uint) (*models.Reservation, error)
 	// FindByBeautyCenterID allows center staff only for their own centerID.
 	FindByBeautyCenterID(beautyCenterID, actorCenterID uint) ([]models.Reservation, error)
+	// FindByPersonnelID returns a staff member's agenda. The personnelID is the
+	// caller's own claim (never a path parameter); from/to are an optional
+	// inclusive date range (nil = open-ended).
+	FindByPersonnelID(personnelID uint, from, to *time.Time) ([]models.Reservation, error)
 	GenerateVerificationToken(reservationID uint, clientID, centerID uint, role string) (string, error)
-	VerifyQR(token string, authBeautyCenterID uint) error
+	// VerifyQR completes a reservation exactly once and reports whether the
+	// reservation was ALREADY COMPLETED before this call: false when this call
+	// performed the completion, true for an idempotent re-scan or a lost
+	// exactly-once race.
+	VerifyQR(token string, authBeautyCenterID uint) (*models.Reservation, bool, error)
 	AssignPersonnel(reservationID uint, personnelID uint, centerID uint) error
 }

@@ -7,6 +7,10 @@ import (
 
 type PersonnelService interface {
 	Update(id uint, req request.UpdatePersonnelRequest) (response.PersonnelResponse, error)
+	// UpdateMe is the self-service profile edit: the allow-listed DTO carries no
+	// email/is_active/beauty_center_id, so identity and center affiliation are
+	// structurally immutable through PATCH /personnel/me (design D2/D4).
+	UpdateMe(id uint, req request.UpdateMePersonnelRequest) (response.PersonnelResponse, error)
 	Delete(id uint) error
 	FindByID(id uint) (response.PersonnelResponse, error)
 	FindAll(beautyCenterID uint, page, limit int) ([]response.PersonnelResponse, int64, error)

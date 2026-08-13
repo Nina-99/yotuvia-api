@@ -76,6 +76,24 @@ func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint) ([
 	return reservations, err
 }
 
+// FindByPersonnelId implements ReservationRepository. The where clause is
+// assembled conditionally so nil from/to stay open-ended while GORM still
+// handles the bound parameters.
+func (r *ReservationRepositoryImpl) FindByPersonnelId(personnelID uint, from, to *time.Time) ([]models.Reservation, error) {
+	var reservations []models.Reservation
+	query := r.db.
+		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
+		Where("personnel_id = ?", personnelID)
+	if from != nil {
+		query = query.Where("date >= ?", *from)
+	}
+	if to != nil {
+		query = query.Where("date <= ?", *to)
+	}
+	err := query.Order("date ASC, start_time ASC").Find(&reservations).Error
+	return reservations, err
+}
+
 func (r *ReservationRepositoryImpl) FindAll(page, limit int, centerID uint) ([]models.Reservation, int64, error) {
 	var reservations []models.Reservation
 	var total int64

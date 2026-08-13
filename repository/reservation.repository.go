@@ -14,6 +14,10 @@ type ReservationRepository interface {
 	FindByClientID(clientID uint) ([]models.Reservation, error)
 	FindUpcomingByClientID(clientID uint) (*models.Reservation, error)
 	FindByBeautyCenterId(beautyCenterID uint) ([]models.Reservation, error)
+	// FindByPersonnelId returns a staff member's reservations (agenda). from/to
+	// are an optional inclusive date range; nil means open-ended on that side.
+	// Results are ordered by date then start_time ascending.
+	FindByPersonnelId(personnelID uint, from, to *time.Time) ([]models.Reservation, error)
 	// FindAll is scoped to a single beauty center (the caller's centerID claim).
 	FindAll(page, limit int, centerID uint) ([]models.Reservation, int64, error)
 	CheckOverlap(centerID uint, date time.Time, startTime, endTime string, personnelID, excludeID uint) (bool, error)

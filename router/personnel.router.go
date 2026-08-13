@@ -22,5 +22,6 @@ func PersonnelRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valid
 		personnel.GET("", ctrl.FindAll)
 		personnel.PUT("/:id", middleware.RequireRole("beauty_center"), ctrl.Update)
 		personnel.DELETE("/:id", middleware.RequireRole("beauty_center"), ctrl.Delete)
+		personnel.PATCH("/me", middleware.RequireRole("personnel"), ctrl.UpdateMe)
 	}
 }
