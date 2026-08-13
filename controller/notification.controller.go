@@ -193,9 +193,10 @@ func (c *NotificationController) RegisterPushDevice(ctx *gin.Context) {
 
 func mapNotificationToResponse(n *models.Notification) response.NotificationResponse {
 	resp := response.NotificationResponse{
-		ID:        n.ID,
-		ClientID:  n.ClientID,
-		Type:      n.Type,
+		ID:          n.ID,
+		ClientID:    n.ClientID,
+		PersonnelID: n.PersonnelID,
+		Type:        n.Type,
 		Title:     n.Title,
 		Message:   n.Message,
 		Data:      n.Data,
