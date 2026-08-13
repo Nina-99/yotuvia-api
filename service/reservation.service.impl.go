@@ -295,7 +295,10 @@ func (s *ReservationServiceImpl) AssignPersonnel(reservationID uint, personnelID
 			personnelNew.LastName,
 		)
 		_ = s.NotificationService.Create(reservation.ClientID, "personnel_changed", title, message, dataStr)
-		_ = s.NotificationService.SendPushToClient(reservation.ClientID, title, message, dataStr)
+		// Push mirrors the REST {type, data} shape so the mobile mapper can
+		// resolve the payload on cold start (design D3). Row data stays clean.
+		pushData := fmt.Sprintf(`{"type":"personnel_changed","data":%q}`, dataStr)
+		_ = s.NotificationService.SendPushToClient(reservation.ClientID, title, message, pushData)
 	}
 
 	return nil
@@ -425,6 +428,13 @@ func (s *ReservationServiceImpl) FindByBeautyCenterID(beautyCenterID, actorCente
 	return s.ReservationRepository.FindByBeautyCenterId(beautyCenterID)
 }
 
+// FindByPersonnelID returns the caller's own agenda. The personnelID arrives as
+// the caller's claim from the controller (never from the request path), so no
+// cross-staff surface exists; from/to bound the optional date range.
+func (s *ReservationServiceImpl) FindByPersonnelID(personnelID uint, from, to *time.Time) ([]models.Reservation, error) {
+	return s.ReservationRepository.FindByPersonnelId(personnelID, from, to)
+}
+
 // ──────────────────────────────────────────────
 //  QR / VERIFICATION
 // ──────────────────────────────────────────────
@@ -477,19 +487,19 @@ func (s *ReservationServiceImpl) GenerateVerificationToken(reservationID uint, c
 	return token, nil
 }
 
-func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint) error {
+func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint) (*models.Reservation, bool, error) {
 	reservation, err := s.ReservationRepository.FindByToken(token)
 	if err != nil || reservation == nil {
-		return apperrors.ErrNotFound
+		return nil, false, apperrors.ErrNotFound
 	}
 
 	if reservation.BeautyCenterID != authBeautyCenterID {
 		utils.Log.Warnf("[SECURITY ALERT] Intrusion attempt! Salon ID %d tried to verify QR for Reservation ID %d (owned by Salon %d)", authBeautyCenterID, reservation.ID, reservation.BeautyCenterID)
-		return apperrors.ErrForbidden
+		return nil, false, apperrors.ErrForbidden
 	}
 
 	if reservation.TokenExpiresAt != nil && time.Now().After(*reservation.TokenExpiresAt) {
-		return apperrors.ErrBadRequest
+		return nil, false, apperrors.ErrBadRequest
 	}
 
 	// Idempotency: a COMPLETED reservation (including legacy lowercase rows) is
@@ -497,19 +507,19 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 	// CANCELLED reservation is terminal and must not complete.
 	switch normalizeStatus(reservation.Status) {
 	case "COMPLETED":
-		return nil
+		return reservation, true, nil
 	case "CANCELLED":
-		return apperrors.ErrConflict
+		return nil, false, apperrors.ErrConflict
 	}
 
 	// ── Token consumption check ──
 	charge := reservation.TotalPrice * 0.035
 	canConsume, err := s.TokenAccountService.CanConsume(authBeautyCenterID, utils.ToMilli(charge))
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	if !canConsume {
-		return apperrors.ErrInsufficientBalance
+		return nil, false, apperrors.ErrInsufficientBalance
 	}
 
 	// ── Exactly-once persistence ──
@@ -522,11 +532,11 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 
 	completed, err := s.ReservationRepository.CompleteVerification(reservation)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	if !completed {
 		utils.Log.Infof("[QR] Reservation ID %d already completed by another scan — no-op", reservation.ID)
-		return nil
+		return reservation, true, nil
 	}
 
 	// ── Deduct YOTTUs ──
@@ -537,7 +547,7 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 		fmt.Sprintf("Reservation #%d completed — 3.5%% of %.2f", reservation.ID, reservation.TotalPrice))
 	if consumeErr != nil {
 		utils.Log.Errorf("[TOKEN] Failed to deduct tokens for reservation %d: %v", reservation.ID, consumeErr)
-		return consumeErr
+		return nil, false, consumeErr
 	}
 
 	// ── Loyalty stamps ──
@@ -557,5 +567,5 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 
 	utils.Log.Infof("[QR VERIFIED] Reservation ID %d marked as COMPLETED. Charged %.2f YOTTUs. Added stamps for %d services",
 		reservation.ID, charge, len(reservation.ReservationServices))
-	return nil
+	return reservation, false, nil
 }

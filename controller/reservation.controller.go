@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
@@ -329,12 +330,58 @@ func (c *ReservationController) VerifyQR(ctx *gin.Context) {
 
 	beautyCenterID := ctx.GetUint("centerID")
 
-	if err := c.reservationService.VerifyQR(token, beautyCenterID); err != nil {
+	reservation, alreadyCompleted, err := c.reservationService.VerifyQR(token, beautyCenterID)
+	if err != nil {
 		c.writeError(ctx, err)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Reservation verified successfully"})
+	ctx.JSON(http.StatusOK, response.VerifyQRResponse{
+		Reservation:      mapToReservationResponse(reservation),
+		AlreadyCompleted: alreadyCompleted,
+	})
+}
+
+// FindMyReservations returns the caller's own agenda (staff self-service). The
+// personnel identity is the JWT claim (ctx clientID) — never a path parameter —
+// and optional from/to query params bound the date range, defaulting to
+// [today, +90d] per the resolved design question.
+func (c *ReservationController) FindMyReservations(ctx *gin.Context) {
+	personnelID := ctx.GetUint("clientID")
+
+	var from, to *time.Time
+	if raw := ctx.Query("from"); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			c.writeError(ctx, apperrors.ErrBadRequest)
+			return
+		}
+		from = &parsed
+	}
+	if raw := ctx.Query("to"); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			c.writeError(ctx, apperrors.ErrBadRequest)
+			return
+		}
+		to = &parsed
+	}
+	if from == nil {
+		today := time.Now().Truncate(24 * time.Hour)
+		from = &today
+	}
+	if to == nil {
+		plus90 := time.Now().Truncate(24*time.Hour).AddDate(0, 0, 90)
+		to = &plus90
+	}
+
+	reservations, err := c.reservationService.FindByPersonnelID(personnelID, from, to)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, mapReservationsToResponses(reservations))
 }
 
 // ──────────────────────────────────────────────

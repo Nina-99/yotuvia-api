@@ -64,16 +64,67 @@ func (s *PersonnelServiceImpl) Update(id uint, req request.UpdatePersonnelReques
 
 	// Sync images
 	if len(req.Images) > 0 {
-		var newImages []models.PersonnelImage
-		for _, imgReq := range req.Images {
-			newImages = append(newImages, models.PersonnelImage{
-				PersonnelID: personnel.ID,
-				ImageUrl:    imgReq.ImageUrl,
-				IsCover:     imgReq.IsCover,
-				Position:    imgReq.Position,
-			})
+		s.applyImages(personnel, req.Images)
+	}
+
+	if err := s.repo.Update(personnel); err != nil {
+		return response.PersonnelResponse{}, err
+	}
+
+	return s.mapToResponse(*personnel), nil
+}
+
+// applyImages replaces the personnel's image set from a request DTO. Shared by
+// the admin Update and self-service UpdateMe paths.
+func (s *PersonnelServiceImpl) applyImages(personnel *models.Personnel, images []request.PersonnelImageRequest) {
+	var newImages []models.PersonnelImage
+	for _, imgReq := range images {
+		newImages = append(newImages, models.PersonnelImage{
+			PersonnelID: personnel.ID,
+			ImageUrl:    imgReq.ImageUrl,
+			IsCover:     imgReq.IsCover,
+			Position:    imgReq.Position,
+		})
+	}
+	personnel.PersonnelImage = newImages
+}
+
+// UpdateMe implements PersonnelService. It reuses Update's bcrypt and images
+// sync internals but only touches fields the self-service DTO exposes — email,
+// is_active, and beauty_center_id are never read or written here, so a staff
+// member's login identity and center affiliation cannot change through
+// PATCH /personnel/me.
+func (s *PersonnelServiceImpl) UpdateMe(id uint, req request.UpdateMePersonnelRequest) (response.PersonnelResponse, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return response.PersonnelResponse{}, apperrors.ErrValidation
+	}
+	personnel, err := s.repo.FindByID(id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.PersonnelResponse{}, apperrors.ErrNotFound
 		}
-		personnel.PersonnelImage = newImages
+		return response.PersonnelResponse{}, err
+	}
+
+	if req.FirstName != "" {
+		personnel.FirstName = req.FirstName
+	}
+	if req.LastName != "" {
+		personnel.LastName = req.LastName
+	}
+	if req.Phone != "" {
+		personnel.Phone = req.Phone
+	}
+	if req.Password != "" {
+		hashed, err := utils.HashPassword(req.Password)
+		if err != nil {
+			return response.PersonnelResponse{}, err
+		}
+		personnel.Password = hashed
+	}
+
+	if len(req.Images) > 0 {
+		s.applyImages(personnel, req.Images)
 	}
 
 	if err := s.repo.Update(personnel); err != nil {

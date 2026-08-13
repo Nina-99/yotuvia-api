@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -42,6 +43,46 @@ func (c *PersonnelController) Update(ctx *gin.Context) {
 	}
 
 	res, err := c.personnelService.Update(uint(id), req)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, res)
+}
+
+// UpdateMe is the staff self-service profile edit. The actor is the JWT claim
+// (ctx clientID) — never a path parameter — and the allow-listed DTO makes
+// email/is_active/beauty_center_id structurally impossible, so a personnel
+// token cannot mutate its own login identity or center affiliation.
+func (c *PersonnelController) UpdateMe(ctx *gin.Context) {
+	personnelID := ctx.GetUint("clientID")
+
+	// Spec contract (api-authz): sending identity/center fields must be
+	// rejected with 403 even though the DTO cannot bind them. Detect them in
+	// the raw payload so the stored value stays unchanged and the caller is
+	// told the attempt failed — defense in depth on top of the DTO firewall.
+	var raw map[string]json.RawMessage
+	if err := ctx.ShouldBindJSON(&raw); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	for _, forbidden := range []string{"email", "is_active", "beauty_center_id"} {
+		if _, present := raw[forbidden]; present {
+			c.writeError(ctx, apperrors.ErrForbidden)
+			return
+		}
+	}
+
+	// Rebind the validated payload into the allow-listed DTO.
+	body, _ := json.Marshal(raw)
+	var req request.UpdateMePersonnelRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	res, err := c.personnelService.UpdateMe(personnelID, req)
 	if err != nil {
 		c.writeError(ctx, err)
 		return

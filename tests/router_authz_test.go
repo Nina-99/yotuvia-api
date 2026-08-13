@@ -6,15 +6,21 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/router"
+	"github.com/Nina-99/yottu-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func ptrString(s string) *string { return &s }
 
 // setupRouterAuthzDB migrates the same model set configs/db.config.go does, so
 // allowed-role probes can actually reach their handlers on an empty database.
@@ -125,7 +131,9 @@ func TestRouterAuthz_NoToken401(t *testing.T) {
 		{"reservation assign", "PATCH", "/api/reservation/1/assign", []string{"beauty_center"}, "client", "", 0},
 		{"reservation cancel", "PATCH", "/api/reservation/1/cancel", []string{"client"}, "beauty_center", "", 0},
 		{"reservation generate qr", "POST", "/api/reservation/generate-qr/1", []string{"client", "beauty_center"}, "personnel", "", 0},
-		{"reservation verify qr", "GET", "/api/reservation/verify-qr", []string{"beauty_center"}, "client", "", 0},
+		{"reservation verify qr", "GET", "/api/reservation/verify-qr", []string{"beauty_center", "personnel"}, "client", "", 0},
+		{"reservation my agenda", "GET", "/api/reservation/me", []string{"personnel"}, "client", "", 0},
+		{"personnel update me", "PATCH", "/api/personnel/me", []string{"personnel"}, "client", "", 0},
 		{"client find all", "GET", "/api/client", []string{"beauty_center"}, "client", "", 0},
 		{"client by id", "GET", "/api/client/1", []string{"client"}, "beauty_center", "", 0},
 		{"personnel find by id", "GET", "/api/personnel/1", []string{"client"}, "client", "", 0},
@@ -166,7 +174,9 @@ func TestRouterAuthz_RoleGates(t *testing.T) {
 		{"reservation assign", "PATCH", "/api/reservation/1/assign", []string{"beauty_center"}, "client", "", 0},
 		{"reservation cancel", "PATCH", "/api/reservation/1/cancel", []string{"client"}, "beauty_center", "", 0},
 		{"reservation generate qr", "POST", "/api/reservation/generate-qr/1", []string{"client", "beauty_center"}, "personnel", "", 0},
-		{"reservation verify qr", "GET", "/api/reservation/verify-qr", []string{"beauty_center"}, "client", "", 0},
+		{"reservation verify qr", "GET", "/api/reservation/verify-qr", []string{"beauty_center", "personnel"}, "client", "", 0},
+		{"reservation my agenda", "GET", "/api/reservation/me", []string{"personnel"}, "client", "", 200},
+		{"personnel update me", "PATCH", "/api/personnel/me", []string{"personnel"}, "client", "", 0},
 		{"client find all", "GET", "/api/client", []string{"beauty_center"}, "client", "", 200},
 		{"personnel update", "PUT", "/api/personnel/1", []string{"beauty_center"}, "client", "", 0},
 		{"personnel delete", "DELETE", "/api/personnel/1", []string{"beauty_center"}, "client", "", 0},
@@ -191,4 +201,95 @@ func TestRouterAuthz_RoleGates(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ──────────────────────────────────────────────
+//  Personnel self-service behavioral coverage
+// ──────────────────────────────────────────────
+
+// TestRouterAuthz_PersonnelAgendaScoped — GET /reservation/me returns only the
+// caller's own reservations (token claim), never another staff member's, and a
+// client token is denied with 403. This is the D1 "no cross-staff surface"
+// guarantee at the HTTP layer.
+func TestRouterAuthz_PersonnelAgendaScoped(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	r, db := authzTestRouter(t)
+
+	today := time.Now().Truncate(24 * time.Hour)
+	rows := []models.Reservation{
+		{BeautyCenterID: 1, ClientID: 1, PersonnelID: 7, Date: today, StartTime: "09:00", EndTime: "10:00", TotalPrice: 100},
+		{BeautyCenterID: 1, ClientID: 2, PersonnelID: 9, Date: today, StartTime: "10:00", EndTime: "11:00", TotalPrice: 200},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("failed to seed: %v", err)
+	}
+
+	// Client token → 403 (role gate, not data scoping).
+	w := do(r, http.MethodGet, "/api/reservation/me", roleToken(t, 1, 0, "client"), "")
+	assert.Equal(t, http.StatusForbidden, w.Code)
+
+	// Personnel 7 → 200, only its own row, no leak of personnel 9's row.
+	w = do(r, http.MethodGet, "/api/reservation/me", roleToken(t, 7, 1, "personnel"), "")
+	assert.Equal(t, http.StatusOK, w.Code)
+	var got []response.ReservationResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Len(t, got, 1, "exactly one reservation for personnel 7")
+	assert.Equal(t, uint(7), got[0].PersonnelID)
+	assert.Equal(t, uint(1), got[0].ClientID)
+}
+
+// TestRouterAuthz_PersonnelVerifyQRWiden — verify-qr is reachable by a
+// personnel token and returns the VerifyQRResponse envelope (200), while the
+// QR it scans must belong to the personnel token's own center (centerID claim).
+func TestRouterAuthz_PersonnelVerifyQRWiden(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+	r, db := authzTestRouter(t)
+
+	// The real token-account chain needs an account with balance for the
+	// 3.5% charge (TotalPrice 100 → 3.5 YOTTUs → 3500 milli).
+	if err := db.Create(&models.TokenAccount{BeautyCenterID: 1, Balance: 100000}).Error; err != nil {
+		t.Fatalf("failed to seed token account: %v", err)
+	}
+
+	future := time.Now().Add(30 * time.Minute)
+	res := &models.Reservation{
+		BeautyCenterID:    1,
+		ClientID:          1,
+		PersonnelID:       1,
+		Status:            "CONFIRMED",
+		TotalPrice:        100,
+		VerificationToken: ptrString("AGENDA-TOK"),
+		TokenExpiresAt:    &future,
+	}
+	if err := db.Create(res).Error; err != nil {
+		t.Fatalf("failed to seed: %v", err)
+	}
+
+	w := do(r, http.MethodGet, "/api/reservation/verify-qr?token=AGENDA-TOK", roleToken(t, 1, 1, "personnel"), "")
+	assert.Equal(t, http.StatusOK, w.Code)
+	var vr response.VerifyQRResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &vr))
+	assert.Equal(t, res.ID, vr.Reservation.ID)
+	assert.False(t, vr.AlreadyCompleted, "first scan completes → already_completed=false")
+}
+
+// TestRouterAuthz_PersonnelStatusStillForbidden — widening verify-qr must NOT
+// widen /status: a personnel token hitting PATCH /:id/status is still 403
+// (design D4 isolation; /status stays beauty_center-only).
+func TestRouterAuthz_PersonnelStatusStillForbidden(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	r, db := authzTestRouter(t)
+
+	res := &models.Reservation{BeautyCenterID: 1, ClientID: 1, PersonnelID: 1, Status: "PENDING", TotalPrice: 50}
+	if err := db.Create(res).Error; err != nil {
+		t.Fatalf("failed to seed: %v", err)
+	}
+
+	w := do(r, http.MethodPatch, "/api/reservation/1/status", roleToken(t, 1, 1, "personnel"), `{"status":"CONFIRMED"}`)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+
+	// Confirm the behavior is unchanged for the legitimate beauty_center role.
+	w = do(r, http.MethodPatch, "/api/reservation/1/status", roleToken(t, 1, 1, "beauty_center"), `{"status":"CONFIRMED"}`)
+	assert.Equal(t, http.StatusOK, w.Code)
 }

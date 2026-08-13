@@ -133,15 +133,18 @@ func seedQRReservation(t *testing.T, db *gorm.DB, status, token string, expiry *
 
 // TestVerifyQR_CompletesExactlyOnce — the first verification charges, punches,
 // and triggers missions exactly once, persists UPPERCASE COMPLETED, clears the
-// token, and a later re-verification produces no extra side effects.
+// token, returns already_completed=false, and a later re-verification produces
+// no extra side effects.
 func TestVerifyQR_CompletesExactlyOnce(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
 	svc, account, loyalty, mission, db := qrTestService(t, true)
 	future := time.Now().Add(30 * time.Minute)
 	res := seedQRReservation(t, db, "CONFIRMED", "TOK-ONCE", &future)
 
-	err := svc.VerifyQR("TOK-ONCE", 1)
+	completed, already, err := svc.VerifyQR("TOK-ONCE", 1)
 	assert.NoError(t, err)
+	assert.False(t, already, "this call completed the reservation → already_completed=false")
+	assert.Equal(t, res.ID, completed.ID)
 	assert.Equal(t, 1, account.consumeCalls)
 	assert.Equal(t, 1, loyalty.punchCalls)
 	assert.Equal(t, 1, mission.triggerCalls)
@@ -154,7 +157,7 @@ func TestVerifyQR_CompletesExactlyOnce(t *testing.T) {
 	assert.Nil(t, stored.TokenExpiresAt)
 
 	// Re-verification after completion: token is gone → nothing runs again.
-	err = svc.VerifyQR("TOK-ONCE", 1)
+	_, _, err = svc.VerifyQR("TOK-ONCE", 1)
 	assert.ErrorIs(t, err, apperrors.ErrNotFound)
 	assert.Equal(t, 1, account.consumeCalls)
 	assert.Equal(t, 1, loyalty.punchCalls)
@@ -163,15 +166,18 @@ func TestVerifyQR_CompletesExactlyOnce(t *testing.T) {
 
 // TestVerifyQR_CompletedIsNoOp — a retry that finds a COMPLETED reservation
 // still carrying its token (concurrent in-flight scan) must not charge, punch,
-// or trigger missions; it is a success no-op.
+// or trigger missions; it is a success no-op that reports already_completed=true.
 func TestVerifyQR_CompletedIsNoOp(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
 	svc, account, loyalty, mission, db := qrTestService(t, true)
 	future := time.Now().Add(30 * time.Minute)
 	seedQRReservation(t, db, "COMPLETED", "TOK-DONE", &future)
 
-	err := svc.VerifyQR("TOK-DONE", 1)
+	completed, already, err := svc.VerifyQR("TOK-DONE", 1)
 	assert.NoError(t, err)
+	assert.True(t, already, "reservation was already completed → already_completed=true")
+	assert.NotNil(t, completed)
+	assert.Equal(t, "COMPLETED", completed.Status)
 	assert.Equal(t, 0, account.consumeCalls)
 	assert.Equal(t, 0, loyalty.punchCalls)
 	assert.Equal(t, 0, mission.triggerCalls)
@@ -179,15 +185,16 @@ func TestVerifyQR_CompletedIsNoOp(t *testing.T) {
 
 // TestVerifyQR_LegacyLowercaseCompletedIsNoOp — a legacy row written with a
 // lowercase status must be treated as COMPLETED (normalized at read) and skip
-// all completion side effects.
+// all completion side effects, reporting already_completed=true.
 func TestVerifyQR_LegacyLowercaseCompletedIsNoOp(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
 	svc, account, loyalty, mission, db := qrTestService(t, true)
 	future := time.Now().Add(30 * time.Minute)
 	seedQRReservation(t, db, "completed", "TOK-LEGACY", &future)
 
-	err := svc.VerifyQR("TOK-LEGACY", 1)
+	_, already, err := svc.VerifyQR("TOK-LEGACY", 1)
 	assert.NoError(t, err)
+	assert.True(t, already, "legacy lowercase completed row is still already_completed")
 	assert.Equal(t, 0, account.consumeCalls)
 	assert.Equal(t, 0, loyalty.punchCalls)
 	assert.Equal(t, 0, mission.triggerCalls)
@@ -222,10 +229,28 @@ func TestVerifyQR_ErrorMapping(t *testing.T) {
 			svc, _, _, _, db := qrTestService(t, tt.canConsume)
 			seedQRReservation(t, db, tt.status, tt.seedToken, tt.expiry)
 
-			err := svc.VerifyQR(tt.token, tt.centerID)
+			_, _, err := svc.VerifyQR(tt.token, tt.centerID)
 			assert.ErrorIs(t, err, tt.wantErr)
 		})
 	}
+}
+
+// TestVerifyQR_LostRaceAlreadyCompleted — when CompleteVerification matches 0
+// rows because the row is no longer in a completable state (concurrent scan or
+// a state the exact-once guard rejects), the call is a success no-op with
+// already_completed=true (design D3). A "NO-SHOW" status passes the canceled
+// check but is excluded by the conditional update's IN (PENDING, CONFIRMED)
+// guard — driving the 0-row race branch with no double charge.
+func TestVerifyQR_LostRaceAlreadyCompleted(t *testing.T) {
+	utils.Log = zap.NewNop().Sugar()
+	svc, account, _, _, db := qrTestService(t, true)
+	future := time.Now().Add(30 * time.Minute)
+	seedQRReservation(t, db, "NO-SHOW", "TOK-RACE", &future)
+
+	_, already, err := svc.VerifyQR("TOK-RACE", 1)
+	assert.NoError(t, err)
+	assert.True(t, already, "0-row completion must report already_completed=true")
+	assert.Equal(t, 0, account.consumeCalls, "no charge when the exact-once guard refuses")
 }
 
 // TestGenerateQR_TerminalStatesConflict — QR generation for terminal states

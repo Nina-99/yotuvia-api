@@ -15,5 +15,10 @@ type Notification struct {
 	IsRead   bool   `gorm:"default:false"`
 	ReadAt   *time.Time
 
+	// PersonnelID is nullable: staff notifications target a personnel row and
+	// use a ClientID sentinel of 0, leaving client rows untouched (design D5).
+	// AutoMigrate (configs/db.config.go) adds the column — no migration file.
+	PersonnelID *uint `gorm:"index"`
+
 	Client Client `gorm:"foreignKey:ClientID"`
 }
