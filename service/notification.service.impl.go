@@ -89,6 +89,60 @@ func (s *NotificationServiceImpl) CountUnread(clientID, actorClientID uint) (int
 }
 
 // ──────────────────────────────────────────────
+//  PERSONNEL-SCOPED NOTIFICATIONS (design D5)
+// ──────────────────────────────────────────────
+
+func (s *NotificationServiceImpl) CreateForPersonnel(personnelID uint, notifType, title, message, data string) error {
+	notif := &models.Notification{
+		ClientID:    0, // D5 sentinel: staff rows never belong to a real client
+		PersonnelID: &personnelID,
+		Type:        notifType,
+		Title:       title,
+		Message:     message,
+		Data:        data,
+	}
+	return s.NotificationRepo.Create(notif)
+}
+
+func (s *NotificationServiceImpl) GetByPersonnelID(personnelID, actorPersonnelID uint) ([]models.Notification, error) {
+	// Owner-only: the path personnelId must match the actor's claim.
+	if actorPersonnelID != personnelID {
+		return nil, apperrors.ErrForbidden
+	}
+	return s.NotificationRepo.FindByPersonnelID(personnelID)
+}
+
+func (s *NotificationServiceImpl) GetUnreadByPersonnelID(personnelID, actorPersonnelID uint) ([]models.Notification, error) {
+	if actorPersonnelID != personnelID {
+		return nil, apperrors.ErrForbidden
+	}
+	return s.NotificationRepo.FindUnreadByPersonnelID(personnelID)
+}
+
+func (s *NotificationServiceImpl) CountUnreadByPersonnelID(personnelID, actorPersonnelID uint) (int64, error) {
+	if actorPersonnelID != personnelID {
+		return 0, apperrors.ErrForbidden
+	}
+	return s.NotificationRepo.CountUnreadByPersonnelID(personnelID)
+}
+
+func (s *NotificationServiceImpl) MarkAsReadByPersonnel(notificationID, actorPersonnelID uint) error {
+	notif, err := s.NotificationRepo.FindByID(notificationID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperrors.ErrNotFound
+		}
+		return err
+	}
+	// Nil-safe ownership: client rows have PersonnelID nil and can never be
+	// claimed by staff, so a mismatch (nil or different value) is forbidden.
+	if notif.PersonnelID == nil || *notif.PersonnelID != actorPersonnelID {
+		return apperrors.ErrForbidden
+	}
+	return s.NotificationRepo.MarkAsRead(notificationID)
+}
+
+// ──────────────────────────────────────────────
 //  PUSH DEVICES
 // ──────────────────────────────────────────────
 

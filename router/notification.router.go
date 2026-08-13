@@ -26,6 +26,18 @@ func NotificationRoutes(rg *gin.RouterGroup, db *gorm.DB) {
 		notifications.POST("/client/:clientId/read-all", ctrl.MarkAllAsRead)
 	}
 
+	// Personnel notifications (personnel auth, design D5). Routes are
+	// claim-scoped: the actor's personnelID lives in ctx "clientID", so no
+	// path param is exposed and cross-staff access is rejected by the service.
+	personnel := notifications.Group("/personnel")
+	personnel.Use(middleware.RequireRole("personnel"))
+	{
+		personnel.GET("", ctrl.GetByPersonnel)
+		personnel.GET("/unread", ctrl.GetUnreadByPersonnel)
+		personnel.GET("/count", ctrl.CountUnreadByPersonnel)
+		personnel.PATCH("/:id/read", ctrl.MarkAsReadByPersonnel)
+	}
+
 	// Push devices (client auth)
 	push := rg.Group("/push-devices")
 	push.Use(middleware.JWTAuthMiddleware())
