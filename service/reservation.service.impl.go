@@ -301,6 +301,15 @@ func (s *ReservationServiceImpl) AssignPersonnel(reservationID uint, personnelID
 		_ = s.NotificationService.SendPushToClient(reservation.ClientID, title, message, pushData)
 	}
 
+	// Personnel-scoped notifications (design D5): in-app only, no push.
+	// The losing staff member is notified only when a staff was actually
+	// assigned before; the gaining staff member always is (personnelID is
+	// validated above and belongs to the right center).
+	if reservation.PersonnelID != 0 && reservation.PersonnelID != personnelID {
+		_ = s.NotifyPersonnelReassigned(reservation, personnelID)
+	}
+	_ = s.NotifyPersonnelAssigned(reservation, personnelID)
+
 	return nil
 }
 
@@ -364,7 +373,62 @@ func (s *ReservationServiceImpl) Cancel(reservationID uint, clientID uint, reaso
 		reservation.CancelReason = &reason
 	}
 
-	return s.ReservationRepository.Update(reservation)
+	if err := s.ReservationRepository.Update(reservation); err != nil {
+		return err
+	}
+
+	// Personnel-scoped notification (design D5): in-app only, no push. The
+	// assigned staff member is told the reservation was cancelled. Guarded
+	// against reservations created without personnel (PersonnelID = 0).
+	if reservation.PersonnelID != 0 {
+		_ = s.NotifyPersonnelCancelled(reservation, reason)
+	}
+
+	return nil
+}
+
+// ──────────────────────────────────────────────
+//  PERSONNEL-SCOPED NOTIFICATION HELPERS (design D5)
+// ──────────────────────────────────────────────
+
+// NotifyPersonnelAssigned tells the gaining staff member about a new
+// reservation (or reassignment). Data carries the stable key pair used by the
+// mobile mapper: reservation_id + personnel_id.
+func (s *ReservationServiceImpl) NotifyPersonnelAssigned(reservation *models.Reservation, personnelID uint) error {
+	dataStr := fmt.Sprintf(`{"reservation_id":%d,"personnel_id":%d}`, reservation.ID, personnelID)
+	title := "Nuevo turno asignado"
+	message := fmt.Sprintf("Tenés un turno el %s a las %s",
+		reservation.Date.Format("02/01"),
+		reservation.StartTime,
+	)
+	return s.NotificationService.CreateForPersonnel(personnelID, "personnel_changed", title, message, dataStr)
+}
+
+// NotifyPersonnelReassigned tells the losing staff member their reservation
+// was reassigned to another professional.
+func (s *ReservationServiceImpl) NotifyPersonnelReassigned(reservation *models.Reservation, personnelID uint) error {
+	dataStr := fmt.Sprintf(`{"reservation_id":%d,"personnel_id":%d}`, reservation.ID, personnelID)
+	title := "Turno reasignado"
+	message := fmt.Sprintf("El turno del %s a las %s fue reasignado a otro profesional",
+		reservation.Date.Format("02/01"),
+		reservation.StartTime,
+	)
+	return s.NotificationService.CreateForPersonnel(reservation.PersonnelID, "personnel_changed", title, message, dataStr)
+}
+
+// NotifyPersonnelCancelled tells the assigned staff member their reservation
+// was cancelled by the client.
+func (s *ReservationServiceImpl) NotifyPersonnelCancelled(reservation *models.Reservation, reason string) error {
+	dataStr := fmt.Sprintf(`{"reservation_id":%d}`, reservation.ID)
+	title := "Turno cancelado"
+	message := fmt.Sprintf("El turno del %s a las %s fue cancelado",
+		reservation.Date.Format("02/01"),
+		reservation.StartTime,
+	)
+	if reason != "" {
+		message += fmt.Sprintf(" — Motivo: %s", reason)
+	}
+	return s.NotificationService.CreateForPersonnel(reservation.PersonnelID, "reservation_cancelled", title, message, dataStr)
 }
 
 // ──────────────────────────────────────────────

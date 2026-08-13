@@ -36,6 +36,33 @@ func (r *NotificationRepositoryImpl) FindUnreadByClientID(clientID uint) ([]mode
 
 // FindByID implements NotificationRepository — used by the service to verify
 // notification ownership before MarkAsRead.
+// FindByPersonnelID returns staff notifications scoped by PersonnelID, newest
+// first. Staff rows use the ClientID=0 sentinel, so the personnel_id filter is
+// sufficient and client rows (PersonnelID null) never match.
+func (r *NotificationRepositoryImpl) FindByPersonnelID(personnelID uint) ([]models.Notification, error) {
+	var notifications []models.Notification
+	err := r.db.Where("personnel_id = ?", personnelID).
+		Order("created_at DESC").
+		Find(&notifications).Error
+	return notifications, err
+}
+
+func (r *NotificationRepositoryImpl) FindUnreadByPersonnelID(personnelID uint) ([]models.Notification, error) {
+	var notifications []models.Notification
+	err := r.db.Where("personnel_id = ? AND is_read = ?", personnelID, false).
+		Order("created_at DESC").
+		Find(&notifications).Error
+	return notifications, err
+}
+
+func (r *NotificationRepositoryImpl) CountUnreadByPersonnelID(personnelID uint) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Notification{}).
+		Where("personnel_id = ? AND is_read = ?", personnelID, false).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *NotificationRepositoryImpl) FindByID(notificationID uint) (*models.Notification, error) {
 	var notif models.Notification
 	if err := r.db.First(&notif, notificationID).Error; err != nil {

@@ -116,6 +116,57 @@ func (c *NotificationController) MarkAllAsRead(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "All marked as read"})
 }
 
+// ──────────────────────────────────────────────
+//  PERSONNEL NOTIFICATIONS (design D5)
+// ──────────────────────────────────────────────
+
+// GET /notifications/personnel — staff reads its own notifications. The actor
+// claim (personnelID in ctx "clientID") is the scope; no path param needed.
+func (c *NotificationController) GetByPersonnel(ctx *gin.Context) {
+	notifications, err := c.notificationService.GetByPersonnelID(ctx.GetUint("clientID"), ctx.GetUint("clientID"))
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, mapNotificationsToResponse(notifications))
+}
+
+// GET /notifications/personnel/unread
+func (c *NotificationController) GetUnreadByPersonnel(ctx *gin.Context) {
+	notifications, err := c.notificationService.GetUnreadByPersonnelID(ctx.GetUint("clientID"), ctx.GetUint("clientID"))
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, mapNotificationsToResponse(notifications))
+}
+
+// GET /notifications/personnel/count
+func (c *NotificationController) CountUnreadByPersonnel(ctx *gin.Context) {
+	count, err := c.notificationService.CountUnreadByPersonnelID(ctx.GetUint("clientID"), ctx.GetUint("clientID"))
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"count": count})
+}
+
+// PATCH /notifications/personnel/:id/read
+func (c *NotificationController) MarkAsReadByPersonnel(ctx *gin.Context) {
+	idParam := ctx.Param("id")
+	notifID, err := strconv.Atoi(idParam)
+	if err != nil || notifID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid notification ID"})
+		return
+	}
+
+	if err := c.notificationService.MarkAsReadByPersonnel(uint(notifID), ctx.GetUint("clientID")); err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"message": "Marked as read"})
+}
+
 // POST /push-devices/register
 func (c *NotificationController) RegisterPushDevice(ctx *gin.Context) {
 	var req request.RegisterPushDeviceRequest
