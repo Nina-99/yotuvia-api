@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
 	"errors"
+	"time"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
@@ -15,6 +18,7 @@ type AuthAccountServiceImpl struct {
 	ClientRepo      repository.ClientRepository
 	PersonnelRepo   repository.PersonnelRepository
 	CenterRepo      repository.BeautyCenterRepository
+	SessionRepo     repository.UserSessionRepository
 	TokenAccountSvc TokenAccountService
 	Validate        *validator.Validate
 }
@@ -24,6 +28,7 @@ func NewAuthAccountServiceImpl(
 	clientRepo repository.ClientRepository,
 	personnelRepo repository.PersonnelRepository,
 	centerRepo repository.BeautyCenterRepository,
+	sessionRepo repository.UserSessionRepository,
 	tokenAccountSvc TokenAccountService,
 	validate *validator.Validate,
 ) AuthAccountService {
@@ -32,9 +37,38 @@ func NewAuthAccountServiceImpl(
 		ClientRepo:      clientRepo,
 		PersonnelRepo:   personnelRepo,
 		CenterRepo:      centerRepo,
+		SessionRepo:     sessionRepo,
 		TokenAccountSvc: tokenAccountSvc,
 		Validate:        validate,
 	}
+}
+
+// mintSession creates a new active session generation for the authenticated
+// user and returns the raw refresh token to hand to the client exactly once.
+// Sessions key on the polymorphic JWT user_id claim (D1).
+func (s *AuthAccountServiceImpl) mintSession(userID, centerID uint, role, email, username string) (string, error) {
+	raw, err := utils.GenerateRefreshToken()
+	if err != nil {
+		return "", err
+	}
+	familyID, err := utils.GenerateFamilyID()
+	if err != nil {
+		return "", err
+	}
+	session := &models.UserSession{
+		UserID:           userID,
+		FamilyID:         familyID,
+		RefreshTokenHash: utils.HashRefreshToken(raw),
+		ExpiresAt:        time.Now().Add(utils.RefreshTokenTTL),
+		Role:             role,
+		CenterID:         centerID,
+		Email:            email,
+		Username:         username,
+	}
+	if err := s.SessionRepo.Create(context.Background(), session); err != nil {
+		return "", err
+	}
+	return raw, nil
 }
 
 // ──────────────────────────────────────────────
@@ -155,13 +189,19 @@ func (s *AuthAccountServiceImpl) loginByType(identifier, password, userType stri
 		return AuthResult{}, err
 	}
 
+	refreshToken, err := s.mintSession(userID, centerID, userType, email, username)
+	if err != nil {
+		return AuthResult{}, err
+	}
+
 	return AuthResult{
-		Token:     token,
-		UserID:    userID,
-		Email:     email,
-		FirstName: firstName,
-		LastName:  lastName,
-		Role:      userType,
+		Token:        token,
+		RefreshToken: refreshToken,
+		UserID:       userID,
+		Email:        email,
+		FirstName:    firstName,
+		LastName:     lastName,
+		Role:         userType,
 	}, nil
 }
 
@@ -311,13 +351,19 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		return AuthResult{}, err
 	}
 
+	refreshToken, err := s.mintSession(userID, centerID, req.UserType, email, username)
+	if err != nil {
+		return AuthResult{}, err
+	}
+
 	return AuthResult{
-		Token:     token,
-		UserID:    userID,
-		Email:     email,
-		FirstName: firstName,
-		LastName:  lastName,
-		Role:      req.UserType,
+		Token:        token,
+		RefreshToken: refreshToken,
+		UserID:       userID,
+		Email:        email,
+		FirstName:    firstName,
+		LastName:     lastName,
+		Role:         req.UserType,
 	}, nil
 }
 
@@ -531,12 +577,82 @@ func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccoun
 		return AuthResult{}, err
 	}
 
+	refreshToken, err := s.mintSession(userID, centerID, account.UserType, email, username)
+	if err != nil {
+		return AuthResult{}, err
+	}
+
 	return AuthResult{
-		Token:     token,
-		UserID:    userID,
-		Email:     email,
-		FirstName: firstName,
-		LastName:  lastName,
-		Role:      account.UserType,
+		Token:        token,
+		RefreshToken: refreshToken,
+		UserID:       userID,
+		Email:        email,
+		FirstName:    firstName,
+		LastName:     lastName,
+		Role:         account.UserType,
 	}, nil
+}
+
+// ──────────────────────────────────────────────
+//  REFRESH
+// ──────────────────────────────────────────────
+
+// Refresh rotates a refresh token (D2). The repository transaction atomically
+// revokes the presented generation and creates the next one; reuse (a stale,
+// already-rotated token) revokes the entire family. Every invalid outcome maps
+// to 401 — the refresh token is the only credential this endpoint has.
+func (s *AuthAccountServiceImpl) Refresh(ctx context.Context, rawToken string) (RefreshResult, error) {
+	if rawToken == "" {
+		return RefreshResult{}, apperrors.ErrUnauthorized
+	}
+
+	var newRaw string
+	newSession, err := s.SessionRepo.Rotate(ctx, utils.HashRefreshToken(rawToken), func(active *models.UserSession) (*models.UserSession, error) {
+		raw, err := utils.GenerateRefreshToken()
+		if err != nil {
+			return nil, err
+		}
+		newRaw = raw
+		return &models.UserSession{
+			UserID:           active.UserID,
+			FamilyID:         active.FamilyID,
+			RefreshTokenHash: utils.HashRefreshToken(raw),
+			ExpiresAt:        time.Now().Add(utils.RefreshTokenTTL),
+			Role:             active.Role,
+			CenterID:         active.CenterID,
+			Email:            active.Email,
+			Username:         active.Username,
+		}, nil
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrSessionNotFound),
+			errors.Is(err, repository.ErrSessionExpired),
+			errors.Is(err, repository.ErrSessionReuse):
+			utils.Log.Warnf("[AUTH] Refresh rejected (%v)", err)
+			return RefreshResult{}, apperrors.ErrUnauthorized
+		default:
+			return RefreshResult{}, err
+		}
+	}
+
+	accessToken, err := utils.GenerateJWT(newSession.UserID, newSession.CenterID, newSession.Role, newSession.Email, newSession.Username)
+	if err != nil {
+		return RefreshResult{}, err
+	}
+	return RefreshResult{AccessToken: accessToken, RefreshToken: newRaw}, nil
+}
+
+// ──────────────────────────────────────────────
+//  LOGOUT
+// ──────────────────────────────────────────────
+
+// Logout revokes the session presenting rawToken (D3). It is idempotent:
+// unknown or already-revoked tokens yield no error, so the endpoint always
+// answers 204 for an authenticated caller.
+func (s *AuthAccountServiceImpl) Logout(ctx context.Context, rawToken string) error {
+	if rawToken == "" {
+		return apperrors.ErrBadRequest
+	}
+	return s.SessionRepo.RevokeByHash(ctx, utils.HashRefreshToken(rawToken))
 }

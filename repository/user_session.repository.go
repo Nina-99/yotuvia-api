@@ -1,0 +1,44 @@
+package repository
+
+import (
+	"context"
+	"errors"
+
+	"github.com/Nina-99/yottu-api/models"
+)
+
+// Session sentinel errors. The service maps all of them to 401 at the HTTP
+// boundary; each carries a distinct reason so the failure is logged, not leaked.
+var (
+	// ErrSessionNotFound signals a refresh token matching no session row.
+	ErrSessionNotFound = errors.New("session not found")
+	// ErrSessionExpired signals an active session past its 30-day expiry.
+	ErrSessionExpired = errors.New("session expired")
+	// ErrSessionReuse signals a token that was already rotated (theft replay or
+	// a lost race): the whole family is revoked before this is returned.
+	ErrSessionReuse = errors.New("session reuse detected")
+)
+
+type UserSessionRepository interface {
+	Create(ctx context.Context, session *models.UserSession) error
+	FindByHash(ctx context.Context, hash string) (*models.UserSession, error)
+
+	// RotateCAS atomically claims the presented session generation: it marks
+	// it rotated (revoked) ONLY if it is still the active generation for that
+	// hash. Returns false when a concurrent request already rotated it
+	// (RowsAffected == 0) or the presented hash no longer matches.
+	RotateCAS(ctx context.Context, sessionID uint, presentedHash string) (bool, error)
+
+	// Rotate runs the full rotation transaction (D2): SELECT ... FOR UPDATE the
+	// generation presenting oldHash; an already-revoked generation (reuse) or a
+	// lost CAS both revoke the entire family; an expired generation fails
+	// without touching the family. issue() builds the next generation row.
+	Rotate(ctx context.Context, presentedHash string, issue func(active *models.UserSession) (*models.UserSession, error)) (*models.UserSession, error)
+
+	// RevokeByHash revokes the session row matching the hash (logout). It is
+	// idempotent: unknown or already-revoked tokens are a no-op.
+	RevokeByHash(ctx context.Context, hash string) error
+
+	// RevokeFamily revokes every generation row of a session family.
+	RevokeFamily(ctx context.Context, familyID string) error
+}

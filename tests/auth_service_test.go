@@ -34,6 +34,7 @@ func setupAuthServiceTestDB(t *testing.T) *gorm.DB {
 		&models.Personnel{},
 		&models.BeautyCenter{},
 		&models.AuthAccount{},
+		&models.UserSession{},
 	)
 	if err != nil {
 		t.Fatalf("Falied to migrate database: %v", err)
@@ -62,7 +63,8 @@ func TestAuthService_Login(t *testing.T) {
 	personnelRepo := repository.NewPersonnelRepositoryImpl(db)
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	// Instanciamos el servicio unificado
-	authService := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo, nil, validate)
+	authService := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo,
+		repository.NewUserSessionRepositoryImpl(db), nil, validate)
 	t.Run("Classic Login Success (Client)", func(t *testing.T) {
 		req := request.LoginRequest{
 			Identifier: "juan@perez.com", // Buscamos por email

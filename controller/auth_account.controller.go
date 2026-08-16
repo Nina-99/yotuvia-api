@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/service"
@@ -96,9 +97,48 @@ func (c *AuthAccountController) CheckEmail(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"exists": exists})
 }
 
+// Refresh rotates the presented refresh token (public — the access token is
+// expired by design when this endpoint is needed). Reuse revokes the family
+// and answers 401; every other invalid token also answers 401.
+func (c *AuthAccountController) Refresh(ctx *gin.Context) {
+	var req request.RefreshRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	result, err := c.authAccountService.Refresh(ctx.Request.Context(), req.RefreshToken)
+	if err != nil {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"token": result.AccessToken, "refresh_token": result.RefreshToken})
+}
+
+// Logout revokes the session presenting the body's refresh token. Idempotent:
+// repeated or unknown tokens still answer 204 for the authenticated caller.
+func (c *AuthAccountController) Logout(ctx *gin.Context) {
+	var req request.LogoutRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if err := c.authAccountService.Logout(ctx.Request.Context(), req.RefreshToken); err != nil {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	ctx.JSON(http.StatusNoContent, nil)
+}
+
 func toAuthResponse(result service.AuthResult) response.AuthResponse {
 	return response.AuthResponse{
-		Token: result.Token,
+		Token:        result.Token,
+		RefreshToken: result.RefreshToken,
 		User: response.UserResponse{
 			ID:        result.UserID,
 			Email:     result.Email,
