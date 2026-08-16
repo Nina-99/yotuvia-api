@@ -25,6 +25,8 @@ var (
 	ErrConflict = errors.New("conflict")
 	// ErrValidation signals request validation failure.
 	ErrValidation = errors.New("validation failed")
+	// ErrFileTooLarge signals an upload exceeding the size cap (413).
+	ErrFileTooLarge = errors.New("file too large")
 	// ErrInsufficientBalance signals the client cannot afford the operation.
 	ErrInsufficientBalance = errors.New("insufficient balance")
 )
@@ -49,6 +51,8 @@ func MapToHTTP(err error) (int, string) {
 		return http.StatusConflict, ErrConflict.Error()
 	case errors.Is(err, ErrInsufficientBalance):
 		return http.StatusConflict, ErrInsufficientBalance.Error()
+	case errors.Is(err, ErrFileTooLarge):
+		return http.StatusRequestEntityTooLarge, ErrFileTooLarge.Error()
 	default:
 		utils.Log.Errorf("[apperrors] internal error: %v", err)
 		return http.StatusInternalServerError, "internal server error"

@@ -5,7 +5,8 @@ type UpdateClientRequest struct {
 	LastName  string `json:"last_name" validate:"required"`
 	Username  string `json:"username" validate:"required"`
 	Email     string `json:"email" validate:"required,email"`
-	Password  string `json:"password" validate:"required"`
+	Password  string `json:"password"` // "" = keep existing hash
 	Phone     string `json:"phone" validate:"required"`
 	IsActive  bool   `json:"is_active"`
+	AvatarURL string `json:"avatar_url"` // "" = keep existing value
 }

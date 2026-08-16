@@ -2,6 +2,14 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
@@ -82,6 +90,9 @@ func (s *ClientServiceImpl) Update(id uint, actorClientID uint, req request.Upda
 		}
 		client.Password = hash
 	}
+	if req.AvatarURL != "" {
+		client.AvatarURL = req.AvatarURL
+	}
 	client.IsActive = req.IsActive
 
 	if err := s.ClientRepository.Update(client); err != nil {
@@ -137,4 +148,66 @@ func (s *ClientServiceImpl) FindByID(id uint, actorClientID uint) (*models.Clien
 		return nil, err
 	}
 	return client, nil
+}
+
+// maxAvatarBytes is the 5MB upload cap from the spec.
+const maxAvatarBytes = 5 * 1024 * 1024
+
+// sniffedImageExtensions maps a detected image/* MIME type to the extension the
+// stored file gets. The extension ALWAYS comes from the sniff, never from the
+// client-controlled filename (spoofable, may carry path separators).
+var sniffedImageExtensions = map[string]string{
+	"image/jpeg": ".jpg",
+	"image/png":  ".png",
+	"image/webp": ".webp",
+	"image/gif":  ".gif",
+}
+
+func (s *ClientServiceImpl) UploadAvatar(clientID uint, file *multipart.FileHeader) (string, error) {
+	if file.Size > maxAvatarBytes {
+		return "", apperrors.ErrFileTooLarge
+	}
+
+	src, err := file.Open()
+	if err != nil {
+		utils.Log.Errorf("UploadAvatar failed: cannot open upload for client %d: %v", clientID, err)
+		return "", err
+	}
+	defer src.Close()
+
+	// Sniff the first 512 bytes for the real MIME type (mirrors the spec's
+	// "detected MIME type" requirement and http.DetectContentType's window).
+	head := make([]byte, 512)
+	n := 0
+	for n < len(head) {
+		read, err := src.Read(head[n:])
+		n += read
+		if err != nil {
+			break
+		}
+	}
+	mime := http.DetectContentType(head[:n])
+	if !strings.HasPrefix(mime, "image/") {
+		return "", apperrors.ErrValidation
+	}
+	ext, ok := sniffedImageExtensions[mime]
+	if !ok {
+		utils.Log.Warnf("UploadAvatar rejected unsupported image type %q for client %d", mime, clientID)
+		return "", apperrors.ErrValidation
+	}
+
+	uploadDir := filepath.Join("uploads", "clients", strconv.FormatUint(uint64(clientID), 10))
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		utils.Log.Errorf("UploadAvatar failed: cannot create upload dir: %v", err)
+		return "", err
+	}
+
+	safeName := fmt.Sprintf("%d_%d%s", clientID, time.Now().UnixNano(), ext)
+	filePath := filepath.Join(uploadDir, safeName)
+	if err := utils.SaveUploadedFile(file, filePath); err != nil {
+		utils.Log.Errorf("UploadAvatar failed: cannot save file for client %d: %v", clientID, err)
+		return "", err
+	}
+
+	return fmt.Sprintf("/uploads/clients/%d/%s", clientID, safeName), nil
 }

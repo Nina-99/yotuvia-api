@@ -49,6 +49,32 @@ func (c *ClientController) Update(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Update"})
 }
 
+// UploadAvatar accepts the client's profile image as multipart field "image",
+// stores it under uploads/clients/{clientID}/ and returns the relative
+// avatar_url. The destination client is taken solely from the JWT claim (no
+// :id surface), so a client can never upload for someone else.
+func (c *ClientController) UploadAvatar(ctx *gin.Context) {
+	clientID := ctx.GetUint("clientID")
+	if clientID == 0 {
+		c.writeError(ctx, apperrors.ErrUnauthorized)
+		return
+	}
+
+	file, err := ctx.FormFile("image")
+	if err != nil {
+		c.writeError(ctx, apperrors.ErrValidation)
+		return
+	}
+
+	avatarURL, err := c.clientService.UploadAvatar(clientID, file)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"avatar_url": avatarURL})
+}
+
 func (c *ClientController) Delete(ctx *gin.Context) {
 	idParam := ctx.Param("id")
 	clientId, err := strconv.Atoi(idParam)
