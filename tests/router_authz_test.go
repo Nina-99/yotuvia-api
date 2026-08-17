@@ -120,6 +120,7 @@ func TestRouterAuthz_NoToken401(t *testing.T) {
 	// Every route in scope now requires a bearer token.
 	routes := []routeGate{
 		{"reservation create", "POST", "/api/reservation/", []string{"client"}, "beauty_center", "", 0},
+		{"reservation admin create", "POST", "/api/reservation/admin", []string{"beauty_center", "personnel"}, "client", "", 0},
 		{"reservation find all", "GET", "/api/reservation", []string{"beauty_center"}, "client", "", 0},
 		{"reservation by id", "GET", "/api/reservation/1", []string{"client", "beauty_center"}, "personnel", "", 0},
 		{"reservation by client", "GET", "/api/reservation/client/1", []string{"client"}, "beauty_center", "", 0},
@@ -163,6 +164,8 @@ func TestRouterAuthz_RoleGates(t *testing.T) {
 	r, _ := authzTestRouter(t)
 
 	routes := []routeGate{
+		{"reservation create", "POST", "/api/reservation/", []string{"client"}, "beauty_center", "", 0},
+		{"reservation admin create", "POST", "/api/reservation/admin", []string{"beauty_center", "personnel"}, "client", "", 0},
 		{"reservation find all", "GET", "/api/reservation", []string{"beauty_center"}, "client", "", 200},
 		{"reservation by client", "GET", "/api/reservation/client/1", []string{"client"}, "beauty_center", "", 200},
 		{"reservation upcoming", "GET", "/api/reservation/client/1/upcoming", []string{"client"}, "beauty_center", "", 404},
