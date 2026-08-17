@@ -22,6 +22,7 @@ func newReservationTriggerTestService(t *testing.T, db *gorm.DB) service.Reserva
 		repository.NewReservationRepositoryImpl(db),
 		repository.NewServiceRepositoryImpl(db),
 		repository.NewPersonnelRepositoryImpl(db),
+		repository.NewClientRepositoryImpl(db),
 		service.NewNotificationServiceImpl(notifRepo, repository.NewPushDeviceRepositoryImpl(db)),
 		nil, // LoyaltyService stub not needed for cancel/assign
 		nil, // TokenAccountService stub not needed for cancel/assign

@@ -19,6 +19,7 @@ type ReservationServiceImpl struct {
 	PersonnelRepository   repository.PersonnelRepository
 	ReservationRepository repository.ReservationRepository
 	ServiceRepository     repository.ServiceRepository
+	ClientRepository      repository.ClientRepository
 	NotificationService   NotificationService
 	LoyaltyService        LoyaltyService
 	TokenAccountService   TokenAccountService
@@ -30,6 +31,7 @@ func NewReservationServiceImpl(
 	reservationRepository repository.ReservationRepository,
 	serviceRepository repository.ServiceRepository,
 	personnelRepository repository.PersonnelRepository,
+	clientRepository repository.ClientRepository,
 	notificationService NotificationService,
 	loyaltyService LoyaltyService,
 	tokenAccountService TokenAccountService,
@@ -40,6 +42,7 @@ func NewReservationServiceImpl(
 		ReservationRepository: reservationRepository,
 		PersonnelRepository:   personnelRepository,
 		ServiceRepository:     serviceRepository,
+		ClientRepository:      clientRepository,
 		NotificationService:   notificationService,
 		LoyaltyService:        loyaltyService,
 		TokenAccountService:   tokenAccountService,
@@ -156,6 +159,58 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 	}
 	_, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime)
 	return err
+}
+
+// ──────────────────────────────────────────────
+//  CREATE ADMIN — Walk-in (beauty_center | personnel)
+// ──────────────────────────────────────────────
+
+// CreateAdminReservation implements ReservationService (design D2/D4/D6).
+// The route gate already restricted the HTTP surface, but the service re-proves
+// every binding from the actor claims so direct callers cannot bypass them:
+// centerID claim must exist and match the body, a personnel actor must be a
+// member of that center (Personnel row), and the target client must exist and
+// be active. The actual persistence delegates to createReservationCore (D1).
+func (s *ReservationServiceImpl) CreateAdminReservation(req request.CreateAdminReservationRequest, actor ReservationActor) (*models.Reservation, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return nil, apperrors.ErrValidation
+	}
+
+	// D2: only center admin and staff may book walk-ins.
+	if actor.Role != "beauty_center" && actor.Role != "personnel" {
+		return nil, apperrors.ErrForbidden
+	}
+
+	// D2: the JWT centerID claim is the source of truth; a missing claim can
+	// never bind a center, and a body center never overrides the claim.
+	if actor.CenterID == 0 || actor.CenterID != req.BeautyCenterID {
+		return nil, apperrors.ErrForbidden
+	}
+
+	// D2: personnel membership is proven from the Personnel row, not trusted
+	// from the claim alone.
+	if actor.Role == "personnel" {
+		personnel, err := s.PersonnelRepository.FindByID(actor.ClientID)
+		if err != nil || personnel == nil || personnel.BeautyCenterID != req.BeautyCenterID {
+			return nil, apperrors.ErrForbidden
+		}
+	}
+
+	// D4: the walk-in target must exist and be active — a clear 400 before any
+	// DB write, never a deferred foreign-key failure.
+	client, err := s.ClientRepository.FindById(req.ClientID)
+	if err != nil || client == nil || !client.IsActive {
+		return nil, apperrors.ErrBadRequest
+	}
+
+	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime)
+	if err != nil {
+		return nil, err
+	}
+
+	// D6: return the reservation with relations preloaded so the controller can
+	// emit the full ReservationResponse DTO (names, services, prices).
+	return s.ReservationRepository.FindById(id)
 }
 
 // ──────────────────────────────────────────────

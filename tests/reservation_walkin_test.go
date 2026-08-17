@@ -29,11 +29,11 @@ var walkinDay = time.Date(2026, 8, 16, 0, 0, 0, 0, time.UTC)
 type walkinSeed struct {
 	centerOne   *models.BeautyCenter
 	centerTwo   *models.BeautyCenter
-	staffOne    *models.Personnel // belongs to center 1
-	staffTwo    *models.Personnel // belongs to center 2
-	svcOne      *models.Service   // center 1, 30min, $50
-	svcTwo      *models.Service   // center 2, 30min, $50 — must never book at center 1
-	svcThree    *models.Service   // center 1, 30min, $50
+	staffOne    *models.Personnel   // belongs to center 1
+	staffTwo    *models.Personnel   // belongs to center 2
+	svcOne      *models.Service     // center 1, 30min, $50
+	svcTwo      *models.Service     // center 2, 30min, $50 — must never book at center 1
+	svcThree    *models.Service     // center 1, 30min, $50
 	overlapSlot *models.Reservation // center 1, 08-16 09:00–10:00, staff 1
 }
 
@@ -129,18 +129,18 @@ func TestReservationWalkin_CreateSuccess(t *testing.T) {
 	}{
 		{
 			name:        "two services compute end_time and total_price",
-			body:        `{"beauty_center_id":1,"client_id":1,"personnel_id":1,"service_ids":[1,3],"date":"2026-08-16","start_time":"09:30"}`,
+			body:        `{"beauty_center_id":1,"client_id":1,"personnel_id":1,"service_ids":[1,3],"date":"2026-08-16","start_time":"10:30"}`,
 			wantClient:  1,
-			wantEnd:     "10:30",
+			wantEnd:     "11:30",
 			wantTotal:   100,
 			wantServLen: 2,
 			wantSvcIDs:  []uint{1, 3},
 		},
 		{
 			name:        "single service keeps price and duration per service",
-			body:        `{"beauty_center_id":1,"client_id":3,"personnel_id":1,"service_ids":[1],"date":"2026-08-16","start_time":"11:00"}`,
+			body:        `{"beauty_center_id":1,"client_id":3,"personnel_id":1,"service_ids":[1],"date":"2026-08-16","start_time":"13:00"}`,
 			wantClient:  3,
-			wantEnd:     "11:30",
+			wantEnd:     "13:30",
 			wantTotal:   50,
 			wantServLen: 1,
 			wantSvcIDs:  []uint{1},
@@ -378,7 +378,7 @@ func TestReservationWalkin_CenterBinding(t *testing.T) {
 		{
 			name:  "personnel of own center books",
 			token: roleToken(t, 1, 1, "personnel"),
-			body:  validBody,
+			body:  `{"beauty_center_id":1,"client_id":5,"personnel_id":1,"service_ids":[1],"date":"2026-08-16","start_time":"14:00"}`,
 			want:  http.StatusCreated,
 		},
 		{

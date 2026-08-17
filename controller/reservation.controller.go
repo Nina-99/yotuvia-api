@@ -63,6 +63,37 @@ func (c *ReservationController) Create(ctx *gin.Context) {
 }
 
 // ──────────────────────────────────────────────
+//  CREATE ADMIN — Walk-in booking (beauty_center | personnel)
+// ──────────────────────────────────────────────
+
+// CreateAdmin books a walk-in reservation on behalf of an active client
+// (design D5). The actor claims come from the JWT context — the body can never
+// supply identity — and the created reservation is returned as the computed
+// ReservationResponse DTO (design D6: 201 + status/price/end_time for
+// immediate UI updates).
+func (c *ReservationController) CreateAdmin(ctx *gin.Context) {
+	var req request.CreateAdminReservationRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	actor := service.ReservationActor{
+		ClientID: ctx.GetUint("clientID"),
+		CenterID: ctx.GetUint("centerID"),
+		Role:     ctx.GetString("role"),
+	}
+
+	reservation, err := c.reservationService.CreateAdminReservation(req, actor)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, mapToReservationResponse(reservation))
+}
+
+// ──────────────────────────────────────────────
 //  UPDATE
 // ──────────────────────────────────────────────
 

@@ -7,8 +7,24 @@ import (
 	"github.com/Nina-99/yottu-api/models"
 )
 
+type ReservationActor struct {
+	// ClientID is the JWT subject: the client ID for the "client" role, the
+	// personnel ID for the "personnel" role, the admin account ID otherwise.
+	ClientID uint
+	// CenterID is the JWT centerID claim (0 when the token carries none).
+	CenterID uint
+	// Role is the JWT role claim: "client" | "personnel" | "beauty_center".
+	Role string
+}
+
 type ReservationService interface {
 	Create(req request.CreateReservationRequest) error
+	// CreateAdminReservation books a walk-in on behalf of a center admin or
+	// staff member (design D2/D4/D6). The actor's centerID claim is the source
+	// of truth and is bound against the request body; staff membership is
+	// proven via the Personnel row; the target client must exist and be
+	// active. It returns the created reservation (preloaded for DTO mapping).
+	CreateAdminReservation(req request.CreateAdminReservationRequest, actor ReservationActor) (*models.Reservation, error)
 	// Update/Delete/FindById/GenerateVerificationToken take actor params
 	// (clientID, centerID, role claims) and enforce ownership: a client may act
 	// on its own reservation, a center on its own center's reservation.
