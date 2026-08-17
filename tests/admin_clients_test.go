@@ -32,13 +32,13 @@ var (
 //	center 2: client 1 (PENDING — shared client), client 4 (COMPLETED — exclusive)
 //	client 5: no reservations anywhere
 type adminClientsSeed struct {
-	c1DayA     *models.Reservation // center 1, client 1, COMPLETED, 08-10 09:00, 100.00
-	c1DayB14   *models.Reservation // center 1, client 1, COMPLETED, 08-15 14:00, 50.00
-	c1DayB09   *models.Reservation // center 1, client 1, COMPLETED, 08-15 09:00, 30.00
-	c1Center2  *models.Reservation // center 2, client 1, PENDING,   08-15 09:00, 200.00 — shared client leak guard
+	c1DayA      *models.Reservation // center 1, client 1, COMPLETED, 08-10 09:00, 100.00
+	c1DayB14    *models.Reservation // center 1, client 1, COMPLETED, 08-15 14:00, 50.00
+	c1DayB09    *models.Reservation // center 1, client 1, COMPLETED, 08-15 09:00, 30.00
+	c1Center2   *models.Reservation // center 2, client 1, PENDING,   08-15 09:00, 200.00 — shared client leak guard
 	c2Cancelled *models.Reservation // center 1, client 2, CANCELLED, 08-10 10:00, 80.00
-	c3Pending  *models.Reservation // center 1, client 3, PENDING,   08-20 11:00, 60.00
-	c4Center2  *models.Reservation // center 2, client 4, COMPLETED, 08-10 12:00, 90.00 — exclusive client leak guard
+	c3Pending   *models.Reservation // center 1, client 3, PENDING,   08-20 11:00, 60.00
+	c4Center2   *models.Reservation // center 2, client 4, COMPLETED, 08-10 12:00, 90.00 — exclusive client leak guard
 }
 
 // seedAdminClientsData seeds two centers, four active clients (one shared, one

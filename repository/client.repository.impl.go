@@ -86,9 +86,9 @@ func (r *ClientRepositoryImpl) FindAllAdmin(page, limit int, centerID uint) ([]m
 	offset := (page - 1) * limit
 	var rows []adminClientRow
 	err := r.db.Table("clients").
-		Select("clients.*, " +
-			"COALESCE(COUNT(CASE WHEN reservations.status = 'COMPLETED' THEN 1 END), 0) AS visits_count, " +
-			"COALESCE(SUM(CASE WHEN reservations.status = 'COMPLETED' THEN reservations.total_price END), 0) AS total_spent, " +
+		Select("clients.*, "+
+			"COALESCE(COUNT(CASE WHEN reservations.status = 'COMPLETED' THEN 1 END), 0) AS visits_count, "+
+			"COALESCE(SUM(CASE WHEN reservations.status = 'COMPLETED' THEN reservations.total_price END), 0) AS total_spent, "+
 			"CAST(MAX(CASE WHEN reservations.status = 'COMPLETED' THEN reservations.date END) AS TEXT) AS last_visit").
 		Joins(adminReservationsJoin, centerID).
 		Where("clients.deleted_at IS NULL").
