@@ -67,13 +67,18 @@ func (r *ReservationRepositoryImpl) FindByClientID(clientID uint) ([]models.Rese
 	return reservations, err
 }
 
-func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint, date *time.Time) ([]models.Reservation, error) {
+func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint, date *time.Time, clientID *uint) ([]models.Reservation, error) {
 	var reservations []models.Reservation
 	query := r.db.
 		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
 		Where("beauty_center_id = ?", beautyCenterID)
 
-	if date != nil {
+	if clientID != nil {
+		// Client-scoped history (design D3): strict center+client filter with
+		// reverse chronological order. Takes precedence over the date-agenda
+		// ordering when both params are present.
+		query = query.Where("client_id = ?", *clientID).Order("date DESC, start_time DESC")
+	} else if date != nil {
 		// Date-scoped agenda (design D2/D3): exact day equality plus
 		// chronological ordering; a nil date keeps current behavior untouched.
 		query = query.Where("date = ?", *date).Order("start_time ASC")

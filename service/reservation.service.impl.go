@@ -485,11 +485,11 @@ func (s *ReservationServiceImpl) FindUpcomingByClientID(clientID, actorClientID 
 	return reservation, nil
 }
 
-func (s *ReservationServiceImpl) FindByBeautyCenterID(beautyCenterID, actorCenterID uint, date *time.Time) ([]models.Reservation, error) {
+func (s *ReservationServiceImpl) FindByBeautyCenterID(beautyCenterID, actorCenterID uint, date *time.Time, clientID *uint) ([]models.Reservation, error) {
 	if actorCenterID != beautyCenterID {
 		return nil, apperrors.ErrForbidden
 	}
-	return s.ReservationRepository.FindByBeautyCenterId(beautyCenterID, date)
+	return s.ReservationRepository.FindByBeautyCenterId(beautyCenterID, date, clientID)
 }
 
 // FindByPersonnelID returns the caller's own agenda. The personnelID arrives as

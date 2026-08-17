@@ -245,7 +245,21 @@ func (c *ReservationController) FindByBeautyCenter(ctx *gin.Context) {
 		parsedDate = &d
 	}
 
-	reservations, err := c.reservationService.FindByBeautyCenterID(centerID, ctx.GetUint("centerID"), parsedDate)
+	// Optional clientId=X scopes the agenda to one client's history at this
+	// center (design D3). Parsing mirrors the date param: malformed or
+	// non-positive → 400, absent → nil (unchanged behavior).
+	var clientID *uint
+	if raw := ctx.Query("clientId"); raw != "" {
+		id, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || id == 0 {
+			c.writeError(ctx, apperrors.ErrBadRequest)
+			return
+		}
+		parsed := uint(id)
+		clientID = &parsed
+	}
+
+	reservations, err := c.reservationService.FindByBeautyCenterID(centerID, ctx.GetUint("centerID"), parsedDate, clientID)
 	if err != nil {
 		c.writeError(ctx, err)
 		return
