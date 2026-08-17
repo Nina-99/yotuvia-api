@@ -233,7 +233,19 @@ func (c *ReservationController) FindByBeautyCenter(ctx *gin.Context) {
 		return
 	}
 
-	reservations, err := c.reservationService.FindByBeautyCenterID(centerID, ctx.GetUint("centerID"))
+	// Optional date=YYYY-MM-DD scopes the agenda to one day (design D3).
+	// Parsing mirrors /reservation/me: malformed → 400, absent → nil.
+	var parsedDate *time.Time
+	if raw := ctx.Query("date"); raw != "" {
+		d, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			c.writeError(ctx, apperrors.ErrBadRequest)
+			return
+		}
+		parsedDate = &d
+	}
+
+	reservations, err := c.reservationService.FindByBeautyCenterID(centerID, ctx.GetUint("centerID"), parsedDate)
 	if err != nil {
 		c.writeError(ctx, err)
 		return

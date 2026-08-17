@@ -67,12 +67,19 @@ func (r *ReservationRepositoryImpl) FindByClientID(clientID uint) ([]models.Rese
 	return reservations, err
 }
 
-func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint) ([]models.Reservation, error) {
+func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint, date *time.Time) ([]models.Reservation, error) {
 	var reservations []models.Reservation
-	err := r.db.
+	query := r.db.
 		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
-		Where("beauty_center_id = ?", beautyCenterID).
-		Find(&reservations).Error
+		Where("beauty_center_id = ?", beautyCenterID)
+
+	if date != nil {
+		// Date-scoped agenda (design D2/D3): exact day equality plus
+		// chronological ordering; a nil date keeps current behavior untouched.
+		query = query.Where("date = ?", *date).Order("start_time ASC")
+	}
+
+	err := query.Find(&reservations).Error
 	return reservations, err
 }
 
