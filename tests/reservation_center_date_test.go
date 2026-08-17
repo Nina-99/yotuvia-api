@@ -110,20 +110,20 @@ func TestReservationCenter_DateScoping(t *testing.T) {
 	centerOneToken := roleToken(t, 7, 1, "beauty_center")
 
 	tests := []struct {
-		name           string
-		queryPath      string
-		wantStatus     int
-		wantLen        int
+		name             string
+		queryPath        string
+		wantStatus       int
+		wantLen          int
 		wantAllCenterOne bool   // no-date scenario: assert the full set, order agnostic
-		wantIDs        []uint // ordered exact match (valid-date scenario)
-		wantStartTimes []string
-		wantErr        string // non-empty asserts the {"error": ...} message
+		wantIDs          []uint // ordered exact match (valid-date scenario)
+		wantStartTimes   []string
+		wantErr          string // non-empty asserts the {"error": ...} message
 	}{
 		{
-			name:            "no date returns all center reservations unfiltered",
-			queryPath:       "/api/reservation/center/1",
-			wantStatus:      http.StatusOK,
-			wantLen:         3,
+			name:             "no date returns all center reservations unfiltered",
+			queryPath:        "/api/reservation/center/1",
+			wantStatus:       http.StatusOK,
+			wantLen:          3,
 			wantAllCenterOne: true,
 		},
 		{
