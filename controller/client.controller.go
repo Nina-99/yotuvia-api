@@ -89,7 +89,12 @@ func (c *ClientController) Delete(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Deleted"})
 }
 
-func (c *ClientController) FindAll(ctx *gin.Context) {
+// FindAllAdmin lists the clients that have at least one reservation at the
+// caller's center (authz spec: Client Endpoint Ownership) with COMPLETED-only
+// summary metrics. The centerID comes exclusively from the JWT claim set by
+// JWTAuthMiddleware — never from body or query — and the route gates the
+// beauty_center role.
+func (c *ClientController) FindAllAdmin(ctx *gin.Context) {
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
 	if page < 1 {
@@ -99,18 +104,14 @@ func (c *ClientController) FindAll(ctx *gin.Context) {
 		limit = 20
 	}
 
-	clients, total, err := c.clientService.FindAll(page, limit)
+	clients, total, err := c.clientService.FindAllAdmin(ctx.GetUint("centerID"), page, limit)
 	if err != nil {
 		c.writeError(ctx, err)
 		return
 	}
 
-	var res []response.ClientResponse
-	for _, client := range clients {
-		res = append(res, response.ClientResponse{ID: client.ID, FirstName: client.FirstName, LastName: client.LastName, Username: client.Username, Email: client.Email})
-	}
 	ctx.JSON(http.StatusOK, response.PaginatedResponse{
-		Data:  res,
+		Data:  clients,
 		Total: total,
 		Page:  page,
 		Limit: limit,

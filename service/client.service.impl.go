@@ -13,6 +13,7 @@ import (
 
 	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
+	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/utils"
@@ -119,8 +120,28 @@ func (s *ClientServiceImpl) Delete(id uint, actorClientID uint) error {
 	return s.ClientRepository.Delete(user)
 }
 
-func (s *ClientServiceImpl) FindAll(page, limit int) ([]models.Client, int64, error) {
-	return s.ClientRepository.FindAll(page, limit)
+func (s *ClientServiceImpl) FindAllAdmin(centerID uint, page, limit int) ([]response.AdminClientResponse, int64, error) {
+	clients, metrics, total, err := s.ClientRepository.FindAllAdmin(page, limit, centerID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	res := make([]response.AdminClientResponse, 0, len(clients))
+	for i := range clients {
+		res = append(res, response.AdminClientResponse{
+			ID:          clients[i].ID,
+			FirstName:   clients[i].FirstName,
+			LastName:    clients[i].LastName,
+			Email:       clients[i].Email,
+			Phone:       clients[i].Phone,
+			AvatarURL:   clients[i].AvatarURL,
+			IsActive:    clients[i].IsActive,
+			VisitsCount: metrics[i].VisitsCount,
+			TotalSpent:  metrics[i].TotalSpent,
+			LastVisit:   metrics[i].LastVisit,
+		})
+	}
+	return res, total, nil
 }
 
 func (s *ClientServiceImpl) FindEmail(Email string) (*models.Client, error) {

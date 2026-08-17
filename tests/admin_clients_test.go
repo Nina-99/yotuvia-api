@@ -236,16 +236,18 @@ func TestAdminClients_Pagination(t *testing.T) {
 	// limit=2 page=1 → clients 1, 2 (id ASC); total stays the scoped 3.
 	w = do(r, http.MethodGet, "/api/client?page=1&limit=2", centerOneToken, "")
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
-	assert.Len(t, page.Data, 2)
-	assert.Equal(t, uint(1), page.Data[0].ID)
-	assert.Equal(t, uint(2), page.Data[1].ID)
+	if assert.Len(t, page.Data, 2) {
+		assert.Equal(t, uint(1), page.Data[0].ID)
+		assert.Equal(t, uint(2), page.Data[1].ID)
+	}
 	assert.Equal(t, int64(3), page.Total, "total is the scoped count, not the page size")
 
 	// page=2 limit=2 → the remaining client; still the scoped total.
 	w = do(r, http.MethodGet, "/api/client?page=2&limit=2", centerOneToken, "")
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
-	assert.Len(t, page.Data, 1)
-	assert.Equal(t, uint(3), page.Data[0].ID)
+	if assert.Len(t, page.Data, 1) {
+		assert.Equal(t, uint(3), page.Data[0].ID)
+	}
 	assert.Equal(t, int64(3), page.Total)
 }
 
