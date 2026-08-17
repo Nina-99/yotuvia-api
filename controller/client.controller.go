@@ -49,6 +49,32 @@ func (c *ClientController) Update(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Update"})
 }
 
+// UploadAvatar accepts the client's profile image as multipart field "image",
+// stores it under uploads/clients/{clientID}/ and returns the relative
+// avatar_url. The destination client is taken solely from the JWT claim (no
+// :id surface), so a client can never upload for someone else.
+func (c *ClientController) UploadAvatar(ctx *gin.Context) {
+	clientID := ctx.GetUint("clientID")
+	if clientID == 0 {
+		c.writeError(ctx, apperrors.ErrUnauthorized)
+		return
+	}
+
+	file, err := ctx.FormFile("image")
+	if err != nil {
+		c.writeError(ctx, apperrors.ErrValidation)
+		return
+	}
+
+	avatarURL, err := c.clientService.UploadAvatar(clientID, file)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"avatar_url": avatarURL})
+}
+
 func (c *ClientController) Delete(ctx *gin.Context) {
 	idParam := ctx.Param("id")
 	clientId, err := strconv.Atoi(idParam)
@@ -63,7 +89,12 @@ func (c *ClientController) Delete(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Deleted"})
 }
 
-func (c *ClientController) FindAll(ctx *gin.Context) {
+// FindAllAdmin lists the clients that have at least one reservation at the
+// caller's center (authz spec: Client Endpoint Ownership) with COMPLETED-only
+// summary metrics. The centerID comes exclusively from the JWT claim set by
+// JWTAuthMiddleware — never from body or query — and the route gates the
+// beauty_center role.
+func (c *ClientController) FindAllAdmin(ctx *gin.Context) {
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
 	if page < 1 {
@@ -73,18 +104,14 @@ func (c *ClientController) FindAll(ctx *gin.Context) {
 		limit = 20
 	}
 
-	clients, total, err := c.clientService.FindAll(page, limit)
+	clients, total, err := c.clientService.FindAllAdmin(ctx.GetUint("centerID"), page, limit)
 	if err != nil {
 		c.writeError(ctx, err)
 		return
 	}
 
-	var res []response.ClientResponse
-	for _, client := range clients {
-		res = append(res, response.ClientResponse{ID: client.ID, FirstName: client.FirstName, LastName: client.LastName, Username: client.Username, Email: client.Email})
-	}
 	ctx.JSON(http.StatusOK, response.PaginatedResponse{
-		Data:  res,
+		Data:  clients,
 		Total: total,
 		Page:  page,
 		Limit: limit,

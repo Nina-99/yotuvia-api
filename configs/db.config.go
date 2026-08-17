@@ -55,6 +55,7 @@ func DBConnection() {
 		&models.PersonnelInvitation{},
 		&models.Notification{},
 		&models.PushDevice{},
+		&models.UserSession{},
 	}
 
 	for _, model := range list_models {

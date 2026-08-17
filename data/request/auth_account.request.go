@@ -38,3 +38,15 @@ type RegisterPersonnelRequest struct {
 	Password       string `json:"password" validate:"required,min=6,max=255"`
 	IsActive       *bool  `json:"is_active"`
 }
+
+// RefreshRequest is the body of POST /auth-accounts/refresh: the opaque
+// refresh token to rotate.
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token" validate:"required"`
+}
+
+// LogoutRequest is the body of POST /auth-accounts/logout (D3): the refresh
+// token of the session to revoke.
+type LogoutRequest struct {
+	RefreshToken string `json:"refresh_token" validate:"required"`
+}

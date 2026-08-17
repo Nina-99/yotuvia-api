@@ -15,6 +15,7 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	personnelRepo := repository.NewPersonnelRepositoryImpl(db)
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	authRepo := repository.NewAuthAccountRepositoryImpl(db)
+	sessionRepo := repository.NewUserSessionRepositoryImpl(db)
 
 	// Token service (for welcome bonus)
 	tokenAccountRepo := repository.NewTokenAccountRepositoryImpl(db)
@@ -24,7 +25,7 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	tokenAccountSvc := service.NewTokenAccountServiceImpl(tokenAccountRepo, tokenTopUpRepo, centerRepo, tokenMissionSvc)
 	tokenMissionSvc = service.NewTokenMissionServiceImpl(tokenMissionRepo, tokenAccountSvc, tokenAccountRepo)
 
-	svc := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo, tokenAccountSvc, validate)
+	svc := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo, sessionRepo, tokenAccountSvc, validate)
 	ctrl := controller.NewAuthAccountController(svc)
 
 	// Legacy routes under /auth-accounts
@@ -33,6 +34,8 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	authAccount.POST("/social", ctrl.SocialLogin)
 	authAccount.POST("/register", ctrl.Register)
 	authAccount.POST("/check-email", ctrl.CheckEmail)
+	authAccount.POST("/refresh", ctrl.Refresh)
+	authAccount.POST("/logout", middleware.JWTAuthMiddleware(), ctrl.Logout)
 
 	// Routes under /auth (used by mobile admin panel)
 	auth := rg.Group("/auth")

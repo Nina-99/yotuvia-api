@@ -24,9 +24,10 @@ type ReservationService interface {
 	FindByClientID(clientID, actorClientID uint) ([]models.Reservation, error)
 	FindUpcomingByClientID(clientID, actorClientID uint) (*models.Reservation, error)
 	// FindByBeautyCenterID allows center staff only for their own centerID.
-	// The optional date (parsed YYYY-MM-DD) scopes the agenda to one day; a
-	// nil date returns all reservations unfiltered.
-	FindByBeautyCenterID(beautyCenterID, actorCenterID uint, date *time.Time) ([]models.Reservation, error)
+	// The optional date (parsed YYYY-MM-DD) scopes the agenda to one day; the
+	// optional clientID scopes it to one client's history at that center
+	// (design D3). Nil params keep the current unfiltered behavior.
+	FindByBeautyCenterID(beautyCenterID, actorCenterID uint, date *time.Time, clientID *uint) ([]models.Reservation, error)
 	// FindByPersonnelID returns a staff member's agenda. The personnelID is the
 	// caller's own claim (never a path parameter); from/to are an optional
 	// inclusive date range (nil = open-ended).
