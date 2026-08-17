@@ -2,7 +2,6 @@ package service
 
 import (
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -75,65 +74,62 @@ func normalizeStatus(status string) string {
 //  CREATE — Multi-servicio
 // ──────────────────────────────────────────────
 
-func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) error {
-	if err := s.Validate.Struct(req); err != nil {
-		return err
-	}
-
+// createReservationCore is the single DRY creation path shared by the client
+// flow (Create) and the admin walk-in flow (CreateAdminReservation, design
+// D1). It is parameterized by fields — never by a request DTO — so both flows
+// keep identical semantics for status tracking (PENDING), end_time/total_price
+// computation, the overlap check, and the transactional insert. It returns the
+// created reservation ID so callers can re-fetch the preloaded row for DTO
+// responses. Errors are canonical apperrors sentinels so controllers map them
+// to the spec contract: 400 for malformed input / unknown or cross-center
+// services, 409 for a conflicting slot.
+func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID, personnelID uint, serviceIDs []uint, dateStr, startTimeStr string) (uint, error) {
 	// Parse date string into time.Time
-	parsedDate, err := time.Parse("2006-01-02", req.Date)
+	parsedDate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
-		return errors.New("invalid date format, use YYYY-MM-DD")
+		return 0, apperrors.ErrBadRequest
 	}
 
 	// Fetch all services and validate
-	services, err := s.ServiceRepository.FindByIDs(req.ServiceIDs)
-	if err != nil {
-		return errors.New("one or more services not found")
-	}
-	if len(services) != len(req.ServiceIDs) {
-		return errors.New("one or more services not found")
+	services, err := s.ServiceRepository.FindByIDs(serviceIDs)
+	if err != nil || len(services) != len(serviceIDs) {
+		return 0, apperrors.ErrBadRequest
 	}
 
 	// All services must belong to the same beauty center
-	for _, svc := range services {
-		if svc.BeautyCenterID != req.BeautyCenterID {
-			return errors.New("all services must belong to the same beauty center")
-		}
-	}
-
-	// Calculate totals
 	var totalPrice float64
 	var totalDuration int
 	for _, svc := range services {
+		if svc.BeautyCenterID != beautyCenterID {
+			return 0, apperrors.ErrBadRequest
+		}
 		totalPrice += svc.Price
 		totalDuration += svc.Duration
 	}
 
 	// Calculate end time from start time + total duration
-	startParsed, err := time.Parse("15:04", req.StartTime)
+	startParsed, err := time.Parse("15:04", startTimeStr)
 	if err != nil {
-		return errors.New("invalid start_time format, use HH:MM")
+		return 0, apperrors.ErrBadRequest
 	}
-	endTime := startParsed.Add(time.Duration(totalDuration) * time.Minute)
-	endTimeStr := endTime.Format("15:04")
+	endTimeStr := startParsed.Add(time.Duration(totalDuration) * time.Minute).Format("15:04")
 
 	// Check for overlaps
-	overlap, err := s.ReservationRepository.CheckOverlap(req.BeautyCenterID, parsedDate, req.StartTime, endTimeStr, req.PersonnelID, 0)
+	overlap, err := s.ReservationRepository.CheckOverlap(beautyCenterID, parsedDate, startTimeStr, endTimeStr, personnelID, 0)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if overlap {
-		return errors.New("overlapping reservation exists")
+		return 0, apperrors.ErrConflict
 	}
 
 	// Build reservation with services in a transaction
 	reservation := models.Reservation{
-		BeautyCenterID: req.BeautyCenterID,
-		ClientID:       req.ClientID,
-		PersonnelID:    req.PersonnelID,
+		BeautyCenterID: beautyCenterID,
+		ClientID:       clientID,
+		PersonnelID:    personnelID,
 		Date:           parsedDate,
-		StartTime:      req.StartTime,
+		StartTime:      startTimeStr,
 		EndTime:        endTimeStr,
 		TotalPrice:     totalPrice,
 		Status:         "PENDING",
@@ -148,7 +144,18 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 		})
 	}
 
-	return s.ReservationRepository.Create(&reservation)
+	if err := s.ReservationRepository.Create(&reservation); err != nil {
+		return 0, err
+	}
+	return reservation.ID, nil
+}
+
+func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) error {
+	if err := s.Validate.Struct(req); err != nil {
+		return err
+	}
+	_, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime)
+	return err
 }
 
 // ──────────────────────────────────────────────
