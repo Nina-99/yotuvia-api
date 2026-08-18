@@ -2,7 +2,6 @@ package service
 
 import (
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -20,6 +19,7 @@ type ReservationServiceImpl struct {
 	PersonnelRepository   repository.PersonnelRepository
 	ReservationRepository repository.ReservationRepository
 	ServiceRepository     repository.ServiceRepository
+	ClientRepository      repository.ClientRepository
 	NotificationService   NotificationService
 	LoyaltyService        LoyaltyService
 	TokenAccountService   TokenAccountService
@@ -31,6 +31,7 @@ func NewReservationServiceImpl(
 	reservationRepository repository.ReservationRepository,
 	serviceRepository repository.ServiceRepository,
 	personnelRepository repository.PersonnelRepository,
+	clientRepository repository.ClientRepository,
 	notificationService NotificationService,
 	loyaltyService LoyaltyService,
 	tokenAccountService TokenAccountService,
@@ -41,6 +42,7 @@ func NewReservationServiceImpl(
 		ReservationRepository: reservationRepository,
 		PersonnelRepository:   personnelRepository,
 		ServiceRepository:     serviceRepository,
+		ClientRepository:      clientRepository,
 		NotificationService:   notificationService,
 		LoyaltyService:        loyaltyService,
 		TokenAccountService:   tokenAccountService,
@@ -75,65 +77,62 @@ func normalizeStatus(status string) string {
 //  CREATE — Multi-servicio
 // ──────────────────────────────────────────────
 
-func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) error {
-	if err := s.Validate.Struct(req); err != nil {
-		return err
-	}
-
+// createReservationCore is the single DRY creation path shared by the client
+// flow (Create) and the admin walk-in flow (CreateAdminReservation, design
+// D1). It is parameterized by fields — never by a request DTO — so both flows
+// keep identical semantics for status tracking (PENDING), end_time/total_price
+// computation, the overlap check, and the transactional insert. It returns the
+// created reservation ID so callers can re-fetch the preloaded row for DTO
+// responses. Errors are canonical apperrors sentinels so controllers map them
+// to the spec contract: 400 for malformed input / unknown or cross-center
+// services, 409 for a conflicting slot.
+func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID, personnelID uint, serviceIDs []uint, dateStr, startTimeStr string) (uint, error) {
 	// Parse date string into time.Time
-	parsedDate, err := time.Parse("2006-01-02", req.Date)
+	parsedDate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
-		return errors.New("invalid date format, use YYYY-MM-DD")
+		return 0, apperrors.ErrBadRequest
 	}
 
 	// Fetch all services and validate
-	services, err := s.ServiceRepository.FindByIDs(req.ServiceIDs)
-	if err != nil {
-		return errors.New("one or more services not found")
-	}
-	if len(services) != len(req.ServiceIDs) {
-		return errors.New("one or more services not found")
+	services, err := s.ServiceRepository.FindByIDs(serviceIDs)
+	if err != nil || len(services) != len(serviceIDs) {
+		return 0, apperrors.ErrBadRequest
 	}
 
 	// All services must belong to the same beauty center
-	for _, svc := range services {
-		if svc.BeautyCenterID != req.BeautyCenterID {
-			return errors.New("all services must belong to the same beauty center")
-		}
-	}
-
-	// Calculate totals
 	var totalPrice float64
 	var totalDuration int
 	for _, svc := range services {
+		if svc.BeautyCenterID != beautyCenterID {
+			return 0, apperrors.ErrBadRequest
+		}
 		totalPrice += svc.Price
 		totalDuration += svc.Duration
 	}
 
 	// Calculate end time from start time + total duration
-	startParsed, err := time.Parse("15:04", req.StartTime)
+	startParsed, err := time.Parse("15:04", startTimeStr)
 	if err != nil {
-		return errors.New("invalid start_time format, use HH:MM")
+		return 0, apperrors.ErrBadRequest
 	}
-	endTime := startParsed.Add(time.Duration(totalDuration) * time.Minute)
-	endTimeStr := endTime.Format("15:04")
+	endTimeStr := startParsed.Add(time.Duration(totalDuration) * time.Minute).Format("15:04")
 
 	// Check for overlaps
-	overlap, err := s.ReservationRepository.CheckOverlap(req.BeautyCenterID, parsedDate, req.StartTime, endTimeStr, req.PersonnelID, 0)
+	overlap, err := s.ReservationRepository.CheckOverlap(beautyCenterID, parsedDate, startTimeStr, endTimeStr, personnelID, 0)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if overlap {
-		return errors.New("overlapping reservation exists")
+		return 0, apperrors.ErrConflict
 	}
 
 	// Build reservation with services in a transaction
 	reservation := models.Reservation{
-		BeautyCenterID: req.BeautyCenterID,
-		ClientID:       req.ClientID,
-		PersonnelID:    req.PersonnelID,
+		BeautyCenterID: beautyCenterID,
+		ClientID:       clientID,
+		PersonnelID:    personnelID,
 		Date:           parsedDate,
-		StartTime:      req.StartTime,
+		StartTime:      startTimeStr,
 		EndTime:        endTimeStr,
 		TotalPrice:     totalPrice,
 		Status:         "PENDING",
@@ -148,7 +147,70 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 		})
 	}
 
-	return s.ReservationRepository.Create(&reservation)
+	if err := s.ReservationRepository.Create(&reservation); err != nil {
+		return 0, err
+	}
+	return reservation.ID, nil
+}
+
+func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) error {
+	if err := s.Validate.Struct(req); err != nil {
+		return err
+	}
+	_, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime)
+	return err
+}
+
+// ──────────────────────────────────────────────
+//  CREATE ADMIN — Walk-in (beauty_center | personnel)
+// ──────────────────────────────────────────────
+
+// CreateAdminReservation implements ReservationService (design D2/D4/D6).
+// The route gate already restricted the HTTP surface, but the service re-proves
+// every binding from the actor claims so direct callers cannot bypass them:
+// centerID claim must exist and match the body, a personnel actor must be a
+// member of that center (Personnel row), and the target client must exist and
+// be active. The actual persistence delegates to createReservationCore (D1).
+func (s *ReservationServiceImpl) CreateAdminReservation(req request.CreateAdminReservationRequest, actor ReservationActor) (*models.Reservation, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return nil, apperrors.ErrValidation
+	}
+
+	// D2: only center admin and staff may book walk-ins.
+	if actor.Role != "beauty_center" && actor.Role != "personnel" {
+		return nil, apperrors.ErrForbidden
+	}
+
+	// D2: the JWT centerID claim is the source of truth; a missing claim can
+	// never bind a center, and a body center never overrides the claim.
+	if actor.CenterID == 0 || actor.CenterID != req.BeautyCenterID {
+		return nil, apperrors.ErrForbidden
+	}
+
+	// D2: personnel membership is proven from the Personnel row, not trusted
+	// from the claim alone.
+	if actor.Role == "personnel" {
+		personnel, err := s.PersonnelRepository.FindByID(actor.ClientID)
+		if err != nil || personnel == nil || personnel.BeautyCenterID != req.BeautyCenterID {
+			return nil, apperrors.ErrForbidden
+		}
+	}
+
+	// D4: the walk-in target must exist and be active — a clear 400 before any
+	// DB write, never a deferred foreign-key failure.
+	client, err := s.ClientRepository.FindById(req.ClientID)
+	if err != nil || client == nil || !client.IsActive {
+		return nil, apperrors.ErrBadRequest
+	}
+
+	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime)
+	if err != nil {
+		return nil, err
+	}
+
+	// D6: return the reservation with relations preloaded so the controller can
+	// emit the full ReservationResponse DTO (names, services, prices).
+	return s.ReservationRepository.FindById(id)
 }
 
 // ──────────────────────────────────────────────

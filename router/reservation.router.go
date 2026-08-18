@@ -30,13 +30,20 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
 	missionSvc = service.NewTokenMissionServiceImpl(missionRepo, accountSvc, accountRepo)
 
-	svc := service.NewReservationServiceImpl(repo, serviceRepo, personnelRepo, notifSvc, loyaltySvc, accountSvc, missionSvc, validate)
+	svc := service.NewReservationServiceImpl(repo, serviceRepo, personnelRepo, repository.NewClientRepositoryImpl(db), notifSvc, loyaltySvc, accountSvc, missionSvc, validate)
 	ctrl := controller.NewReservationController(svc)
 
 	reservation := rg.Group("/reservation")
 	reservation.Use(middleware.JWTAuthMiddleware())
 	{
-		reservation.POST("/", ctrl.Create)
+		// Client-only creation (actor fix): the client identity is resolved
+		// from the JWT claim, never from the body. Admin walk-ins use
+		// POST /reservation/admin below.
+		reservation.POST("/", middleware.RequireRole("client"), ctrl.Create)
+		// Admin walk-in booking: center admins and their staff book for a
+		// provided active client. The service binds the body center against
+		// the JWT centerID claim (design D2/D5).
+		reservation.POST("/admin", middleware.RequireRole("beauty_center", "personnel"), ctrl.CreateAdmin)
 
 		// client-only: owner of the reservation
 		clientOnly := reservation.Group("/client", middleware.RequireRole("client"))
