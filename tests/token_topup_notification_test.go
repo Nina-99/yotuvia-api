@@ -177,6 +177,17 @@ func TestTokenTopupNotification_HTTPAuthzMatrix(t *testing.T) {
 		assert.NoError(t, db.Where("type = ? AND beauty_center_id = ?", "topup_approved", 1).First(&n).Error)
 	})
 
+	t.Run("reprocess keeps the legacy 400 path", func(t *testing.T) {
+		// Already processed (no longer pending): the controller must map the
+		// plain error to 400 — only ErrForbidden maps to 403 (design D5).
+		w := do(r, http.MethodPut, fmt.Sprintf("/api/admin/tokens/topups/%d", own.ID), roleToken(t, 1, 1, "beauty_center"), `{"status":"approved"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Equal(t, "top-up already processed", errBody(t, w.Body.String()))
+		var count int64
+		assert.NoError(t, db.Model(&models.Notification{}).Count(&count).Error)
+		assert.Equal(t, int64(1), count, "no second notification on reprocess")
+	})
+
 	t.Run("cross-center processing blocked", func(t *testing.T) {
 		w := do(r, http.MethodPut, fmt.Sprintf("/api/admin/tokens/topups/%d", other.ID), roleToken(t, 1, 1, "beauty_center"), `{"status":"approved"}`)
 		assert.Equal(t, http.StatusForbidden, w.Code)
