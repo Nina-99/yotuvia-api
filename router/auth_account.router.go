@@ -21,8 +21,12 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	tokenAccountRepo := repository.NewTokenAccountRepositoryImpl(db)
 	tokenTopUpRepo := repository.NewTokenTopUpRepositoryImpl(db)
 	tokenMissionRepo := repository.NewTokenMissionRepositoryImpl(db)
+	tokenNotifSvc := service.NewNotificationServiceImpl(
+		repository.NewNotificationRepositoryImpl(db),
+		repository.NewPushDeviceRepositoryImpl(db),
+	)
 	tokenMissionSvc := service.NewTokenMissionServiceImpl(tokenMissionRepo, nil, tokenAccountRepo)
-	tokenAccountSvc := service.NewTokenAccountServiceImpl(tokenAccountRepo, tokenTopUpRepo, centerRepo, tokenMissionSvc)
+	tokenAccountSvc := service.NewTokenAccountServiceImpl(tokenAccountRepo, tokenTopUpRepo, centerRepo, tokenMissionSvc, tokenNotifSvc)
 	tokenMissionSvc = service.NewTokenMissionServiceImpl(tokenMissionRepo, tokenAccountSvc, tokenAccountRepo)
 
 	svc := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo, sessionRepo, tokenAccountSvc, validate)

@@ -49,7 +49,9 @@ func setupRouterAuthzDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-// authzTestRouter mounts the four routers exactly as router.go does.
+// authzTestRouter mounts the routers exactly as router.go does, including
+// TokenRoutes (design D5: the topup routeGate rows need the /admin/tokens
+// group mounted with its RequireRole("beauty_center") gate).
 func authzTestRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 	gin.SetMode(gin.TestMode)
 	db := setupRouterAuthzDB(t)
@@ -61,6 +63,7 @@ func authzTestRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 	router.ClientRoutes(rg, db, validate)
 	router.PersonnelRoutes(rg, db, validate)
 	router.NotificationRoutes(rg, db)
+	router.TokenRoutes(rg, db, validate)
 	return r, db
 }
 
@@ -147,6 +150,11 @@ func TestRouterAuthz_NoToken401(t *testing.T) {
 		{"notification read", "PATCH", "/api/notifications/1/read", []string{"client"}, "client", "", 0},
 		{"notifications read all", "POST", "/api/notifications/client/1/read-all", []string{"client"}, "client", "", 0},
 		{"push device register", "POST", "/api/push-devices/register", []string{"client"}, "client", "", 0},
+		{"notifications center list", "GET", "/api/notifications/center", []string{"beauty_center"}, "client", "", 0},
+		{"notifications center unread", "GET", "/api/notifications/center/unread", []string{"beauty_center"}, "client", "", 0},
+		{"notifications center count", "GET", "/api/notifications/center/count", []string{"beauty_center"}, "client", "", 0},
+		{"notification center read", "PATCH", "/api/notifications/center/1/read", []string{"beauty_center"}, "client", "", 0},
+		{"topup process", "PUT", "/api/admin/tokens/topups/1", []string{"beauty_center"}, "client", "", 0},
 	}
 
 	for _, rt := range routes {
@@ -183,6 +191,11 @@ func TestRouterAuthz_RoleGates(t *testing.T) {
 		{"client find all", "GET", "/api/client", []string{"beauty_center"}, "client", "", 200},
 		{"personnel update", "PUT", "/api/personnel/1", []string{"beauty_center"}, "client", "", 0},
 		{"personnel delete", "DELETE", "/api/personnel/1", []string{"beauty_center"}, "client", "", 0},
+		{"notifications center list", "GET", "/api/notifications/center", []string{"beauty_center"}, "client", "", 200},
+		{"notifications center unread", "GET", "/api/notifications/center/unread", []string{"beauty_center"}, "client", "", 200},
+		{"notifications center count", "GET", "/api/notifications/center/count", []string{"beauty_center"}, "client", "", 200},
+		{"notification center read", "PATCH", "/api/notifications/center/1/read", []string{"beauty_center"}, "client", "", 404},
+		{"topup process", "PUT", "/api/admin/tokens/topups/1", []string{"beauty_center"}, "client", "", 0},
 	}
 
 	for _, rt := range routes {

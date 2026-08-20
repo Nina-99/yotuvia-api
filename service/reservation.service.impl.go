@@ -208,6 +208,14 @@ func (s *ReservationServiceImpl) CreateAdminReservation(req request.CreateAdminR
 		return nil, err
 	}
 
+	// Best-effort trigger (design D4): the center is told about its new walk-in.
+	// The service already proved actor.CenterID == req.BeautyCenterID for both
+	// roles, so the target equals req.BeautyCenterID. Never fails the write.
+	_ = s.NotificationService.CreateForCenter(req.BeautyCenterID, "walkin_created",
+		"Nueva reserva walk-in",
+		fmt.Sprintf("Nueva reserva walk-in el %s a las %s", req.Date, req.StartTime),
+		fmt.Sprintf(`{"reservation_id":%d,"client_id":%d}`, id, req.ClientID))
+
 	// D6: return the reservation with relations preloaded so the controller can
 	// emit the full ReservationResponse DTO (names, services, prices).
 	return s.ReservationRepository.FindById(id)

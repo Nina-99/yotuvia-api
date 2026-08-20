@@ -167,6 +167,99 @@ func (c *NotificationController) MarkAsReadByPersonnel(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Marked as read"})
 }
 
+// ──────────────────────────────────────────────
+//  CENTER NOTIFICATIONS (design D6)
+// ──────────────────────────────────────────────
+
+// centerIDClaimOrForbidden returns the actor's centerID claim or writes a 403
+// (design D6). RequireRole guarantees the role but not a nonzero claim —
+// jwt.middleware.go stores centerID only when nonzero, and an unscoped query
+// would expose every center's rows — so the handlers mirror the dashboard
+// precedent (dashboard.controller.go:33-42).
+func (c *NotificationController) centerIDClaimOrForbidden(ctx *gin.Context) (uint, bool) {
+	raw, exists := ctx.Get("centerID")
+	if !exists {
+		c.writeError(ctx, apperrors.ErrForbidden)
+		return 0, false
+	}
+	centerID, ok := raw.(uint)
+	if !ok || centerID == 0 {
+		c.writeError(ctx, apperrors.ErrForbidden)
+		return 0, false
+	}
+	return centerID, true
+}
+
+// GET /notifications/center — the actor's centerID claim is the scope; no path
+// param is exposed, and cross-center reads are rejected by the service.
+func (c *NotificationController) GetByCenter(ctx *gin.Context) {
+	centerID, ok := c.centerIDClaimOrForbidden(ctx)
+	if !ok {
+		return
+	}
+
+	notifications, err := c.notificationService.GetByCenterID(centerID, centerID)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, mapNotificationsToResponse(notifications))
+}
+
+// GET /notifications/center/unread
+func (c *NotificationController) GetUnreadByCenter(ctx *gin.Context) {
+	centerID, ok := c.centerIDClaimOrForbidden(ctx)
+	if !ok {
+		return
+	}
+
+	notifications, err := c.notificationService.GetUnreadByCenterID(centerID, centerID)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, mapNotificationsToResponse(notifications))
+}
+
+// GET /notifications/center/count
+func (c *NotificationController) CountUnreadByCenter(ctx *gin.Context) {
+	centerID, ok := c.centerIDClaimOrForbidden(ctx)
+	if !ok {
+		return
+	}
+
+	count, err := c.notificationService.CountUnreadByCenterID(centerID, centerID)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"count": count})
+}
+
+// PATCH /notifications/center/:id/read
+func (c *NotificationController) MarkAsReadByCenter(ctx *gin.Context) {
+	centerID, ok := c.centerIDClaimOrForbidden(ctx)
+	if !ok {
+		return
+	}
+
+	idParam := ctx.Param("id")
+	notifID, err := strconv.Atoi(idParam)
+	if err != nil || notifID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid notification ID"})
+		return
+	}
+
+	if err := c.notificationService.MarkAsReadByCenter(uint(notifID), centerID); err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"message": "Marked as read"})
+}
+
 // POST /push-devices/register
 func (c *NotificationController) RegisterPushDevice(ctx *gin.Context) {
 	var req request.RegisterPushDeviceRequest
@@ -193,16 +286,17 @@ func (c *NotificationController) RegisterPushDevice(ctx *gin.Context) {
 
 func mapNotificationToResponse(n *models.Notification) response.NotificationResponse {
 	resp := response.NotificationResponse{
-		ID:          n.ID,
-		ClientID:    n.ClientID,
-		PersonnelID: n.PersonnelID,
-		Type:        n.Type,
-		Title:     n.Title,
-		Message:   n.Message,
-		Data:      n.Data,
-		IsRead:    n.IsRead,
-		CreatedAt: n.CreatedAt,
-		ReadAt:    n.ReadAt,
+		ID:             n.ID,
+		ClientID:       n.ClientID,
+		PersonnelID:    n.PersonnelID,
+		BeautyCenterID: n.BeautyCenterID,
+		Type:           n.Type,
+		Title:          n.Title,
+		Message:        n.Message,
+		Data:           n.Data,
+		IsRead:         n.IsRead,
+		CreatedAt:      n.CreatedAt,
+		ReadAt:         n.ReadAt,
 	}
 	return resp
 }

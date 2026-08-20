@@ -22,7 +22,8 @@ func TestTokenLedger_ConsumeFailureReturnsErrorNoGraceRow(t *testing.T) {
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
 	missionSvc := service.NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
-	svc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
+	notifSvc := service.NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db))
+	svc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
 
 	acct := &models.TokenAccount{BeautyCenterID: 1, Balance: 5000, Currency: "USD"}
 	assert.NoError(t, accountRepo.Create(acct))
@@ -51,7 +52,8 @@ func TestTokenLedger_ProcessTopUpCreditsReceivedPlusBonusOnly(t *testing.T) {
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
 	missionSvc := service.NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
-	svc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
+	notifSvc := service.NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db))
+	svc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
 
 	// Center + account with a starting balance.
 	assert.NoError(t, db.Create(&models.BeautyCenter{ID: 1, Name: "C", Email: "c@c.com", Phone: "1", Password: "x", IsActive: true}).Error)
@@ -68,7 +70,9 @@ func TestTokenLedger_ProcessTopUpCreditsReceivedPlusBonusOnly(t *testing.T) {
 	}
 	assert.NoError(t, topUpRepo.Create(topup))
 
-	assert.NoError(t, svc.ProcessTopUp(topup.ID, 2, "approved"))
+	// adminID 1 == topup.BeautyCenterID 1: the cross-center ownership check
+	// (design D5) must not disturb the legacy ledger-math assertions.
+	assert.NoError(t, svc.ProcessTopUp(topup.ID, 1, "approved"))
 
 	// 1000 + 10000 + 2500 = 13500; the grace -500 was NOT re-applied.
 	balance, _, _, err := svc.GetBalance(1)
