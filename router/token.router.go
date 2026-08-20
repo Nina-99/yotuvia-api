@@ -23,7 +23,11 @@ func TokenRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate)
 	missionSvc := service.NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
 	txSvc := service.NewTokenTransactionServiceImpl(txRepo)
 	referralSvc := service.NewReferralServiceImpl(referralRepo, centerRepo, nil)
-	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
+	notifSvc := service.NewNotificationServiceImpl(
+		repository.NewNotificationRepositoryImpl(db),
+		repository.NewPushDeviceRepositoryImpl(db),
+	)
+	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
 
 	// Wire circular refs
 	missionSvc = service.NewTokenMissionServiceImpl(missionRepo, accountSvc, accountRepo)
@@ -44,8 +48,11 @@ func TokenRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate)
 		tokens.GET("/referrals", ctrl.GetReferrals)
 	}
 
+	// Admin top-up processing (design D5): the group gains RequireRole so
+	// PUT /admin/tokens/topups/:id (and AdminListTopUps, same group) is only
+	// reachable by a beauty_center; ownership is re-proven inside the service.
 	admin := rg.Group("/admin/tokens")
-	admin.Use(middleware.JWTAuthMiddleware())
+	admin.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("beauty_center"))
 	{
 		admin.GET("/topups", ctrl.AdminListTopUps)
 		admin.PUT("/topups/:id", ctrl.AdminProcessTopUp)

@@ -1,9 +1,11 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
@@ -289,6 +291,12 @@ func (c *TokenController) AdminProcessTopUp(ctx *gin.Context) {
 	}
 
 	if err := c.accountSvc.ProcessTopUp(uint(topUpID), adminID.(uint), req.Status); err != nil {
+		// D5: only the ownership violation maps to 403 — the legacy 400 path
+		// (e.g. "top-up already processed") is preserved unchanged.
+		if errors.Is(err, apperrors.ErrForbidden) {
+			ctx.JSON(http.StatusForbidden, gin.H{"error": apperrors.ErrForbidden.Error()})
+			return
+		}
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

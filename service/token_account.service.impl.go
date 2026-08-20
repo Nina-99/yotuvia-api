@@ -3,18 +3,21 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/utils"
 )
 
 type TokenAccountServiceImpl struct {
-	accountRepo    repository.TokenAccountRepository
-	topUpRepo      repository.TokenTopUpRepository
-	centerRepo     repository.BeautyCenterRepository
-	missionService TokenMissionService
+	accountRepo         repository.TokenAccountRepository
+	topUpRepo           repository.TokenTopUpRepository
+	centerRepo          repository.BeautyCenterRepository
+	missionService      TokenMissionService
+	notificationService NotificationService
 }
 
 func NewTokenAccountServiceImpl(
@@ -22,12 +25,14 @@ func NewTokenAccountServiceImpl(
 	topUpRepo repository.TokenTopUpRepository,
 	centerRepo repository.BeautyCenterRepository,
 	missionService TokenMissionService,
+	notificationService NotificationService,
 ) TokenAccountService {
 	return &TokenAccountServiceImpl{
-		accountRepo:    accountRepo,
-		topUpRepo:      topUpRepo,
-		centerRepo:     centerRepo,
-		missionService: missionService,
+		accountRepo:         accountRepo,
+		topUpRepo:           topUpRepo,
+		centerRepo:          centerRepo,
+		missionService:      missionService,
+		notificationService: notificationService,
 	}
 }
 
@@ -190,12 +195,27 @@ func (s *TokenAccountServiceImpl) ProcessTopUp(topUpID, adminID uint, status str
 		return errors.New("top-up already processed")
 	}
 
+	// D5 authz: the admin must own the top-up's center. The role gate on the
+	// route guarantees the role; here the service re-proves the claim so direct
+	// callers cannot bypass ownership (mirrors CreateAdminReservation).
+	if topup.BeautyCenterID != adminID {
+		return apperrors.ErrForbidden
+	}
+
 	if status == "rejected" {
 		topup.Status = "rejected"
 		topup.ValidatedBy = &adminID
 		now := time.Now()
 		topup.ValidatedAt = &now
-		return s.topUpRepo.Update(topup)
+		if err := s.topUpRepo.Update(topup); err != nil {
+			return err
+		}
+		// Best-effort trigger (design D4): the center is told its top-up was
+		// rejected. Never fails the business write.
+		_ = s.notificationService.CreateForCenter(topup.BeautyCenterID, "topup_rejected",
+			"Recarga rechazada", "Tu solicitud de recarga fue rechazada",
+			fmt.Sprintf(`{"topup_id":%d}`, topup.ID))
+		return nil
 	}
 
 	// approved — credit exactly tokens_received + bonus_tokens; historical grace
@@ -215,6 +235,13 @@ func (s *TokenAccountServiceImpl) ProcessTopUp(topUpID, adminID uint, status str
 	if err := s.AddTokens(topup.BeautyCenterID, totalTokens, "topup", topup.ID, "Top-up approved: "+topup.ReceiptURL); err != nil {
 		return err
 	}
+
+	// Best-effort trigger (design D4): the center is told its top-up was
+	// approved, after the persist + credit succeeded. The pending guard above
+	// prevents double-send on reprocess.
+	_ = s.notificationService.CreateForCenter(topup.BeautyCenterID, "topup_approved",
+		"Recarga aprobada", "Tu recarga fue aprobada",
+		fmt.Sprintf(`{"topup_id":%d}`, topup.ID))
 
 	utils.Log.Infof("[TOPUP] Center %d top-up approved: %.2f + %.2f bonus = %.2f YOTTUs",
 		topup.BeautyCenterID, utils.FromMilli(topup.TokensReceived), utils.FromMilli(topup.BonusTokens), utils.FromMilli(totalTokens))

@@ -55,7 +55,8 @@ func newTokenTestService(db *gorm.DB) TokenAccountService {
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
 	missionSvc := NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
-	return NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
+	notifSvc := NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db))
+	return NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
 }
 
 func TestTokenAccountService_GetOrCreate(t *testing.T) {
@@ -140,7 +141,8 @@ func TestTokenAccountService_CanConsume(t *testing.T) {
 			centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 			missionRepo := repository.NewTokenMissionRepositoryImpl(db)
 			missionSvc := NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
-			svc := NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
+			notifSvc := NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db))
+			svc := NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
 
 			// Create account with specific created_at for overdraft tier
 			createdAt := time.Now().AddDate(0, 0, -tt.daysActive)
@@ -242,7 +244,8 @@ func TestTokenAccountService_OverdraftTiers(t *testing.T) {
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
 	missionSvc := NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
-	svc := NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc)
+	notifSvc := NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db))
+	svc := NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
 
 	// Center 1: New (just created)
 	svc.GetOrCreate(1, "USD")
