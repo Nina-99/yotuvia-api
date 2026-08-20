@@ -20,5 +20,11 @@ type Notification struct {
 	// AutoMigrate (configs/db.config.go) adds the column — no migration file.
 	PersonnelID *uint `gorm:"index"`
 
+	// BeautyCenterID is nullable: center notifications target a beauty center
+	// row and combine the ClientID=0 sentinel with PersonnelID=nil, leaving
+	// client and staff rows untouched (design D1). AutoMigrate adds the column
+	// — no migration file.
+	BeautyCenterID *uint `gorm:"index"`
+
 	Client Client `gorm:"foreignKey:ClientID"`
 }
