@@ -12,6 +12,13 @@ type NotificationRepository interface {
 	FindByPersonnelID(personnelID uint) ([]models.Notification, error)
 	FindUnreadByPersonnelID(personnelID uint) ([]models.Notification, error)
 	CountUnreadByPersonnelID(personnelID uint) (int64, error)
+	// FindByCenterID/FindUnreadByCenterID/CountUnreadByCenterID scope center
+	// notifications by the BeautyCenterID column only; center rows carry the
+	// ClientID=0 sentinel + PersonnelID nil (design D1) so they never collide
+	// with client or staff queries.
+	FindByCenterID(centerID uint) ([]models.Notification, error)
+	FindUnreadByCenterID(centerID uint) ([]models.Notification, error)
+	CountUnreadByCenterID(centerID uint) (int64, error)
 	FindByID(notificationID uint) (*models.Notification, error)
 	MarkAsRead(notificationID uint) error
 	MarkAllAsRead(clientID uint) error
