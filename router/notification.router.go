@@ -38,6 +38,19 @@ func NotificationRoutes(rg *gin.RouterGroup, db *gorm.DB) {
 		personnel.PATCH("/:id/read", ctrl.MarkAsReadByPersonnel)
 	}
 
+	// Center notifications (beauty_center auth, design D1/D6). Routes are
+	// claim-scoped: the actor's centerID lives in ctx "centerID", so no path
+	// param is exposed on list/unread/count, and cross-center access is
+	// rejected by the service.
+	center := notifications.Group("/center")
+	center.Use(middleware.RequireRole("beauty_center"))
+	{
+		center.GET("", ctrl.GetByCenter)
+		center.GET("/unread", ctrl.GetUnreadByCenter)
+		center.GET("/count", ctrl.CountUnreadByCenter)
+		center.PATCH("/:id/read", ctrl.MarkAsReadByCenter)
+	}
+
 	// Push devices (client auth)
 	push := rg.Group("/push-devices")
 	push.Use(middleware.JWTAuthMiddleware())
