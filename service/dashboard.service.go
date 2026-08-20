@@ -1,6 +1,10 @@
 package service
 
-import "github.com/Nina-99/yottu-api/data/response"
+import (
+	"time"
+
+	"github.com/Nina-99/yottu-api/data/response"
+)
 
 // DashboardService computes the admin dashboard statistics for a beauty center.
 type DashboardService interface {
@@ -9,4 +13,9 @@ type DashboardService interface {
 	// ErrNotFound), calculates revenue/ticket aggregates over COMPLETED
 	// reservations, and truncates leaders/upcoming lists to 3 entries each.
 	GetStats(centerID uint) (*response.DashboardStatsResponse, error)
+	// GetStatsWithRange returns the full stats payload plus time series for
+	// the given date range [from, to). The service computes UTC boundaries,
+	// calls repository by-day queries, and zero-fills missing days so every
+	// date in the range is present in the series arrays (never null).
+	GetStatsWithRange(centerID uint, from, to time.Time) (*response.DashboardStatsResponse, error)
 }

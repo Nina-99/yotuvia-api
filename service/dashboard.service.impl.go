@@ -137,6 +137,163 @@ func (s *DashboardServiceImpl) GetStats(centerID uint) (*response.DashboardStats
 	return resp, nil
 }
 
+// GetStatsWithRange returns the full stats payload plus time series for the
+// given date range [from, to). The service computes UTC boundaries, calls
+// repository by-day queries, and zero-fills missing days so every date in the
+// range is present in the series arrays (never null).
+func (s *DashboardServiceImpl) GetStatsWithRange(centerID uint, from, to time.Time) (*response.DashboardStatsResponse, error) {
+	// Business rule: inactive/deleted center → 404
+	if _, err := s.repo.GetActiveCenter(centerID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperrors.ErrNotFound
+		}
+		return nil, err
+	}
+
+	// Compute UTC boundaries: half-open [fromUTC, toUTC)
+	fromUTC := startOfDayUTC(from)
+	toUTC := startOfDayUTC(to.AddDate(0, 0, 1))
+
+	// Get base stats (reusing GetStats logic but without the date-range specific calls)
+	now := time.Now().UTC()
+	todayStart := startOfDayUTC(now)
+	tomorrowStart := todayStart.AddDate(0, 0, 1)
+	weekStart := startOfWeekUTC(now)
+	weekEnd := weekStart.AddDate(0, 0, 7)
+	monthStart := startOfMonthUTC(now)
+	monthEnd := monthStart.AddDate(0, 1, 0)
+
+	var (
+		appointmentsToday int64
+		pending           int64
+		totalServices     int64
+		totalPersonnel    int64
+		totalReviews      int64
+		avgRating         float64
+		revenueToday      float64
+		revenueWeek       float64
+		revenueMonth      float64
+		revenueTotal      float64
+		completedCount    int64
+		topServices       []repository.TopServiceRow
+		upcoming          []models.Reservation
+		err               error
+	)
+
+	if appointmentsToday, err = s.repo.CountAppointmentsToday(centerID, todayStart, tomorrowStart); err != nil {
+		return nil, err
+	}
+	if pending, err = s.repo.CountPending(centerID); err != nil {
+		return nil, err
+	}
+	if totalServices, err = s.repo.CountActiveServices(centerID); err != nil {
+		return nil, err
+	}
+	if totalPersonnel, err = s.repo.CountActivePersonnel(centerID); err != nil {
+		return nil, err
+	}
+	if totalReviews, err = s.repo.CountReviews(centerID); err != nil {
+		return nil, err
+	}
+	if avgRating, err = s.repo.AverageRating(centerID); err != nil {
+		return nil, err
+	}
+	if revenueToday, err = s.repo.RevenueBetween(centerID, todayStart, tomorrowStart); err != nil {
+		return nil, err
+	}
+	if revenueWeek, err = s.repo.RevenueBetween(centerID, weekStart, weekEnd); err != nil {
+		return nil, err
+	}
+	if revenueMonth, err = s.repo.RevenueBetween(centerID, monthStart, monthEnd); err != nil {
+		return nil, err
+	}
+	if revenueTotal, completedCount, err = s.repo.CompletedAggregates(centerID); err != nil {
+		return nil, err
+	}
+	if topServices, err = s.repo.TopServices(centerID, topListLimit); err != nil {
+		return nil, err
+	}
+	if upcoming, err = s.repo.UpcomingReservations(centerID, todayStart, topListLimit); err != nil {
+		return nil, err
+	}
+
+	// Average ticket
+	averageTicket := 0.0
+	if completedCount > 0 {
+		averageTicket = revenueTotal / float64(completedCount)
+	}
+
+	// Get time series data
+	revenueRows, err := s.repo.RevenueByDay(centerID, fromUTC, toUTC)
+	if err != nil {
+		return nil, err
+	}
+	appointmentRows, err := s.repo.AppointmentsByDay(centerID, fromUTC, toUTC)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert repo rows to maps for O(1) lookup during zero-fill
+	revenueMap := make(map[string]float64)
+	for _, row := range revenueRows {
+		revenueMap[row.Date.Format("2006-01-02")] = row.Value
+	}
+	appointmentMap := make(map[string]int64)
+	for _, row := range appointmentRows {
+		appointmentMap[row.Date.Format("2006-01-02")] = row.Value
+	}
+
+	// Zero-fill: iterate [fromUTC, toUTC) step 1 day
+	var revenueSeries []response.SeriesDayDTO
+	var appointmentsSeries []response.SeriesDayDTO
+
+	for d := fromUTC; d.Before(toUTC); d = d.AddDate(0, 0, 1) {
+		dateStr := d.Format("2006-01-02")
+		revVal := revenueMap[dateStr]
+		appVal := float64(appointmentMap[dateStr])
+
+		revenueSeries = append(revenueSeries, response.SeriesDayDTO{
+			Date:  dateStr,
+			Value: revVal,
+		})
+		appointmentsSeries = append(appointmentsSeries, response.SeriesDayDTO{
+			Date:  dateStr,
+			Value: appVal,
+		})
+	}
+
+	// Build response with series
+	resp := &response.DashboardStatsResponse{
+		AppointmentsToday:    int(appointmentsToday),
+		PendingAppointments:  int(pending),
+		TotalServices:        int(totalServices),
+		TotalPersonnel:       int(totalPersonnel),
+		TotalReviews:         int(totalReviews),
+		AverageRating:        avgRating,
+		RevenueToday:         revenueToday,
+		RevenueWeek:          revenueWeek,
+		RevenueMonth:         revenueMonth,
+		AverageTicket:        averageTicket,
+		TopServices:          []response.TopServiceDTO{},
+		UpcomingReservations: []response.UpcomingReservationDTO{},
+		RevenueSeries:        revenueSeries,
+		AppointmentsSeries:   appointmentsSeries,
+	}
+
+	for _, row := range topServices {
+		resp.TopServices = append(resp.TopServices, response.TopServiceDTO{
+			ServiceID:        row.ServiceID,
+			ServiceName:      row.ServiceName,
+			AppointmentCount: int(row.AppointmentCount),
+		})
+	}
+	for i := range upcoming {
+		resp.UpcomingReservations = append(resp.UpcomingReservations, mapUpcomingReservation(&upcoming[i]))
+	}
+
+	return resp, nil
+}
+
 // mapUpcomingReservation flattens a Reservation (with preloaded Client) into
 // the public DTO; the date is normalized to the wire format YYYY-MM-DD in UTC.
 func mapUpcomingReservation(res *models.Reservation) response.UpcomingReservationDTO {
