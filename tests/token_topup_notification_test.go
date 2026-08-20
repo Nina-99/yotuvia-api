@@ -1,6 +1,8 @@
 package tests
 
 import (
+	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/Nina-99/yottu-api/apperrors"
@@ -131,4 +133,59 @@ func TestTokenTopupNotification_CrossCenterForbidden(t *testing.T) {
 	var count int64
 	assert.NoError(t, db.Model(&models.Notification{}).Where("type IN ?", []string{"topup_approved", "topup_rejected"}).Count(&count).Error)
 	assert.Equal(t, int64(0), count, "no outcome row for a forbidden processing")
+}
+
+// TestTokenTopupNotification_HTTPAuthzMatrix — the api-authz topup matrix over
+// the real mounted router (TokenRoutes): missing token 401, client/personnel
+// 403 with the topup unchanged, own center 200 + approved + emitted row,
+// cross-center 403 with the topup still pending.
+func TestTokenTopupNotification_HTTPAuthzMatrix(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+	r, db := authzTestRouter(t)
+	// Token account for the approve credit path (AddTokens).
+	assert.NoError(t, db.Create(&models.TokenAccount{BeautyCenterID: 1, Balance: 0, Currency: "USD"}).Error)
+	own := seedPendingTopUp(t, db, 1)
+	other := seedPendingTopUp(t, db, 2)
+
+	t.Run("missing token rejected", func(t *testing.T) {
+		w := do(r, http.MethodPut, fmt.Sprintf("/api/admin/tokens/topups/%d", own.ID), "", `{"status":"approved"}`)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("client token denied and topup unchanged", func(t *testing.T) {
+		w := do(r, http.MethodPut, fmt.Sprintf("/api/admin/tokens/topups/%d", own.ID), roleToken(t, 1, 0, "client"), `{"status":"approved"}`)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		var stored models.TokenTopUp
+		assert.NoError(t, db.First(&stored, own.ID).Error)
+		assert.Equal(t, "pending", stored.Status, "role denial must not touch the topup")
+	})
+
+	t.Run("personnel token denied", func(t *testing.T) {
+		w := do(r, http.MethodPut, fmt.Sprintf("/api/admin/tokens/topups/%d", own.ID), roleToken(t, 7, 1, "personnel"), `{"status":"approved"}`)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("own center processes its topup", func(t *testing.T) {
+		w := do(r, http.MethodPut, fmt.Sprintf("/api/admin/tokens/topups/%d", own.ID), roleToken(t, 1, 1, "beauty_center"), `{"status":"approved"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var stored models.TokenTopUp
+		assert.NoError(t, db.First(&stored, own.ID).Error)
+		assert.Equal(t, "approved", stored.Status)
+		// The HTTP flow also emits the outcome row (D4).
+		var n models.Notification
+		assert.NoError(t, db.Where("type = ? AND beauty_center_id = ?", "topup_approved", 1).First(&n).Error)
+	})
+
+	t.Run("cross-center processing blocked", func(t *testing.T) {
+		w := do(r, http.MethodPut, fmt.Sprintf("/api/admin/tokens/topups/%d", other.ID), roleToken(t, 1, 1, "beauty_center"), `{"status":"approved"}`)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Equal(t, "forbidden", errBody(t, w.Body.String()))
+		var stored models.TokenTopUp
+		assert.NoError(t, db.First(&stored, other.ID).Error)
+		assert.Equal(t, "pending", stored.Status, "cross-center denial leaves the topup pending")
+		var count int64
+		assert.NoError(t, db.Model(&models.Notification{}).Where("type = ? AND beauty_center_id = ?", "topup_approved", 2).Count(&count).Error)
+		assert.Equal(t, int64(0), count, "no outcome row for the cross-center attempt")
+	})
 }
