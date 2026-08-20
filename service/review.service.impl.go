@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
@@ -11,12 +12,13 @@ import (
 )
 
 type ReviewServiceImpl struct {
-	repo     repository.ReviewRepository
-	Validate *validator.Validate
+	repo                repository.ReviewRepository
+	notificationService NotificationService
+	Validate            *validator.Validate
 }
 
-func NewReviewServiceImpl(repo repository.ReviewRepository, validate *validator.Validate) ReviewService {
-	return &ReviewServiceImpl{repo: repo, Validate: validate}
+func NewReviewServiceImpl(repo repository.ReviewRepository, notificationService NotificationService, validate *validator.Validate) ReviewService {
+	return &ReviewServiceImpl{repo: repo, notificationService: notificationService, Validate: validate}
 }
 
 func (s *ReviewServiceImpl) Create(clientID uint, req request.CreateReviewRequest) error {
@@ -50,7 +52,18 @@ func (s *ReviewServiceImpl) Create(clientID uint, req request.CreateReviewReques
 		Rating:         req.Rating,
 		Comment:        req.Comment,
 	}
-	return s.repo.Create(review)
+	if err := s.repo.Create(review); err != nil {
+		return err
+	}
+
+	// Best-effort trigger (design D4): the center is told a client reviewed it.
+	// Only fires after the insert succeeded — a failed or duplicate review
+	// emits nothing — and never fails the business write.
+	_ = s.notificationService.CreateForCenter(review.BeautyCenterID, "review_created",
+		"Nueva reseña",
+		fmt.Sprintf("Recibiste una reseña de %d estrellas", review.Rating),
+		fmt.Sprintf(`{"review_id":%d,"rating":%d}`, review.ID, review.Rating))
+	return nil
 }
 
 func (s *ReviewServiceImpl) CanReview(clientID, beautyCenterID uint) (bool, error) {
