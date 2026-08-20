@@ -143,6 +143,62 @@ func (s *NotificationServiceImpl) MarkAsReadByPersonnel(notificationID, actorPer
 }
 
 // ──────────────────────────────────────────────
+//  CENTER-SCOPED NOTIFICATIONS (design D1/D3)
+// ──────────────────────────────────────────────
+
+func (s *NotificationServiceImpl) CreateForCenter(centerID uint, notifType, title, message, data string) error {
+	notif := &models.Notification{
+		ClientID:       0, // D1 sentinel: center rows never belong to a real client
+		BeautyCenterID: &centerID,
+		Type:           notifType,
+		Title:          title,
+		Message:        message,
+		Data:           data,
+	}
+	return s.NotificationRepo.Create(notif)
+}
+
+func (s *NotificationServiceImpl) GetByCenterID(centerID, actorCenterID uint) ([]models.Notification, error) {
+	// Owner-only: the path centerID must match the actor's claim.
+	if actorCenterID != centerID {
+		return nil, apperrors.ErrForbidden
+	}
+	return s.NotificationRepo.FindByCenterID(centerID)
+}
+
+func (s *NotificationServiceImpl) GetUnreadByCenterID(centerID, actorCenterID uint) ([]models.Notification, error) {
+	if actorCenterID != centerID {
+		return nil, apperrors.ErrForbidden
+	}
+	return s.NotificationRepo.FindUnreadByCenterID(centerID)
+}
+
+func (s *NotificationServiceImpl) CountUnreadByCenterID(centerID, actorCenterID uint) (int64, error) {
+	if actorCenterID != centerID {
+		return 0, apperrors.ErrForbidden
+	}
+	return s.NotificationRepo.CountUnreadByCenterID(centerID)
+}
+
+func (s *NotificationServiceImpl) MarkAsReadByCenter(notificationID, actorCenterID uint) error {
+	notif, err := s.NotificationRepo.FindByID(notificationID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperrors.ErrNotFound
+		}
+		return err
+	}
+	// Nil-safe ownership: client/staff rows have BeautyCenterID nil and can
+	// never be claimed by a center, so a mismatch (nil or different value) is
+	// forbidden. Idempotent by construction: MarkAsRead on an already-read row
+	// rewrites the same state.
+	if notif.BeautyCenterID == nil || *notif.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
+	}
+	return s.NotificationRepo.MarkAsRead(notificationID)
+}
+
+// ──────────────────────────────────────────────
 //  PUSH DEVICES
 // ──────────────────────────────────────────────
 
