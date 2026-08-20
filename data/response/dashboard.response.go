@@ -20,6 +20,12 @@ type UpcomingReservationDTO struct {
 	TotalPrice float64 `json:"total_price"`
 }
 
+// SeriesDayDTO represents a single day's value in a time series.
+type SeriesDayDTO struct {
+	Date  string  `json:"date"`  // "2006-01-02"
+	Value float64 `json:"value"`
+}
+
 // DashboardStatsResponse is the single server-computed stats payload returned
 // by GET /dashboard/stats for an authenticated beauty_center actor, scoped to
 // the caller's centerID claim.
@@ -36,4 +42,6 @@ type DashboardStatsResponse struct {
 	AverageTicket        float64                  `json:"average_ticket"`
 	TopServices          []TopServiceDTO          `json:"top_services"`
 	UpcomingReservations []UpcomingReservationDTO `json:"upcoming_reservations"`
+	RevenueSeries        []SeriesDayDTO           `json:"revenue_series"`
+	AppointmentsSeries   []SeriesDayDTO           `json:"appointments_series"`
 }
