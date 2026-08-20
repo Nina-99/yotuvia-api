@@ -63,6 +63,34 @@ func (r *NotificationRepositoryImpl) CountUnreadByPersonnelID(personnelID uint) 
 	return count, err
 }
 
+// FindByCenterID returns center notifications scoped by BeautyCenterID, newest
+// first. Center rows use the ClientID=0 sentinel with PersonnelID nil, so the
+// beauty_center_id filter is sufficient and client/staff rows (BeautyCenterID
+// null) never match (design D2).
+func (r *NotificationRepositoryImpl) FindByCenterID(centerID uint) ([]models.Notification, error) {
+	var notifications []models.Notification
+	err := r.db.Where("beauty_center_id = ?", centerID).
+		Order("created_at DESC").
+		Find(&notifications).Error
+	return notifications, err
+}
+
+func (r *NotificationRepositoryImpl) FindUnreadByCenterID(centerID uint) ([]models.Notification, error) {
+	var notifications []models.Notification
+	err := r.db.Where("beauty_center_id = ? AND is_read = ?", centerID, false).
+		Order("created_at DESC").
+		Find(&notifications).Error
+	return notifications, err
+}
+
+func (r *NotificationRepositoryImpl) CountUnreadByCenterID(centerID uint) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Notification{}).
+		Where("beauty_center_id = ? AND is_read = ?", centerID, false).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *NotificationRepositoryImpl) FindByID(notificationID uint) (*models.Notification, error) {
 	var notif models.Notification
 	if err := r.db.First(&notif, notificationID).Error; err != nil {

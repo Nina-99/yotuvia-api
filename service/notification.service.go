@@ -23,6 +23,19 @@ type NotificationService interface {
 	GetUnreadByPersonnelID(personnelID, actorPersonnelID uint) ([]models.Notification, error)
 	CountUnreadByPersonnelID(personnelID, actorPersonnelID uint) (int64, error)
 	MarkAsReadByPersonnel(notificationID, actorPersonnelID uint) error
+	// Center-scoped notifications (design D1/D3): rows are stored with the
+	// ClientID=0 sentinel + BeautyCenterID set + PersonnelID nil, so client and
+	// staff queries never collide. CreateForCenter is the single trigger entry
+	// point for best-effort emits from other services; Get*/CountUnread take
+	// the path centerID plus the actor's claim and reject mismatches with
+	// ErrForbidden; MarkAsReadByCenter verifies ownership nil-safely (client
+	// and staff rows have BeautyCenterID nil and can never be claimed by a
+	// center).
+	CreateForCenter(centerID uint, notifType, title, message, data string) error
+	GetByCenterID(centerID, actorCenterID uint) ([]models.Notification, error)
+	GetUnreadByCenterID(centerID, actorCenterID uint) ([]models.Notification, error)
+	CountUnreadByCenterID(centerID, actorCenterID uint) (int64, error)
+	MarkAsReadByCenter(notificationID, actorCenterID uint) error
 	RegisterPushDevice(clientID uint, pushToken, platform string) error
 	UnregisterPushDevice(token string) error
 	SendPushToClient(clientID uint, title, body, dataJSON string) error
