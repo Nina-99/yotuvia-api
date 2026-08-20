@@ -129,3 +129,29 @@ func (r *DashboardRepositoryImpl) UpcomingReservations(centerID uint, from time.
 		Find(&reservations).Error
 	return reservations, err
 }
+
+// RevenueByDay returns daily revenue (SUM total_price) for COMPLETED
+// reservations with date in [from, to), grouped by date.
+func (r *DashboardRepositoryImpl) RevenueByDay(centerID uint, from, to time.Time) ([]RevenueDayRow, error) {
+	var rows []RevenueDayRow
+	err := r.db.Model(&models.Reservation{}).
+		Where("beauty_center_id = ? AND status = ? AND date >= ? AND date < ?", centerID, "COMPLETED", from, to).
+		Select("date, COALESCE(SUM(total_price), 0) AS value").
+		Group("date").
+		Order("date ASC").
+		Scan(&rows).Error
+	return rows, err
+}
+
+// AppointmentsByDay returns daily appointment counts (status != CANCELLED)
+// with date in [from, to), grouped by date.
+func (r *DashboardRepositoryImpl) AppointmentsByDay(centerID uint, from, to time.Time) ([]CountDayRow, error) {
+	var rows []CountDayRow
+	err := r.db.Model(&models.Reservation{}).
+		Where("beauty_center_id = ? AND status <> ? AND date >= ? AND date < ?", centerID, "CANCELLED", from, to).
+		Select("date, COUNT(*) AS value").
+		Group("date").
+		Order("date ASC").
+		Scan(&rows).Error
+	return rows, err
+}
