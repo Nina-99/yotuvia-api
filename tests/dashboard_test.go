@@ -9,7 +9,9 @@ import (
 
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/router"
+	"github.com/Nina-99/yottu-api/service"
 	"github.com/Nina-99/yottu-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -498,4 +500,652 @@ func TestDashboardStats_Authz(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 		assert.Equal(t, "not found", errBody(t, w.Body.String()))
 	})
+}
+
+// ──────────────────────────────────────────────
+//  T5 — Repository Unit Tests: by-day GROUP BY correctness
+// ──────────────────────────────────────────────
+
+// TestDashboardRepo_RevenueByDay verifies RevenueByDay returns daily revenue
+// sums for COMPLETED reservations only, grouped by date in UTC.
+func TestDashboardRepo_RevenueByDay(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+
+	db := setupRouterAuthzDB(t)
+	repo := repository.NewDashboardRepositoryImpl(db)
+
+	seedDashboardCenter(t, db, 1, "Repo Test Center", "repo@test.com", true)
+	seedDashboardClient(t, db, 1, "Client", "One")
+	seedDashboardPersonnel(t, db, 1, 1, true)
+	seedDashboardService(t, db, 1, 1, "Test Service", true)
+
+	base := utcMidnight(-3)
+
+	// Day 0: 2 COMPLETED = 150, 1 PENDING (ignored), 1 CANCELLED (ignored)
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "09:00", endTime: "10:00", status: "COMPLETED", totalPrice: 100,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "11:00", endTime: "12:00", status: "COMPLETED", totalPrice: 50,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "14:00", endTime: "15:00", status: "PENDING", totalPrice: 80,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "16:00", endTime: "17:00", status: "CANCELLED", totalPrice: 999,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	// Day 1: 1 COMPLETED = 200
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base.AddDate(0, 0, 1), startTime: "10:00", endTime: "11:00", status: "COMPLETED", totalPrice: 200,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	// Day 2: no COMPLETED (only PENDING) → should not appear in results
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base.AddDate(0, 0, 2), startTime: "09:00", endTime: "10:00", status: "PENDING", totalPrice: 75,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	from := base
+	to := base.AddDate(0, 0, 3) // half-open [from, to)
+
+	rows, err := repo.RevenueByDay(1, from, to)
+	assert.NoError(t, err)
+	assert.Len(t, rows, 2, "only days with COMPLETED reservations appear")
+
+	// Assert day 0: 100 + 50 = 150
+	assert.Equal(t, base.Format("2006-01-02"), rows[0].Date.Format("2006-01-02"))
+	assert.Equal(t, 150.0, rows[0].Value)
+
+	// Assert day 1: 200
+	assert.Equal(t, base.AddDate(0, 0, 1).Format("2006-01-02"), rows[1].Date.Format("2006-01-02"))
+	assert.Equal(t, 200.0, rows[1].Value)
+}
+
+// TestDashboardRepo_AppointmentsByDay verifies AppointmentsByDay returns daily
+// counts for non-CANCELLED reservations, grouped by date in UTC.
+func TestDashboardRepo_AppointmentsByDay(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+
+	db := setupRouterAuthzDB(t)
+	repo := repository.NewDashboardRepositoryImpl(db)
+
+	seedDashboardCenter(t, db, 1, "Repo Test Center", "repo@test.com", true)
+	seedDashboardClient(t, db, 1, "Client", "One")
+	seedDashboardPersonnel(t, db, 1, 1, true)
+	seedDashboardService(t, db, 1, 1, "Test Service", true)
+
+	base := utcMidnight(-3)
+
+	// Day 0: COMPLETED + PENDING = 2 (CANCELLED excluded)
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "09:00", endTime: "10:00", status: "COMPLETED", totalPrice: 100,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "11:00", endTime: "12:00", status: "PENDING", totalPrice: 80,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "14:00", endTime: "15:00", status: "CANCELLED", totalPrice: 999,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	// Day 1: CONFIRMED + PENDING = 2
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base.AddDate(0, 0, 1), startTime: "10:00", endTime: "11:00", status: "CONFIRMED", totalPrice: 200,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base.AddDate(0, 0, 1), startTime: "14:00", endTime: "15:00", status: "PENDING", totalPrice: 150,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	// Day 2: only CANCELLED → should not appear
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base.AddDate(0, 0, 2), startTime: "09:00", endTime: "10:00", status: "CANCELLED", totalPrice: 75,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	from := base
+	to := base.AddDate(0, 0, 3) // half-open [from, to)
+
+	rows, err := repo.AppointmentsByDay(1, from, to)
+	assert.NoError(t, err)
+	assert.Len(t, rows, 2, "only days with non-CANCELLED reservations appear")
+
+	// Assert day 0: 2 appointments (COMPLETED + PENDING)
+	assert.Equal(t, base.Format("2006-01-02"), rows[0].Date.Format("2006-01-02"))
+	assert.Equal(t, int64(2), rows[0].Value)
+
+	// Assert day 1: 2 appointments (CONFIRMED + PENDING)
+	assert.Equal(t, base.AddDate(0, 0, 1).Format("2006-01-02"), rows[1].Date.Format("2006-01-02"))
+	assert.Equal(t, int64(2), rows[1].Value)
+}
+
+// ──────────────────────────────────────────────
+//  T6 — Service Unit Tests: zero-fill, UTC boundaries
+// ──────────────────────────────────────────────
+
+// TestDashboardService_GetStatsWithRange_ZeroFill verifies that missing days
+// in the range are zero-filled in both revenue and appointments series.
+func TestDashboardService_GetStatsWithRange_ZeroFill(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+
+	db := setupRouterAuthzDB(t)
+	repo := repository.NewDashboardRepositoryImpl(db)
+	svc := service.NewDashboardServiceImpl(repo)
+
+	seedDashboardCenter(t, db, 1, "Service Test Center", "svc@test.com", true)
+	seedDashboardClient(t, db, 1, "Client", "One")
+	seedDashboardPersonnel(t, db, 1, 1, true)
+	seedDashboardService(t, db, 1, 1, "Test Service", true)
+
+	// Only seed data for day 0 and day 2; day 1 should be zero-filled
+	base := utcMidnight(-5)
+
+	// Day 0: COMPLETED revenue 100, 1 non-cancelled appt
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "09:00", endTime: "10:00", status: "COMPLETED", totalPrice: 100,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	// Day 2: COMPLETED revenue 200, 2 non-cancelled appts
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base.AddDate(0, 0, 2), startTime: "10:00", endTime: "11:00", status: "COMPLETED", totalPrice: 200,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base.AddDate(0, 0, 2), startTime: "14:00", endTime: "15:00", status: "PENDING", totalPrice: 150,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	// Request range covering 3 days: day 0, 1, 2
+	from := base
+	to := base.AddDate(0, 0, 2) // inclusive end; service treats as half-open [from, to+1)
+
+	resp, err := svc.GetStatsWithRange(1, from, to)
+	assert.NoError(t, err)
+
+	// Should have 3 days in each series (day 0, 1, 2)
+	assert.Len(t, resp.RevenueSeries, 3)
+	assert.Len(t, resp.AppointmentsSeries, 3)
+
+	// Day 0: revenue 100, appointments 1
+	assert.Equal(t, base.Format("2006-01-02"), resp.RevenueSeries[0].Date)
+	assert.Equal(t, 100.0, resp.RevenueSeries[0].Value)
+	assert.Equal(t, base.Format("2006-01-02"), resp.AppointmentsSeries[0].Date)
+	assert.Equal(t, 1.0, resp.AppointmentsSeries[0].Value)
+
+	// Day 1: zero-filled
+	assert.Equal(t, base.AddDate(0, 0, 1).Format("2006-01-02"), resp.RevenueSeries[1].Date)
+	assert.Equal(t, 0.0, resp.RevenueSeries[1].Value)
+	assert.Equal(t, base.AddDate(0, 0, 1).Format("2006-01-02"), resp.AppointmentsSeries[1].Date)
+	assert.Equal(t, 0.0, resp.AppointmentsSeries[1].Value)
+
+	// Day 2: revenue 200, appointments 2
+	assert.Equal(t, base.AddDate(0, 0, 2).Format("2006-01-02"), resp.RevenueSeries[2].Date)
+	assert.Equal(t, 200.0, resp.RevenueSeries[2].Value)
+	assert.Equal(t, base.AddDate(0, 0, 2).Format("2006-01-02"), resp.AppointmentsSeries[2].Date)
+	assert.Equal(t, 2.0, resp.AppointmentsSeries[2].Value)
+}
+
+// TestDashboardService_GetStatsWithRange_RangeDefaults verifies that when the
+// controller defaults are applied (handled at HTTP layer), the service correctly
+// handles the provided range. This test focuses on the service behavior with
+// an explicit 30-day range.
+func TestDashboardService_GetStatsWithRange_RangeDefaults(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+
+	db := setupRouterAuthzDB(t)
+	repo := repository.NewDashboardRepositoryImpl(db)
+	svc := service.NewDashboardServiceImpl(repo)
+
+	seedDashboardCenter(t, db, 1, "Service Test Center", "svc@test.com", true)
+	seedDashboardClient(t, db, 1, "Client", "One")
+	seedDashboardPersonnel(t, db, 1, 1, true)
+	seedDashboardService(t, db, 1, 1, "Test Service", true)
+
+	// Seed one reservation 15 days ago
+	base := utcMidnight(-15)
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "10:00", endTime: "11:00", status: "COMPLETED", totalPrice: 300,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	// 30-day range ending today
+	from := utcMidnight(-29)
+	to := utcMidnight(0)
+
+	resp, err := svc.GetStatsWithRange(1, from, to)
+	assert.NoError(t, err)
+
+	// Should have exactly 30 days (half-open [from, to+1) = 30 days)
+	assert.Len(t, resp.RevenueSeries, 30)
+	assert.Len(t, resp.AppointmentsSeries, 30)
+
+	// Day at index 14 (15 days ago) should have the data
+	assert.Equal(t, base.Format("2006-01-02"), resp.RevenueSeries[14].Date)
+	assert.Equal(t, 300.0, resp.RevenueSeries[14].Value)
+	assert.Equal(t, 1.0, resp.AppointmentsSeries[14].Value)
+
+	// All other days should be zero
+	for i := 0; i < 30; i++ {
+		if i != 14 {
+			assert.Equal(t, 0.0, resp.RevenueSeries[i].Value, "day %d should be zero", i)
+			assert.Equal(t, 0.0, resp.AppointmentsSeries[i].Value, "day %d should be zero", i)
+		}
+	}
+}
+
+// TestDashboardService_GetStatsWithRange_FutureToAllowed verifies that a `to`
+// date in the future is allowed and future days are zero-filled.
+func TestDashboardService_GetStatsWithRange_FutureToAllowed(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+
+	db := setupRouterAuthzDB(t)
+	repo := repository.NewDashboardRepositoryImpl(db)
+	svc := service.NewDashboardServiceImpl(repo)
+
+	seedDashboardCenter(t, db, 1, "Service Test Center", "svc@test.com", true)
+	seedDashboardClient(t, db, 1, "Client", "One")
+	seedDashboardPersonnel(t, db, 1, 1, true)
+	seedDashboardService(t, db, 1, 1, "Test Service", true)
+
+	// Seed data for today
+	today := utcMidnight(0)
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: today, startTime: "10:00", endTime: "11:00", status: "COMPLETED", totalPrice: 150,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	// Range: today through 5 days in the future
+	from := today
+	to := today.AddDate(0, 0, 5) // inclusive end → 6 days total
+
+	resp, err := svc.GetStatsWithRange(1, from, to)
+	assert.NoError(t, err)
+
+	// Should have 6 days (today + 5 future)
+	assert.Len(t, resp.RevenueSeries, 6)
+	assert.Len(t, resp.AppointmentsSeries, 6)
+
+	// Today: revenue 150, 1 appointment
+	assert.Equal(t, today.Format("2006-01-02"), resp.RevenueSeries[0].Date)
+	assert.Equal(t, 150.0, resp.RevenueSeries[0].Value)
+	assert.Equal(t, 1.0, resp.AppointmentsSeries[0].Value)
+
+	// Future days: all zero-filled
+	for i := 1; i < 6; i++ {
+		assert.Equal(t, 0.0, resp.RevenueSeries[i].Value, "future day %d should be zero", i)
+		assert.Equal(t, 0.0, resp.AppointmentsSeries[i].Value, "future day %d should be zero", i)
+	}
+}
+
+// ──────────────────────────────────────────────
+//  T7 — HTTP Integration Tests: authz + params + series contract
+// ──────────────────────────────────────────────
+
+// TestDashboardStats_TimeSeries_HappyPath covers the happy path with data
+// spanning the range, verifying series arrays present with correct sums.
+func TestDashboardStats_TimeSeries_HappyPath(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+	r, db := dashboardTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Series Happy Center", "happy@test.com", true)
+	seedDashboardClient(t, db, 1, "Client", "One")
+	seedDashboardClient(t, db, 2, "Client", "Two")
+	seedDashboardPersonnel(t, db, 1, 1, true)
+	seedDashboardService(t, db, 1, 1, "Service A", true)
+	seedDashboardService(t, db, 2, 1, "Service B", true)
+
+	base := utcMidnight(-2)
+
+	// Day 0 (base): 2 COMPLETED = 150, 1 PENDING, 1 CANCELLED
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "09:00", endTime: "10:00", status: "COMPLETED", totalPrice: 100,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "11:00", endTime: "12:00", status: "COMPLETED", totalPrice: 50,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "14:00", endTime: "15:00", status: "PENDING", totalPrice: 80,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base, startTime: "16:00", endTime: "17:00", status: "CANCELLED", totalPrice: 999,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	// Day 1 (base+1): 1 COMPLETED = 200, 1 PENDING
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base.AddDate(0, 0, 1), startTime: "10:00", endTime: "11:00", status: "COMPLETED", totalPrice: 200,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{2},
+	})
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base.AddDate(0, 0, 1), startTime: "14:00", endTime: "15:00", status: "PENDING", totalPrice: 150,
+		clientID: 2, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	// Day 2 (base+2): no COMPLETED, 1 CONFIRMED
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: base.AddDate(0, 0, 2), startTime: "09:00", endTime: "10:00", status: "CONFIRMED", totalPrice: 75,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	fromStr := base.Format("2006-01-02")
+	toStr := base.AddDate(0, 0, 2).Format("2006-01-02")
+	path := "/api/dashboard/stats?from=" + fromStr + "&to=" + toStr
+
+	w := do(r, http.MethodGet, path, roleToken(t, 7, 1, "beauty_center"), "")
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var got response.DashboardStatsResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+
+	// 3 days in range [from, to] inclusive → half-open [from, to+1) = 3 days
+	assert.Len(t, got.RevenueSeries, 3)
+	assert.Len(t, got.AppointmentsSeries, 3)
+
+	// Revenue: day0=150 (COMPLETED only), day1=200, day2=0 (no COMPLETED)
+	assert.Equal(t, base.Format("2006-01-02"), got.RevenueSeries[0].Date)
+	assert.Equal(t, 150.0, got.RevenueSeries[0].Value)
+	assert.Equal(t, base.AddDate(0, 0, 1).Format("2006-01-02"), got.RevenueSeries[1].Date)
+	assert.Equal(t, 200.0, got.RevenueSeries[1].Value)
+	assert.Equal(t, base.AddDate(0, 0, 2).Format("2006-01-02"), got.RevenueSeries[2].Date)
+	assert.Equal(t, 0.0, got.RevenueSeries[2].Value)
+
+	// Appointments: day0=3 (2 COMPLETED+1 PENDING), day1=2 (COMPLETED+PENDING), day2=1 (CONFIRMED)
+	assert.Equal(t, base.Format("2006-01-02"), got.AppointmentsSeries[0].Date)
+	assert.Equal(t, 3.0, got.AppointmentsSeries[0].Value)
+	assert.Equal(t, base.AddDate(0, 0, 1).Format("2006-01-02"), got.AppointmentsSeries[1].Date)
+	assert.Equal(t, 2.0, got.AppointmentsSeries[1].Value)
+	assert.Equal(t, base.AddDate(0, 0, 2).Format("2006-01-02"), got.AppointmentsSeries[2].Date)
+	assert.Equal(t, 1.0, got.AppointmentsSeries[2].Value)
+
+	// Series never null - arrays present
+	assert.NotNil(t, got.RevenueSeries)
+	assert.NotNil(t, got.AppointmentsSeries)
+}
+
+// TestDashboardStats_TimeSeries_EmptyRange covers zero-filled arrays when
+// the range has no data.
+func TestDashboardStats_TimeSeries_EmptyRange(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+	r, db := dashboardTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Empty Range Center", "empty@test.com", true)
+
+	fromStr := "2026-08-01"
+	toStr := "2026-08-03"
+	path := "/api/dashboard/stats?from=" + fromStr + "&to=" + toStr
+
+	w := do(r, http.MethodGet, path, roleToken(t, 7, 1, "beauty_center"), "")
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var got response.DashboardStatsResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+
+	// 3 days: 2026-08-01, 2026-08-02, 2026-08-03
+	assert.Len(t, got.RevenueSeries, 3)
+	assert.Len(t, got.AppointmentsSeries, 3)
+
+	for i := 0; i < 3; i++ {
+		assert.Equal(t, 0.0, got.RevenueSeries[i].Value)
+		assert.Equal(t, 0.0, got.AppointmentsSeries[i].Value)
+	}
+
+	// Series present as empty arrays, not null
+	assert.Contains(t, w.Body.String(), `"revenue_series":[`)
+	assert.Contains(t, w.Body.String(), `"appointments_series":[`)
+}
+
+// TestDashboardStats_TimeSeries_AbsentParams covers the default 30-day window
+// when no from/to params are provided.
+func TestDashboardStats_TimeSeries_AbsentParams(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+	r, db := dashboardTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Default Range Center", "default@test.com", true)
+	seedDashboardClient(t, db, 1, "Client", "One")
+	seedDashboardPersonnel(t, db, 1, 1, true)
+	seedDashboardService(t, db, 1, 1, "Test Service", true)
+
+	// Seed data 15 days ago
+	fifteenDaysAgo := utcMidnight(-15)
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: fifteenDaysAgo, startTime: "10:00", endTime: "11:00", status: "COMPLETED", totalPrice: 250,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	// No from/to params
+	w := do(r, http.MethodGet, "/api/dashboard/stats", roleToken(t, 7, 1, "beauty_center"), "")
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var got response.DashboardStatsResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+
+	// Default 30 days: [today-29, today] inclusive = 30 days
+	assert.Len(t, got.RevenueSeries, 30)
+	assert.Len(t, got.AppointmentsSeries, 30)
+
+	// The seeded day should be at index 14 (15 days ago from today = today-15)
+	// Range is [today-29, today] → index 0 = today-29, index 14 = today-15
+	assert.Equal(t, fifteenDaysAgo.Format("2006-01-02"), got.RevenueSeries[14].Date)
+	assert.Equal(t, 250.0, got.RevenueSeries[14].Value)
+	assert.Equal(t, 1.0, got.AppointmentsSeries[14].Value)
+}
+
+// TestDashboardStats_TimeSeries_OnlyFrom covers the case where only `from`
+// is provided, defaulting `to` to `from + 30 days`.
+func TestDashboardStats_TimeSeries_OnlyFrom(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+	r, db := dashboardTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Only From Center", "onlyfrom@test.com", true)
+	seedDashboardClient(t, db, 1, "Client", "One")
+	seedDashboardPersonnel(t, db, 1, 1, true)
+	seedDashboardService(t, db, 1, 1, "Test Service", true)
+
+	fromDate := utcMidnight(-10)
+	fromStr := fromDate.Format("2006-01-02")
+	path := "/api/dashboard/stats?from=" + fromStr
+
+	w := do(r, http.MethodGet, path, roleToken(t, 7, 1, "beauty_center"), "")
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var got response.DashboardStatsResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+
+	// 31 days: from through from+30 inclusive
+	assert.Len(t, got.RevenueSeries, 31)
+	assert.Len(t, got.AppointmentsSeries, 31)
+
+	// First day should be the from date
+	assert.Equal(t, fromStr, got.RevenueSeries[0].Date)
+	assert.Equal(t, fromStr, got.AppointmentsSeries[0].Date)
+
+	// Last day should be from + 30
+	lastDate := fromDate.AddDate(0, 0, 30).Format("2006-01-02")
+	assert.Equal(t, lastDate, got.RevenueSeries[30].Date)
+	assert.Equal(t, lastDate, got.AppointmentsSeries[30].Date)
+}
+
+// TestDashboardStats_TimeSeries_FromAfterTo covers the validation error when
+// from > to.
+func TestDashboardStats_TimeSeries_FromAfterTo(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+	r, db := dashboardTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Validation Center", "valid@test.com", true)
+
+	fromStr := "2026-08-15"
+	toStr := "2026-08-10"
+	path := "/api/dashboard/stats?from=" + fromStr + "&to=" + toStr
+
+	w := do(r, http.MethodGet, path, roleToken(t, 7, 1, "beauty_center"), "")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	// Verify api-error-contract shape
+	assert.Contains(t, w.Body.String(), `"error"`)
+}
+
+// TestDashboardStats_TimeSeries_MalformedDate covers the validation error
+// when date strings are malformed.
+func TestDashboardStats_TimeSeries_MalformedDate(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+	r, db := dashboardTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Validation Center", "valid@test.com", true)
+
+	// Malformed date format
+	path := "/api/dashboard/stats?from=2026/08/10&to=2026-08-15"
+
+	w := do(r, http.MethodGet, path, roleToken(t, 7, 1, "beauty_center"), "")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	assert.Contains(t, w.Body.String(), `"error"`)
+}
+
+// TestDashboardStats_TimeSeries_FutureTo covers future `to` date being
+// allowed and zero-filled.
+func TestDashboardStats_TimeSeries_FutureTo(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+	r, db := dashboardTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Future To Center", "future@test.com", true)
+	seedDashboardClient(t, db, 1, "Client", "One")
+	seedDashboardPersonnel(t, db, 1, 1, true)
+	seedDashboardService(t, db, 1, 1, "Test Service", true)
+
+	// Seed data for today
+	today := utcMidnight(0)
+	seedReservationWithServices(t, db, 1, seedReservationPlan{
+		date: today, startTime: "10:00", endTime: "11:00", status: "COMPLETED", totalPrice: 120,
+		clientID: 1, personnelID: 1, serviceIDs: []uint{1},
+	})
+
+	fromStr := today.Format("2006-01-02")
+	toStr := today.AddDate(0, 0, 5).Format("2006-01-02") // 5 days in future
+	path := "/api/dashboard/stats?from=" + fromStr + "&to=" + toStr
+
+	w := do(r, http.MethodGet, path, roleToken(t, 7, 1, "beauty_center"), "")
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var got response.DashboardStatsResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+
+	// 6 days: today through today+5
+	assert.Len(t, got.RevenueSeries, 6)
+	assert.Len(t, got.AppointmentsSeries, 6)
+
+	// Today has data
+	assert.Equal(t, 120.0, got.RevenueSeries[0].Value)
+	assert.Equal(t, 1.0, got.AppointmentsSeries[0].Value)
+
+	// Future days zero-filled
+	for i := 1; i < 6; i++ {
+		assert.Equal(t, 0.0, got.RevenueSeries[i].Value)
+		assert.Equal(t, 0.0, got.AppointmentsSeries[i].Value)
+	}
+}
+
+// TestDashboardStats_TimeSeries_AuthzMatrix covers the authorization matrix
+// with from/to params — should be unchanged from base authz.
+func TestDashboardStats_TimeSeries_AuthzMatrix(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+	r, db := dashboardTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Authz Center", "authz@test.com", true)
+	seedDashboardCenter(t, db, 2, "Inactive Center", "inactive@test.com", false)
+
+	fromStr := "2026-08-01"
+	toStr := "2026-08-03"
+	path := "/api/dashboard/stats?from=" + fromStr + "&to=" + toStr
+
+	t.Run("no token is 401", func(t *testing.T) {
+		w := do(r, http.MethodGet, path, "", "")
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, "Authorization header missing", errBody(t, w.Body.String()))
+	})
+
+	t.Run("client role is 403", func(t *testing.T) {
+		w := do(r, http.MethodGet, path, roleToken(t, 1, 0, "client"), "")
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Equal(t, "forbidden", errBody(t, w.Body.String()))
+	})
+
+	t.Run("personnel role is 403", func(t *testing.T) {
+		w := do(r, http.MethodGet, path, roleToken(t, 1, 1, "personnel"), "")
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Equal(t, "forbidden", errBody(t, w.Body.String()))
+	})
+
+	t.Run("missing centerID claim is 403", func(t *testing.T) {
+		w := do(r, http.MethodGet, path, roleToken(t, 1, 0, "beauty_center"), "")
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Equal(t, "forbidden", errBody(t, w.Body.String()))
+	})
+
+	t.Run("inactive center is 404", func(t *testing.T) {
+		w := do(r, http.MethodGet, path, roleToken(t, 1, 2, "beauty_center"), "")
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, "not found", errBody(t, w.Body.String()))
+	})
+}
+
+// TestDashboardStats_TimeSeries_OnlyTo covers the case where only `to` is
+// provided, defaulting `from` to `to - 30 days`.
+func TestDashboardStats_TimeSeries_OnlyTo(t *testing.T) {
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	utils.Log = zap.NewNop().Sugar()
+	r, db := dashboardTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Only To Center", "onlyto@test.com", true)
+	seedDashboardClient(t, db, 1, "Client", "One")
+	seedDashboardPersonnel(t, db, 1, 1, true)
+	seedDashboardService(t, db, 1, 1, "Test Service", true)
+
+	toDate := utcMidnight(0)
+	toStr := toDate.Format("2006-01-02")
+	path := "/api/dashboard/stats?to=" + toStr
+
+	w := do(r, http.MethodGet, path, roleToken(t, 7, 1, "beauty_center"), "")
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var got response.DashboardStatsResponse
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+
+	// 31 days: to-30 through to inclusive
+	assert.Len(t, got.RevenueSeries, 31)
+	assert.Len(t, got.AppointmentsSeries, 31)
+
+	// First day should be to - 30
+	firstDate := toDate.AddDate(0, 0, -30).Format("2006-01-02")
+	assert.Equal(t, firstDate, got.RevenueSeries[0].Date)
+	assert.Equal(t, firstDate, got.AppointmentsSeries[0].Date)
+
+	// Last day should be the to date
+	assert.Equal(t, toStr, got.RevenueSeries[30].Date)
+	assert.Equal(t, toStr, got.AppointmentsSeries[30].Date)
 }
