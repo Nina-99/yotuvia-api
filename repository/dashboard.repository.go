@@ -14,6 +14,18 @@ type TopServiceRow struct {
 	AppointmentCount int64  `gorm:"column:appointment_count"`
 }
 
+// RevenueDayRow is a single day's revenue aggregate returned by RevenueByDay.
+type RevenueDayRow struct {
+	Date  time.Time
+	Value float64
+}
+
+// CountDayRow is a single day's appointment count returned by AppointmentsByDay.
+type CountDayRow struct {
+	Date  time.Time
+	Value int64
+}
+
 // DashboardRepository centralizes the aggregate queries backing the admin
 // dashboard stats endpoint. Date boundaries are computed by the service in UTC
 // (design decision D2) and passed in, keeping every query deterministic.
@@ -48,4 +60,10 @@ type DashboardRepository interface {
 	// PENDING or CONFIRMED and date >= from, sorted by date then start_time,
 	// with the Client preloaded for display.
 	UpcomingReservations(centerID uint, from time.Time, limit int) ([]models.Reservation, error)
+	// RevenueByDay returns daily revenue (SUM total_price) for COMPLETED
+	// reservations with date in [from, to), grouped by date.
+	RevenueByDay(centerID uint, from, to time.Time) ([]RevenueDayRow, error)
+	// AppointmentsByDay returns daily appointment counts (status != CANCELLED)
+	// with date in [from, to), grouped by date.
+	AppointmentsByDay(centerID uint, from, to time.Time) ([]CountDayRow, error)
 }
