@@ -33,7 +33,8 @@ func TokenRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate)
 	missionSvc = service.NewTokenMissionServiceImpl(missionRepo, accountSvc, accountRepo)
 	referralSvc = service.NewReferralServiceImpl(referralRepo, centerRepo, accountSvc)
 
-	ctrl := controller.NewTokenController(accountSvc, txSvc, missionSvc, referralSvc, topUpRepo, centerRepo)
+	uploadCtrl := controller.NewUploadController()
+	ctrl := controller.NewTokenController(accountSvc, txSvc, missionSvc, referralSvc, topUpRepo, centerRepo, uploadCtrl)
 
 	tokens := rg.Group("/tokens")
 	tokens.Use(middleware.JWTAuthMiddleware())
@@ -41,11 +42,19 @@ func TokenRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate)
 		tokens.GET("/balance", ctrl.GetBalance)
 		tokens.GET("/history", ctrl.GetHistory)
 		tokens.POST("/topup", ctrl.CreateTopUp)
+		tokens.GET("/topups", ctrl.FindMyTopUps)
 		tokens.GET("/missions", ctrl.GetMissions)
 		tokens.POST("/missions/:id/claim", ctrl.ClaimMission)
 		tokens.GET("/referral-info", ctrl.GetReferralInfo)
 		tokens.POST("/referrals", ctrl.CreateReferral)
 		tokens.GET("/referrals", ctrl.GetReferrals)
+	}
+
+	// Config endpoints (public or auth depending on needs)
+	config := rg.Group("/config")
+	config.Use(middleware.JWTAuthMiddleware())
+	{
+		config.GET("/tiers", ctrl.GetTierConfig)
 	}
 
 	// Admin top-up processing (design D5): the group gains RequireRole so

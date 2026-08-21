@@ -7,6 +7,7 @@ type TokenTopUpRepository interface {
 	Update(topup *models.TokenTopUp) error
 	FindByID(id uint) (*models.TokenTopUp, error)
 	FindByBeautyCenterID(beautyCenterID uint) ([]models.TokenTopUp, error)
+	FindByCenterIDWithStatus(beautyCenterID uint, page, limit int, status string) ([]models.TokenTopUp, int64, error)
 	FindPending() ([]models.TokenTopUp, error)
 	FindAll(page, limit int) ([]models.TokenTopUp, int64, error)
 }

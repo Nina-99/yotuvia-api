@@ -247,3 +247,11 @@ func (s *TokenAccountServiceImpl) ProcessTopUp(topUpID, adminID uint, status str
 		topup.BeautyCenterID, utils.FromMilli(topup.TokensReceived), utils.FromMilli(topup.BonusTokens), utils.FromMilli(totalTokens))
 	return nil
 }
+
+func (s *TokenAccountServiceImpl) FindMyTopUps(centerID uint, page, limit int, status *string) ([]models.TokenTopUp, int64, error) {
+	var statusStr string
+	if status != nil {
+		statusStr = *status
+	}
+	return s.topUpRepo.FindByCenterIDWithStatus(centerID, page, limit, statusStr)
+}

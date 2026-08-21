@@ -53,3 +53,18 @@ func (r *TokenTopUpRepositoryImpl) FindAll(page, limit int) ([]models.TokenTopUp
 	err := r.db.Offset(offset).Limit(limit).Order("created_at DESC").Find(&topups).Error
 	return topups, total, err
 }
+
+func (r *TokenTopUpRepositoryImpl) FindByCenterIDWithStatus(beautyCenterID uint, page, limit int, status string) ([]models.TokenTopUp, int64, error) {
+	var topups []models.TokenTopUp
+	var total int64
+
+	query := r.db.Model(&models.TokenTopUp{}).Where("beauty_center_id = ?", beautyCenterID)
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+
+	query.Count(&total)
+	offset := (page - 1) * limit
+	err := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&topups).Error
+	return topups, total, err
+}

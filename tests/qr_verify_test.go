@@ -49,6 +49,9 @@ func (s *stubTokenAccount) ProcessTopUp(uint, uint, string) error {
 func (s *stubTokenAccount) AddTokens(uint, int64, string, uint, string) error {
 	return nil
 }
+func (s *stubTokenAccount) FindMyTopUps(uint, int, int, *string) ([]models.TokenTopUp, int64, error) {
+	return nil, 0, nil
+}
 
 type stubLoyalty struct {
 	punchCalls int

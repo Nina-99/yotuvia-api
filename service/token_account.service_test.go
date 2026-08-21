@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -16,6 +18,10 @@ import (
 
 func TestMain(m *testing.M) {
 	utils.InitLogger(utils.LoggerConfig{Level: "fatal", Format: "console"})
+	// Set tier config path for tests
+	_, filename, _, _ := runtime.Caller(0)
+	projectRoot := filepath.Dir(filepath.Dir(filename)) // service/ -> yottu-api/
+	os.Setenv("TIERS_CONFIG_PATH", filepath.Join(projectRoot, "configs", "tiers.json"))
 	os.Exit(m.Run())
 }
 
@@ -211,20 +217,24 @@ func TestCalculateTier(t *testing.T) {
 	tests := []struct {
 		name       string
 		amount     float64
+		currency   string
 		wantTokens float64
 		wantBonus  float64
 		wantTotal  float64
 	}{
-		{"50 Bs (no bonus)", 50, 50, 0, 50},
-		{"100 Bs (+5%)", 100, 100, 5, 105},
-		{"275 Bs (+9%)", 275, 275, 24.75, 299.75},
-		{"500 Bs (+15%)", 500, 500, 75, 575},
-		{"1000 Bs (+25%)", 1000, 1000, 250, 1250},
+		{"50 VES (no bonus)", 50, "VES", 50, 0, 50},
+		{"100 VES (+5%)", 100, "VES", 100, 5, 105},
+		{"275 VES (+9%)", 275, "VES", 275, 24.75, 299.75},
+		{"500 VES (+15%)", 500, "VES", 500, 75, 575},
+		{"1000 VES (+25%)", 1000, "VES", 1000, 250, 1250},
+		{"10 USD (+5%)", 10, "USD", 10, 0.5, 10.5},
+		{"50 USD (+15%)", 50, "USD", 50, 7.5, 57.5},
+		{"100 USD (+25%)", 100, "USD", 100, 25, 125},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tokens, bonus := utils.CalculateTier(tt.amount)
+			tokens, bonus := utils.CalculateTier(tt.amount, tt.currency)
 			assert.InDelta(t, tt.wantTokens, tokens, 0.01)
 			assert.InDelta(t, tt.wantBonus, bonus, 0.01)
 			assert.InDelta(t, tt.wantTotal, tokens+bonus, 0.01)

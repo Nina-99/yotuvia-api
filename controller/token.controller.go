@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -16,12 +17,13 @@ import (
 )
 
 type TokenController struct {
-	accountSvc  service.TokenAccountService
-	txSvc       service.TokenTransactionService
-	missionSvc  service.TokenMissionService
-	referralSvc service.ReferralService
-	topUpRepo   repository.TokenTopUpRepository
-	centerRepo  repository.BeautyCenterRepository
+	accountSvc    service.TokenAccountService
+	txSvc         service.TokenTransactionService
+	missionSvc    service.TokenMissionService
+	referralSvc   service.ReferralService
+	topUpRepo     repository.TokenTopUpRepository
+	centerRepo    repository.BeautyCenterRepository
+	uploadCtrl    *UploadController
 }
 
 func NewTokenController(
@@ -31,6 +33,7 @@ func NewTokenController(
 	referralSvc service.ReferralService,
 	topUpRepo repository.TokenTopUpRepository,
 	centerRepo repository.BeautyCenterRepository,
+	uploadCtrl *UploadController,
 ) *TokenController {
 	return &TokenController{
 		accountSvc:  accountSvc,
@@ -39,6 +42,7 @@ func NewTokenController(
 		referralSvc: referralSvc,
 		topUpRepo:   topUpRepo,
 		centerRepo:  centerRepo,
+		uploadCtrl:  uploadCtrl,
 	}
 }
 
@@ -97,15 +101,7 @@ func (c *TokenController) CreateTopUp(ctx *gin.Context) {
 		return
 	}
 
-	var req request.CreateTopUpRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	tokens, bonus := utils.CalculateTier(req.AmountBs)
-
-	// Ensure token account exists
+	// Ensure token account exists and get currency
 	center, err := c.centerRepo.FindByID(centerID.(uint))
 	if err != nil || center == nil {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "beauty center not found"})
@@ -118,6 +114,23 @@ func (c *TokenController) CreateTopUp(ctx *gin.Context) {
 		return
 	}
 
+	contentType := ctx.GetHeader("Content-Type")
+
+	// Handle multipart/form-data (file upload)
+	if len(contentType) > 0 && contentType[:30] == "multipart/form-data" {
+		c.createTopUpMultipart(ctx, centerID.(uint), center.Currency)
+		return
+	}
+
+	// Handle application/json (existing behavior)
+	var req request.CreateTopUpRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tokens, bonus := utils.CalculateTier(req.AmountBs, center.Currency)
+
 	topup := &models.TokenTopUp{
 		BeautyCenterID: centerID.(uint),
 		AmountBs:       req.AmountBs,
@@ -127,13 +140,67 @@ func (c *TokenController) CreateTopUp(ctx *gin.Context) {
 		Status:         "pending",
 	}
 
-	// Need to import models
 	if err := c.topUpRepo.Create(topup); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// The wire format stays decimal YOTTUs; the stored values are milli.
+	ctx.JSON(http.StatusCreated, gin.H{
+		"message":         "Top-up request created",
+		"topup_id":        topup.ID,
+		"tokens_received": utils.FromMilli(topup.TokensReceived),
+		"bonus_tokens":    utils.FromMilli(topup.BonusTokens),
+		"total_tokens":    utils.FromMilli(topup.TokensReceived + topup.BonusTokens),
+	})
+}
+
+func (c *TokenController) createTopUpMultipart(ctx *gin.Context, centerID uint, currency string) {
+	file, err := ctx.FormFile("file")
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		return
+	}
+
+	amountBsStr := ctx.PostForm("amount_bs")
+	if amountBsStr == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "amount_bs is required"})
+		return
+	}
+
+	amountBs := 0.0
+	if _, err := fmt.Sscanf(amountBsStr, "%f", &amountBs); err != nil || amountBs < 1 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid amount_bs"})
+		return
+	}
+
+	// Upload receipt
+	if c.uploadCtrl == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "upload service not available"})
+		return
+	}
+
+	receiptURL, err := c.uploadCtrl.UploadReceiptFromFile(file)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tokens, bonus := utils.CalculateTier(amountBs, currency)
+
+	topup := &models.TokenTopUp{
+		BeautyCenterID: centerID,
+		AmountBs:       amountBs,
+		TokensReceived: utils.ToMilli(tokens),
+		BonusTokens:    utils.ToMilli(bonus),
+		ReceiptURL:     receiptURL,
+		Status:         "pending",
+	}
+
+	if err := c.topUpRepo.Create(topup); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
 	ctx.JSON(http.StatusCreated, gin.H{
 		"message":         "Top-up request created",
 		"topup_id":        topup.ID,
@@ -302,4 +369,59 @@ func (c *TokenController) AdminProcessTopUp(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "top-up " + req.Status})
+}
+
+// GET /api/v1/tokens/topups (Center: My TopUps)
+func (c *TokenController) FindMyTopUps(ctx *gin.Context) {
+	centerID, exists := ctx.Get("centerID")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "center ID not found in token"})
+		return
+	}
+
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+	if limit > 100 {
+		limit = 100
+	}
+	status := ctx.Query("status")
+
+	topups, total, err := c.topUpRepo.FindByCenterIDWithStatus(centerID.(uint), page, limit, status)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var resp []response.TokenTopUpResponse
+	for _, t := range topups {
+		resp = append(resp, response.NewTokenTopUpResponse(t))
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"topups": resp,
+		"total":  total,
+		"page":   page,
+		"limit":  limit,
+	})
+}
+
+// GET /api/v1/config/tiers
+func (c *TokenController) GetTierConfig(ctx *gin.Context) {
+	currency := ctx.DefaultQuery("currency", "VES")
+
+	tiers, err := utils.GetTierConfig(currency)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load tier config"})
+		return
+	}
+
+	if tiers == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "currency not supported"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"currency": currency,
+		"tiers":    tiers,
+	})
 }

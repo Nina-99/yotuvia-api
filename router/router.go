@@ -43,6 +43,8 @@ func SetupRouter() *gin.Engine {
 		SocialMediaRoutes(api, db, validate)
 		VideoRoutes(api, db, validate)
 	}
+
+	UploadRoutes(api)
 	return r
 }
 

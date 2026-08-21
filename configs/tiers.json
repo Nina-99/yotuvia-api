@@ -1,0 +1,14 @@
+{
+  "VES": [
+    { "min": 100, "bonusPct": 0.05 },
+    { "min": 275, "bonusPct": 0.09 },
+    { "min": 500, "bonusPct": 0.15 },
+    { "min": 1000, "bonusPct": 0.25 }
+  ],
+  "USD": [
+    { "min": 10, "bonusPct": 0.05 },
+    { "min": 25, "bonusPct": 0.09 },
+    { "min": 50, "bonusPct": 0.15 },
+    { "min": 100, "bonusPct": 0.25 }
+  ]
+}

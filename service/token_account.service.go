@@ -17,4 +17,5 @@ type TokenAccountService interface {
 	// AddTokens credits amountMilli atomically. TotalPurchased accumulates only
 	// for "topup" transactions.
 	AddTokens(beautyCenterID uint, amountMilli int64, txType string, referenceID uint, description string) error
+	FindMyTopUps(centerID uint, page, limit int, status *string) ([]models.TokenTopUp, int64, error)
 }
