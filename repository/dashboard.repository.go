@@ -9,9 +9,10 @@ import (
 // TopServiceRow is the aggregated leaderboard row returned by TopServices: a
 // service's id/name snapshot plus how many reservations reference it.
 type TopServiceRow struct {
-	ServiceID        uint   `gorm:"column:service_id"`
-	ServiceName      string `gorm:"column:service_name"`
-	AppointmentCount int64  `gorm:"column:appointment_count"`
+	ServiceID        uint    `gorm:"column:service_id"`
+	ServiceName      string  `gorm:"column:service_name"`
+	AppointmentCount int64   `gorm:"column:appointment_count"`
+	Revenue          float64 `gorm:"column:revenue"`
 }
 
 // RevenueDayRow is a single day's revenue aggregate returned by RevenueByDay.
@@ -24,6 +25,69 @@ type RevenueDayRow struct {
 type CountDayRow struct {
 	Date  time.Time
 	Value int64
+}
+
+// HeatmapRow is one raw COMPLETED reservation feeding the day×hour heatmap.
+// Aggregation into the 7×24 matrix happens in the service layer (design
+// decision D4) to stay portable across PostgreSQL and the SQLite test driver.
+type HeatmapRow struct {
+	Date      time.Time
+	StartTime string
+}
+
+// CountStatusRow bundles total vs CANCELLED reservation counts for a range,
+// feeding the cancellation-rate metric in one round trip.
+type CountStatusRow struct {
+	Total     int64 `gorm:"column:total"`
+	Cancelled int64 `gorm:"column:cancelled"`
+}
+
+// PersonnelRevenueRow is one rank of the revenue-by-personnel leaderboard.
+type PersonnelRevenueRow struct {
+	PersonnelID      uint    `gorm:"column:personnel_id"`
+	PersonnelName    string  `gorm:"column:personnel_name"`
+	Revenue          float64 `gorm:"column:revenue"`
+	AppointmentCount int64   `gorm:"column:appointment_count"`
+}
+
+// ClientRecurrenceRow holds the new-vs-recurring client counts (Phase 3).
+// "New" = client whose earliest non-CANCELLED reservation starts inside the
+// range; "Recurring" = visited in range but first visit predates it.
+type ClientRecurrenceRow struct {
+	NewClients       int64 `gorm:"column:new_clients"`
+	RecurringClients int64 `gorm:"column:recurring_clients"`
+}
+
+// ClientSpendRow is one rank of the top-clients-by-spend leaderboard.
+type ClientSpendRow struct {
+	ClientID   uint    `gorm:"column:client_id"`
+	ClientName string  `gorm:"column:client_name"`
+	TotalSpent float64 `gorm:"column:total_spent"`
+	VisitCount int64   `gorm:"column:visit_count"`
+}
+
+// AtRiskClientRow is a client whose last COMPLETED visit predates a cutoff.
+// LastVisit arrives as driver-formatted text (CAST in the query for
+// cross-driver portability); the service parses it.
+type AtRiskClientRow struct {
+	ClientID   uint   `gorm:"column:client_id"`
+	ClientName string `gorm:"column:client_name"`
+	LastVisit  string `gorm:"column:last_visit"`
+}
+
+// BookedSlotRow is one raw non-CANCELLED reservation slot feeding the
+// occupancy computation; durations are parsed from HH:MM strings in Go
+// (design decision D4 — driver-portable, no dialect SQL).
+type BookedSlotRow struct {
+	PersonnelID uint
+	StartTime   string
+	EndTime     string
+}
+
+// ReviewPointRow is one raw review feeding the rating trend aggregation.
+type ReviewPointRow struct {
+	CreatedAt time.Time
+	Rating    int
 }
 
 // DashboardRepository centralizes the aggregate queries backing the admin
@@ -66,4 +130,44 @@ type DashboardRepository interface {
 	// AppointmentsByDay returns daily appointment counts (status != CANCELLED)
 	// with date in [from, to), grouped by date.
 	AppointmentsByDay(centerID uint, from, to time.Time) ([]CountDayRow, error)
+	// HeatmapRows returns the raw COMPLETED reservations (date + start_time)
+	// with date in [from, to); the service builds the 7×24 matrix in Go (D4).
+	HeatmapRows(centerID uint, from, to time.Time) ([]HeatmapRow, error)
+	// CountStatusBetween returns total and CANCELLED reservation counts with
+	// date in [from, to) — cancellation-rate inputs in one query.
+	CountStatusBetween(centerID uint, from, to time.Time) (CountStatusRow, error)
+	// TopServicesByRevenue is the range-scoped leaderboard: SUM of
+	// reservation_services.price joined to COMPLETED reservations in
+	// [from, to), ranked revenue DESC (ties: appointment_count DESC, then id).
+	TopServicesByRevenue(centerID uint, from, to time.Time, limit int) ([]TopServiceRow, error)
+	// PersonnelRevenue ranks staff by SUM(total_price) of COMPLETED
+	// reservations in [from, to), revenue DESC, limited to `limit` entries.
+	PersonnelRevenue(centerID uint, from, to time.Time, limit int) ([]PersonnelRevenueRow, error)
+
+	// ── feat-admin-analytics Phase 3 ────────────────────────────────
+
+	// ClientRecurrence counts NEW clients (earliest non-CANCELLED reservation
+	// inside [from, to)) vs RECURRING (visited in range, first visit earlier).
+	ClientRecurrence(centerID uint, from, to time.Time) (ClientRecurrenceRow, error)
+	// TopClientsBySpend ranks clients by SUM(total_price) of COMPLETED
+	// reservations in [from, to), spend DESC, limited to `limit` entries.
+	TopClientsBySpend(centerID uint, from, to time.Time, limit int) ([]ClientSpendRow, error)
+	// AtRiskClients returns clients whose last COMPLETED visit is strictly
+	// before cutoff, oldest first, limited to `limit` entries.
+	AtRiskClients(centerID uint, cutoff time.Time, limit int) ([]AtRiskClientRow, error)
+	// BookedSlots returns the raw non-CANCELLED reservation slots in
+	// [from, to); durations are parsed in Go by the service.
+	BookedSlots(centerID uint, from, to time.Time) ([]BookedSlotRow, error)
+	// PersonnelNames resolves display names for the given personnel ids,
+	// scoped to the center; missing/soft-deleted ids are absent from the map.
+	PersonnelNames(centerID uint, ids []uint) (map[uint]string, error)
+	// WorkingHoursRows returns the center-level schedule rows used as the
+	// shared availability denominator for occupancy.
+	WorkingHoursRows(centerID uint) ([]models.WorkingHour, error)
+	// CompletedCountByDay returns daily COMPLETED counts grouped by date —
+	// average-ticket-trend denominator.
+	CompletedCountByDay(centerID uint, from, to time.Time) ([]CountDayRow, error)
+	// ReviewPoints returns raw review ratings with timestamps in [from, to);
+	// day-bucketing happens in Go (D4 portability).
+	ReviewPoints(centerID uint, from, to time.Time) ([]ReviewPointRow, error)
 }

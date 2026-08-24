@@ -17,5 +17,7 @@ type DashboardService interface {
 	// the given date range [from, to). The service computes UTC boundaries,
 	// calls repository by-day queries, and zero-fills missing days so every
 	// date in the range is present in the series arrays (never null).
-	GetStatsWithRange(centerID uint, from, to time.Time) (*response.DashboardStatsResponse, error)
+	// churnDays drives the at-risk-clients window (spec: default 30, valid
+	// 1–365; controller validates before calling).
+	GetStatsWithRange(centerID uint, from, to time.Time, churnDays int) (*response.DashboardStatsResponse, error)
 }

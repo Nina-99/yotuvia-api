@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/Nina-99/yottu-api/apperrors"
@@ -116,7 +117,19 @@ func (c *DashboardController) GetStats(ctx *gin.Context) {
 		return
 	}
 
-	resp, err := c.dashboardService.GetStatsWithRange(centerID, from, to)
+	// Optional churnDays (feat-admin-analytics Phase 3): at-risk window in
+	// days. Default 30; accepted 1–365 → 400 otherwise (api-error-contract).
+	churnDays := 30
+	if rawChurn := ctx.Query("churnDays"); rawChurn != "" {
+		parsed, parseErr := strconv.Atoi(rawChurn)
+		if parseErr != nil || parsed < 1 || parsed > 365 {
+			c.writeError(ctx, apperrors.ErrBadRequest)
+			return
+		}
+		churnDays = parsed
+	}
+
+	resp, err := c.dashboardService.GetStatsWithRange(centerID, from, to, churnDays)
 	if err != nil {
 		c.writeError(ctx, err)
 		return
