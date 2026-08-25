@@ -2,11 +2,12 @@ package service
 
 import (
 	"errors"
-	"time"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/utils"
+	"gorm.io/gorm"
 )
 
 type TokenMissionServiceImpl struct {
@@ -56,44 +57,53 @@ func (s *TokenMissionServiceImpl) GetProgress(beautyCenterID uint) ([]models.Tok
 	return s.missionRepo.FindProgressByCenter(beautyCenterID)
 }
 
+// TriggerCheck advances EVERY active mission matching the trigger type (D1 —
+// the 1/10/50 reservation ladder shares one trigger and must co-progress).
+// Progress rows are created on demand; the count increment is a single atomic
+// statement (D2) so concurrent triggers can neither overshoot the target nor
+// double-stamp completion.
 func (s *TokenMissionServiceImpl) TriggerCheck(beautyCenterID uint, triggerType string) error {
-	mission, err := s.missionRepo.FindMissionByType(triggerType)
+	missions, err := s.missionRepo.FindActiveMissionsByType(triggerType)
 	if err != nil {
 		return err
 	}
-	if mission == nil {
+	if len(missions) == 0 {
 		return nil // no mission configured for this trigger type
 	}
 
-	progress, err := s.missionRepo.FindProgress(beautyCenterID, mission.ID)
-	if err != nil {
-		return err
-	}
-
-	if progress == nil {
-		progress = &models.TokenMissionProgress{
-			BeautyCenterID: beautyCenterID,
-			MissionID:      mission.ID,
-			CurrentCount:   0,
-			TargetCount:    mission.TriggerCount,
+	for _, mission := range missions {
+		progress, err := s.missionRepo.FindProgress(beautyCenterID, mission.ID)
+		if err != nil {
+			return err
 		}
+		if progress == nil {
+			progress = &models.TokenMissionProgress{
+				BeautyCenterID: beautyCenterID,
+				MissionID:      mission.ID,
+				CurrentCount:   0,
+				TargetCount:    mission.TriggerCount,
+			}
+			if err := s.missionRepo.UpsertProgress(progress); err != nil {
+				return err
+			}
+		}
+		if progress.CompletedAt != nil {
+			continue // already completed — frozen until claim
+		}
+		if err := s.missionRepo.IncrementProgress(progress.ID, mission.TriggerCount); err != nil {
+			return err
+		}
+		utils.Log.Debugf("[MISSION] Center %d progressed mission %q", beautyCenterID, mission.Name)
 	}
-
-	if progress.CompletedAt != nil {
-		return nil // already completed
-	}
-
-	progress.CurrentCount++
-	if err := s.missionRepo.UpsertProgress(progress); err != nil {
-		return err
-	}
-
-	utils.Log.Debugf("[MISSION] Center %d progressed mission %s: %d/%d",
-		beautyCenterID, mission.Name, progress.CurrentCount, progress.TargetCount)
 
 	return nil
 }
 
+// ClaimReward credits the mission reward atomically with the claim flag (D7):
+// one transaction locks the progress row, flips reward_claimed under a guard
+// that rejects already-claimed or incomplete rows, and performs the token
+// credit + ledger insert via AddTokensInTx. A rejected guard surfaces
+// apperrors.ErrConflict so the API layer maps it to 409.
 func (s *TokenMissionServiceImpl) ClaimReward(beautyCenterID, missionID uint) error {
 	mission, err := s.missionRepo.FindMissionByID(missionID)
 	if err != nil {
@@ -108,32 +118,37 @@ func (s *TokenMissionServiceImpl) ClaimReward(beautyCenterID, missionID uint) er
 		return err
 	}
 	if progress == nil {
-		return errors.New("mission progress not found")
+		// No progress row = mission never started → the claim guard treats it
+		// exactly like an incomplete mission (conflict, D7).
+		return apperrors.ErrConflict
 	}
 
-	if progress.RewardClaimed {
-		return errors.New("reward already claimed")
-	}
-
-	if progress.CurrentCount < progress.TargetCount {
-		return errors.New("mission not yet completed")
-	}
-
-	// Mark as completed and claimed
-	now := time.Now()
-	progress.CompletedAt = &now
-	progress.RewardClaimed = true
-
-	if err := s.missionRepo.UpsertProgress(progress); err != nil {
+	var account *models.TokenAccount
+	account, err = s.accountRepo.FindByBeautyCenterID(beautyCenterID)
+	if err != nil {
 		return err
 	}
-
-	// Award tokens — RewardTokens is already milli-YOTTUs, passed through
-	// unchanged to the atomic AddTokens.
-	if err := s.accountSvc.AddTokens(beautyCenterID, mission.RewardTokens, "mission", mission.ID, "Mission reward: "+mission.Name); err != nil {
-		return err
+	if account == nil {
+		return errors.New("token account not found")
 	}
 
-	utils.Log.Infof("[MISSION] Center %d claimed reward for %s: +%.2f YOTTUs", beautyCenterID, mission.Name, utils.FromMilli(mission.RewardTokens))
-	return nil
+	var refPtr *uint
+	if mission.ID != 0 {
+		ref := mission.ID
+		refPtr = &ref
+	}
+
+	return s.missionRepo.Transact(func(tx *gorm.DB) error {
+		rows, err := s.missionRepo.MarkClaimed(tx, progress.ID)
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return apperrors.ErrConflict // already claimed or incomplete
+		}
+
+		_, err = s.accountRepo.AddTokensInTx(tx, account.ID, mission.RewardTokens,
+			"mission", "Mission reward: "+mission.Name, refPtr)
+		return err
+	})
 }

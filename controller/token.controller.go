@@ -17,13 +17,13 @@ import (
 )
 
 type TokenController struct {
-	accountSvc    service.TokenAccountService
-	txSvc         service.TokenTransactionService
-	missionSvc    service.TokenMissionService
-	referralSvc   service.ReferralService
-	topUpRepo     repository.TokenTopUpRepository
-	centerRepo    repository.BeautyCenterRepository
-	uploadCtrl    *UploadController
+	accountSvc  service.TokenAccountService
+	txSvc       service.TokenTransactionService
+	missionSvc  service.TokenMissionService
+	referralSvc service.ReferralService
+	topUpRepo   repository.TokenTopUpRepository
+	centerRepo  repository.BeautyCenterRepository
+	uploadCtrl  *UploadController
 }
 
 func NewTokenController(
@@ -247,6 +247,12 @@ func (c *TokenController) ClaimMission(ctx *gin.Context) {
 	}
 
 	if err := c.missionSvc.ClaimReward(centerID.(uint), uint(missionID)); err != nil {
+		// feat-token-missions D7: double-claim / incomplete-mission guards
+		// surface as conflicts per the api-error-contract.
+		if errors.Is(err, apperrors.ErrConflict) {
+			ctx.JSON(http.StatusConflict, gin.H{"error": apperrors.ErrConflict.Error()})
+			return
+		}
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

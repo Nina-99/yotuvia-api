@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Nina-99/yottu-api/models"
+	"gorm.io/gorm"
 )
 
 type TokenAccountRepository interface {
@@ -24,4 +25,19 @@ type TokenAccountRepository interface {
 	// purchases.
 	AddTokens(ctx context.Context, accountID uint, amountMilli int64,
 		txnType string, description string, referenceID *uint) (*models.TokenAccount, error)
+
+	// AddTokensInTx is the transaction-aware variant: it performs the same
+	// credit + ledger insert inside a CALLER-managed transaction so composite
+	// operations (e.g. mission claim: flag + credit) commit as one unit.
+	AddTokensInTx(tx *gorm.DB, accountID uint, amountMilli int64,
+		txnType string, description string, referenceID *uint) (*models.TokenAccount, error)
+
+	// DebitInTx is the overdraft-aware transactional counterpart used by QR
+	// completion (feat-token-economy-config): locks the account row and
+	// decrements balance while `balance ≥ amount - overdraft`, incrementing
+	// TotalConsumed and inserting the consumption ledger row. Fails with
+	// apperrors.ErrInsufficientBalance when the guard rejects — the CALLER's
+	// transaction rolls back with it.
+	DebitInTx(tx *gorm.DB, accountID uint, amountMilli int64, overdraftMilli int64,
+		txnType string, description string, referenceID *uint) error
 }

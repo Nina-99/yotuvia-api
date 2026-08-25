@@ -84,35 +84,88 @@ func (r *TokenAccountRepositoryImpl) Consume(ctx context.Context, accountID uint
 func (r *TokenAccountRepositoryImpl) AddTokens(ctx context.Context, accountID uint, amountMilli int64,
 	txnType string, description string, referenceID *uint) (*models.TokenAccount, error) {
 
-	var account models.TokenAccount
+	var updated *models.TokenAccount
 	err := r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&account, accountID).Error; err != nil {
-			return err
-		}
-
-		balanceBefore := account.Balance
-		account.Balance += amountMilli
-		if txnType == "topup" {
-			account.TotalPurchased += amountMilli
-		}
-
-		if err := tx.Save(&account).Error; err != nil {
-			return err
-		}
-
-		ledger := &models.TokenTransaction{
-			BeautyCenterID: account.BeautyCenterID,
-			Amount:         amountMilli,
-			Type:           txnType,
-			ReferenceID:    referenceID,
-			BalanceBefore:  balanceBefore,
-			BalanceAfter:   account.Balance,
-			Description:    description,
-		}
-		return tx.Create(ledger).Error
+		var err error
+		updated, err = r.AddTokensInTx(tx, accountID, amountMilli, txnType, description, referenceID)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
+	return updated, nil
+}
+
+// AddTokensInTx performs the credit + ledger insert inside a CALLER-managed
+// transaction (feat-token-missions D7): locking read, balance update and
+// ledger row commit together with whatever else the caller writes (e.g. the
+// mission claim flag).
+func (r *TokenAccountRepositoryImpl) AddTokensInTx(tx *gorm.DB, accountID uint, amountMilli int64,
+	txnType string, description string, referenceID *uint) (*models.TokenAccount, error) {
+
+	var account models.TokenAccount
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&account, accountID).Error; err != nil {
+		return nil, err
+	}
+
+	balanceBefore := account.Balance
+	account.Balance += amountMilli
+	if txnType == "topup" {
+		account.TotalPurchased += amountMilli
+	}
+
+	if err := tx.Save(&account).Error; err != nil {
+		return nil, err
+	}
+
+	ledger := &models.TokenTransaction{
+		BeautyCenterID: account.BeautyCenterID,
+		Amount:         amountMilli,
+		Type:           txnType,
+		ReferenceID:    referenceID,
+		BalanceBefore:  balanceBefore,
+		BalanceAfter:   account.Balance,
+		Description:    description,
+	}
+	if err := tx.Create(ledger).Error; err != nil {
+		return nil, err
+	}
 	return &account, nil
+}
+
+// DebitInTx performs the overdraft-aware consumption inside a CALLER-managed
+// transaction (feat-token-economy-config D4): locked read, guard
+// `balance ≥ amount - overdraft`, decrement, TotalConsumed accumulation and
+// ledger row all commit (or roll back) with the caller's completion update.
+func (r *TokenAccountRepositoryImpl) DebitInTx(tx *gorm.DB, accountID uint, amountMilli int64,
+	overdraftMilli int64, txnType string, description string, referenceID *uint) error {
+
+	var account models.TokenAccount
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&account, accountID).Error; err != nil {
+		return err
+	}
+
+	// Overdraft-aware guard: balance may go as low as -overdraftMilli.
+	if account.Balance < amountMilli-overdraftMilli {
+		return apperrors.ErrInsufficientBalance
+	}
+
+	balanceBefore := account.Balance
+	account.Balance -= amountMilli
+	account.TotalConsumed += amountMilli
+
+	if err := tx.Save(&account).Error; err != nil {
+		return err
+	}
+
+	ledger := &models.TokenTransaction{
+		BeautyCenterID: account.BeautyCenterID,
+		Amount:         -amountMilli,
+		Type:           txnType,
+		ReferenceID:    referenceID,
+		BalanceBefore:  balanceBefore,
+		BalanceAfter:   account.Balance,
+		Description:    description,
+	}
+	return tx.Create(ledger).Error
 }
