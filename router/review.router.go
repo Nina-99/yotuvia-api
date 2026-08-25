@@ -16,7 +16,11 @@ func ReviewRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate
 		repository.NewNotificationRepositoryImpl(db),
 		repository.NewPushDeviceRepositoryImpl(db),
 	)
-	svc := service.NewReviewServiceImpl(repo, notifSvc, validate)
+	svc := service.NewReviewServiceImpl(repo, notifSvc,
+		service.NewTokenMissionServiceImpl(
+			repository.NewTokenMissionRepositoryImpl(db), nil,
+			repository.NewTokenAccountRepositoryImpl(db),
+		), validate)
 	ctrl := controller.NewReviewController(svc)
 
 	// Public routes

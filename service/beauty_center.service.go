@@ -14,4 +14,8 @@ type BeautyCenterService interface {
 	Search(query string, page, limit int) ([]response.BeautyCenterResponse, int64, error)
 	FindTopRated(limit int) ([]response.BeautyCenterResponse, error)
 	FindNearby(latitude, longitude float64, limit int) ([]response.BeautyCenterResponse, error)
+	// MarkVerified stamps platform-ops verification (feat-token-missions D5)
+	// and fires the referrer's referral mission when a referral links the
+	// center. Idempotent no-op for already-verified centers.
+	MarkVerified(id uint) error
 }

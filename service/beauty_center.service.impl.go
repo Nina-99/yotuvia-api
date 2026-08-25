@@ -18,15 +18,37 @@ import (
 )
 
 type BeautyCenterServiceImpl struct {
-	repo     repository.BeautyCenterRepository
-	Validate *validator.Validate
+	repo           repository.BeautyCenterRepository
+	missionService TokenMissionService
+	Validate       *validator.Validate
 }
 
-func NewBeautyCenterServiceImpl(repo repository.BeautyCenterRepository, validate *validator.Validate) BeautyCenterService {
+func NewBeautyCenterServiceImpl(repo repository.BeautyCenterRepository, missionService TokenMissionService, validate *validator.Validate) BeautyCenterService {
 	return &BeautyCenterServiceImpl{
-		repo:     repo,
-		Validate: validate,
+		repo:           repo,
+		missionService: missionService,
+		Validate:       validate,
 	}
+}
+
+// profileComplete evaluates the feat-token-missions D4 checklist: name,
+// description, address, phone, at least one schedule and at least one image.
+func (s *BeautyCenterServiceImpl) profileComplete(center *models.BeautyCenter) (bool, error) {
+	basics := center.Name != "" &&
+		center.Description != "" &&
+		center.Address != "" &&
+		center.Phone != ""
+	if !basics {
+		return false, nil
+	}
+	hasSchedules, err := s.repo.HasSchedules(center.ID)
+	if err != nil {
+		return false, err
+	}
+	if !hasSchedules {
+		return false, nil
+	}
+	return s.repo.HasImages(center.ID)
 }
 
 // Update implements BeautyCenterService
@@ -38,6 +60,14 @@ func (s *BeautyCenterServiceImpl) Update(id uint, req request.UpdateBeautyCenter
 	center, err := s.repo.FindByID(id)
 	if err != nil {
 		return response.BeautyCenterResponse{}, errors.New("beauty center not found")
+	}
+
+	// feat-token-missions D4: capture completeness BEFORE the update so the
+	// profile_completed mission fires only on an incomplete→complete
+	// transition, never on repeated updates of an already-complete profile.
+	wasComplete, err := s.profileComplete(center)
+	if err != nil {
+		return response.BeautyCenterResponse{}, err
 	}
 
 	// Update basic fields
@@ -134,7 +164,36 @@ func (s *BeautyCenterServiceImpl) Update(id uint, req request.UpdateBeautyCenter
 		return response.BeautyCenterResponse{}, err
 	}
 
+	// feat-token-missions D4/D6: fire profile_completed only on the
+	// incomplete→complete transition. Best-effort — never fails the update.
+	if !wasComplete {
+		if nowComplete, err := s.profileComplete(center); err == nil && nowComplete && s.missionService != nil {
+			if err := s.missionService.TriggerCheck(center.ID, "profile_completed"); err != nil {
+				utils.Log.Errorf("[MISSION] profile_completed trigger failed for center %d: %v",
+					center.ID, err)
+			}
+		}
+	}
+
 	return s.mapToResponse(*center), nil
+}
+
+// MarkVerified stamps platform-ops verification (feat-token-missions D5) and,
+// when an active referral links the center, fires the referrer's referral
+// mission best-effort after the transition commits. Idempotent: already
+// verified centers return without side effects.
+func (s *BeautyCenterServiceImpl) MarkVerified(id uint) error {
+	transitioned, referrerID, err := s.repo.VerifyCenter(id)
+	if err != nil {
+		return err
+	}
+	if !transitioned || referrerID == nil || s.missionService == nil {
+		return nil
+	}
+	if err := s.missionService.TriggerCheck(*referrerID, "referral"); err != nil {
+		utils.Log.Errorf("[MISSION] referral trigger failed for referrer %d: %v", *referrerID, err)
+	}
+	return nil
 }
 
 // Delete implements BeautyCenterService

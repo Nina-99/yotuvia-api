@@ -11,7 +11,11 @@ import (
 
 func LoyaltyRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
 	repo := repository.NewLoyaltyRepositoryImpl(db)
-	svc := service.NewLoyaltyService(repo, validate)
+	svc := service.NewLoyaltyService(repo,
+		service.NewTokenMissionServiceImpl(
+			repository.NewTokenMissionRepositoryImpl(db), nil,
+			repository.NewTokenAccountRepositoryImpl(db),
+		), validate)
 	ctrl := controller.NewLoyaltyController(svc)
 
 	loyalty := rg.Group("/loyalty")

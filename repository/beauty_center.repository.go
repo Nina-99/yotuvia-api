@@ -22,4 +22,14 @@ type BeautyCenterRepository interface {
 	FindTopRated(limit int) ([]models.BeautyCenter, error)
 	FindNearby(latitude, longitude float64, limit int) ([]models.BeautyCenter, error)
 	FindByReferralCode(code string) (*models.BeautyCenter, error)
+	// HasSchedules reports whether the center has at least one working hour
+	// row (profile-completeness checklist, feat-token-missions D4).
+	HasSchedules(centerID uint) (bool, error)
+	// HasImages reports whether the center has at least one image row.
+	HasImages(centerID uint) (bool, error)
+	// VerifyCenter stamps verified_at on first verification inside a
+	// transaction and resolves the referrer from an active referral row.
+	// Returns transitioned=false when the center was already verified;
+	// referrerID is nil when no referral links the center.
+	VerifyCenter(centerID uint) (transitioned bool, referrerID *uint, err error)
 }

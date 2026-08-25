@@ -8,17 +8,19 @@ import (
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yottu-api/utils"
 	"github.com/go-playground/validator/v10"
 )
 
 type ReviewServiceImpl struct {
 	repo                repository.ReviewRepository
 	notificationService NotificationService
+	missionService      TokenMissionService
 	Validate            *validator.Validate
 }
 
-func NewReviewServiceImpl(repo repository.ReviewRepository, notificationService NotificationService, validate *validator.Validate) ReviewService {
-	return &ReviewServiceImpl{repo: repo, notificationService: notificationService, Validate: validate}
+func NewReviewServiceImpl(repo repository.ReviewRepository, notificationService NotificationService, missionService TokenMissionService, validate *validator.Validate) ReviewService {
+	return &ReviewServiceImpl{repo: repo, notificationService: notificationService, missionService: missionService, Validate: validate}
 }
 
 func (s *ReviewServiceImpl) Create(clientID uint, req request.CreateReviewRequest) error {
@@ -63,6 +65,14 @@ func (s *ReviewServiceImpl) Create(clientID uint, req request.CreateReviewReques
 		"Nueva reseña",
 		fmt.Sprintf("Recibiste una reseña de %d estrellas", review.Rating),
 		fmt.Sprintf(`{"review_id":%d,"rating":%d}`, review.ID, review.Rating))
+
+	// Best-effort mission trigger (feat-token-missions D6): review_received.
+	if s.missionService != nil {
+		if err := s.missionService.TriggerCheck(review.BeautyCenterID, "review_received"); err != nil {
+			utils.Log.Errorf("[MISSION] review_received trigger failed for center %d: %v",
+				review.BeautyCenterID, err)
+		}
+	}
 	return nil
 }
 

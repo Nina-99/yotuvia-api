@@ -25,6 +25,12 @@ type BeautyCenter struct {
 	IsActive     bool    `gorm:"default:true" json:"is_active"`
 	ReferralCode string  `gorm:"size:20;uniqueIndex" json:"referral_code"`
 
+	// VerifiedAt stamps platform-ops verification of the center's business
+	// documentation (feat-token-missions D5). NULL = pending verification;
+	// the first set fires the referral mission for the referrer. Verification
+	// itself is a platform-ops action until an admin surface exists.
+	VerifiedAt *time.Time `json:"verified_at,omitempty"`
+
 	AvgRating   float64 `gorm:"-" json:"avg_rating"`
 	ReviewCount int64   `gorm:"-" json:"review_count"`
 

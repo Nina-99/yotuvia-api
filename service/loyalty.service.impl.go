@@ -12,14 +12,16 @@ import (
 )
 
 type LoyaltyServiceImpl struct {
-	repo     repository.LoyaltyRepository
-	Validate *validator.Validate
+	repo           repository.LoyaltyRepository
+	missionService TokenMissionService
+	Validate       *validator.Validate
 }
 
-func NewLoyaltyService(repo repository.LoyaltyRepository, validate *validator.Validate) LoyaltyService {
+func NewLoyaltyService(repo repository.LoyaltyRepository, missionService TokenMissionService, validate *validator.Validate) LoyaltyService {
 	return &LoyaltyServiceImpl{
-		repo:     repo,
-		Validate: validate,
+		repo:           repo,
+		missionService: missionService,
+		Validate:       validate,
 	}
 }
 
@@ -46,7 +48,23 @@ func (s *LoyaltyServiceImpl) CreateProgram(req request.CreateLoyaltyProgrmaReque
 		IsActive:       true,
 	}
 
+	// Persist the program — it was previously assembled but never saved
+	// (drive-by fix required by the stamp_activated trigger: there is nothing
+	// to activate without a row).
+	if err := s.repo.CreateProgram(&program); err != nil {
+		return response.LoyaltyProgramResponse{}, err
+	}
+
 	utils.Log.Info("[Loyalty] New program created for BeautyCenteer %d on Service %d", req.BeautyCenterID, req.ServiceID)
+
+	// Best-effort mission trigger (feat-token-missions D6): activating a stamp
+	// card program counts as stamp_activated. Never fails the primary write.
+	if s.missionService != nil {
+		if err := s.missionService.TriggerCheck(req.BeautyCenterID, "stamp_activated"); err != nil {
+			utils.Log.Errorf("[MISSION] stamp_activated trigger failed for center %d: %v",
+				req.BeautyCenterID, err)
+		}
+	}
 
 	return response.LoyaltyProgramResponse{
 		ID:            program.ID,

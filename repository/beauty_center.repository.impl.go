@@ -11,7 +11,7 @@ import (
 // listing/detail query: the base columns plus the avg_rating and review_count
 // subqueries against reviews.
 const ratingSelect = "beauty_centers.*, " +
-	"COALESCE((SELECT AVG(rating)::numeric(10,2) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as avg_rating, " +
+	"COALESCE((SELECT CAST(AVG(rating) AS numeric(10,2)) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as avg_rating, " +
 	"COALESCE((SELECT COUNT(*) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as review_count"
 
 // withAverageRating is a GORM scope that selects the base beauty_centers columns
@@ -218,4 +218,69 @@ func (r *BeautyCenterRepositoryImpl) FindByReferralCode(code string) (*models.Be
 		return nil, err
 	}
 	return &center, nil
+}
+
+// HasSchedules reports whether at least one working hour exists (profile
+// completeness, feat-token-missions D4).
+func (r *BeautyCenterRepositoryImpl) HasSchedules(centerID uint) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.WorkingHour{}).
+		Where("beauty_center_id = ?", centerID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+// HasImages reports whether at least one image row exists.
+func (r *BeautyCenterRepositoryImpl) HasImages(centerID uint) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.BeautyCenterImage{}).
+		Where("beauty_center_id = ?", centerID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+// VerifyCenter stamps verified_at on the first verification (NULL → set) and
+// resolves the referrer from an active referral row in the same transaction.
+// Already-verified centers return transitioned=false without touching data;
+// a center without a referral row returns transitioned=true with nil referrer
+// (verification itself is platform-ops driven — feat-token-missions D5).
+func (r *BeautyCenterRepositoryImpl) VerifyCenter(centerID uint) (bool, *uint, error) {
+	var referrerID *uint
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.BeautyCenter{}).
+			Where("id = ? AND verified_at IS NULL", centerID).
+			Update("verified_at", time.Now().UTC())
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil // already verified — idempotent no-op
+		}
+
+		var referral models.Referral
+		err := tx.Where("referred_id = ? AND deleted_at IS NULL", centerID).
+			First(&referral).Error
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil // verified without referral — nothing to attribute
+			}
+			return err
+		}
+		id := referral.ReferrerID
+		referrerID = &id
+		return nil
+	})
+	if err != nil {
+		return false, nil, err
+	}
+	transitioned := referrerID != nil
+	// A verified-without-referral center also "transitioned"; re-derive by
+	// checking the column so callers can distinguish cleanly.
+	if !transitioned {
+		var center models.BeautyCenter
+		if err := r.db.Select("verified_at").First(&center, centerID).Error; err == nil && center.VerifiedAt != nil {
+			transitioned = true
+		}
+	}
+	return transitioned, referrerID, nil
 }
