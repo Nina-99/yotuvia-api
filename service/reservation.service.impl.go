@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/rand"
 	"fmt"
+	"math"
 	"math/big"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/utils"
 	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
 )
 
 type ReservationServiceImpl struct {
@@ -20,10 +22,12 @@ type ReservationServiceImpl struct {
 	ReservationRepository repository.ReservationRepository
 	ServiceRepository     repository.ServiceRepository
 	ClientRepository      repository.ClientRepository
+	TokenAccountRepo      repository.TokenAccountRepository
 	NotificationService   NotificationService
 	LoyaltyService        LoyaltyService
 	TokenAccountService   TokenAccountService
 	MissionService        TokenMissionService
+	MarketConfigService   MarketConfigService
 	Validate              *validator.Validate
 }
 
@@ -32,10 +36,12 @@ func NewReservationServiceImpl(
 	serviceRepository repository.ServiceRepository,
 	personnelRepository repository.PersonnelRepository,
 	clientRepository repository.ClientRepository,
+	tokenAccountRepository repository.TokenAccountRepository,
 	notificationService NotificationService,
 	loyaltyService LoyaltyService,
 	tokenAccountService TokenAccountService,
 	missionService TokenMissionService,
+	marketConfigService MarketConfigService,
 	validate *validator.Validate,
 ) ReservationService {
 	return &ReservationServiceImpl{
@@ -43,10 +49,12 @@ func NewReservationServiceImpl(
 		PersonnelRepository:   personnelRepository,
 		ServiceRepository:     serviceRepository,
 		ClientRepository:      clientRepository,
+		TokenAccountRepo:      tokenAccountRepository,
 		NotificationService:   notificationService,
 		LoyaltyService:        loyaltyService,
 		TokenAccountService:   tokenAccountService,
 		MissionService:        missionService,
+		MarketConfigService:   marketConfigService,
 		Validate:              validate,
 	}
 }
@@ -646,43 +654,60 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 		return nil, false, apperrors.ErrConflict
 	}
 
-	// ── Token consumption check ──
-	charge := reservation.TotalPrice * 0.035
-	canConsume, err := s.TokenAccountService.CanConsume(authBeautyCenterID, utils.ToMilli(charge))
+	// ── Token consumption: config-driven charge, atomic with completion ──
+	// feat-token-economy-config D3/D4: the charge comes from market_config
+	// (percentage + floor) and status flip + guarded debit + ledger commit as
+	// ONE transaction. A debit failure rolls back the completion — no more
+	// completed turns that never paid.
+
+	_, overdraftMilli, currency, err := s.TokenAccountService.GetBalance(authBeautyCenterID)
 	if err != nil {
 		return nil, false, err
 	}
-	if !canConsume {
-		return nil, false, apperrors.ErrInsufficientBalance
+	economy := defaultEconomy
+	if s.MarketConfigService != nil {
+		economy = s.MarketConfigService.GetEconomyForCurrency(currency)
 	}
 
-	// ── Exactly-once persistence ──
-	// The conditional update only completes reservations still in a non-terminal
-	// state; a concurrent scan that already completed this one hits 0 rows and
-	// becomes a no-op success. Status is persisted UPPERCASE.
-	reservation.Status = "COMPLETED"
-	reservation.VerificationToken = nil
-	reservation.TokenExpiresAt = nil
+	totalMilli := utils.ToMilli(reservation.TotalPrice)
+	charge := ComputeChargeMilli(totalMilli, economy.CommissionPct, economy.MinChargeMilli)
 
-	completed, err := s.ReservationRepository.CompleteVerification(reservation)
+	account, err := s.TokenAccountService.GetOrCreate(authBeautyCenterID, currency)
 	if err != nil {
 		return nil, false, err
 	}
-	if !completed {
+
+	var alreadyCompleted bool
+	err = s.ReservationRepository.Transact(func(tx *gorm.DB) error {
+		completed, txErr := s.ReservationRepository.CompleteVerificationTx(tx, reservation.ID)
+		if txErr != nil {
+			return txErr
+		}
+		if !completed {
+			alreadyCompleted = true // concurrent scan won — free no-op success
+			return nil
+		}
+		return s.TokenAccountRepo.DebitInTx(
+			tx, account.ID, charge, overdraftMilli,
+			"consumption",
+			fmt.Sprintf("Reservation #%d completed — %.2f%% of %.2f", reservation.ID, economy.CommissionPct, reservation.TotalPrice),
+			&reservation.ID,
+		)
+	})
+	if err != nil {
+		utils.Log.Errorf("[TOKEN] Charge failed for reservation %d (rolled back): %v", reservation.ID, err)
+		return nil, false, err
+	}
+	if alreadyCompleted {
 		utils.Log.Infof("[QR] Reservation ID %d already completed by another scan — no-op", reservation.ID)
 		return reservation, true, nil
 	}
 
-	// ── Deduct YOTTUs ──
-	// The charge is converted to milli and deducted atomically (balance + ledger
-	// row in one transaction). A failure propagates to the caller — there is no
-	// grace mechanism and no partial state.
-	consumeErr := s.TokenAccountService.Consume(authBeautyCenterID, utils.ToMilli(charge), reservation.ID,
-		fmt.Sprintf("Reservation #%d completed — 3.5%% of %.2f", reservation.ID, reservation.TotalPrice))
-	if consumeErr != nil {
-		utils.Log.Errorf("[TOKEN] Failed to deduct tokens for reservation %d: %v", reservation.ID, consumeErr)
-		return nil, false, consumeErr
-	}
+	// Mirror the persisted state onto the returned struct (legacy behavior):
+	// callers read these fields directly after a successful verification.
+	reservation.Status = "COMPLETED"
+	reservation.VerificationToken = nil
+	reservation.TokenExpiresAt = nil
 
 	// ── Loyalty stamps ──
 	for _, svc := range reservation.ReservationServices {
@@ -702,4 +727,16 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 	utils.Log.Infof("[QR VERIFIED] Reservation ID %d marked as COMPLETED. Charged %.2f YOTTUs. Added stamps for %d services",
 		reservation.ID, charge, len(reservation.ReservationServices))
 	return reservation, false, nil
+}
+
+// ComputeChargeMilli resolves the token charge for a reservation in integer
+// milli-YOTTU (feat-token-economy-config D3/D5): percentage of the total with
+// a per-market floor, exact integer math (pct treated at 2-decimal precision).
+func ComputeChargeMilli(totalMilli int64, commissionPct float64, minChargeMilli int64) int64 {
+	bp := int64(math.Round(commissionPct * 100)) // 3.5% → 350 basis points
+	pctCharge := totalMilli * bp / 10000
+	if pctCharge < minChargeMilli {
+		return minChargeMilli
+	}
+	return pctCharge
 }

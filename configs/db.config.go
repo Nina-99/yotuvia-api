@@ -56,6 +56,7 @@ func DBConnection() {
 		&models.Notification{},
 		&models.PushDevice{},
 		&models.UserSession{},
+		&models.MarketConfig{},
 	}
 
 	for _, model := range list_models {
@@ -67,4 +68,5 @@ func DBConnection() {
 	DB = db
 
 	SeedDefaultMissions()
+	SeedMarketConfigs()
 }

@@ -3,6 +3,8 @@ package repository
 import (
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/Nina-99/yottu-api/models"
 )
 
@@ -32,6 +34,12 @@ type ReservationRepository interface {
 	// Returns true when this call performed the update, false when another scan
 	// already completed the reservation.
 	CompleteVerification(reservation *models.Reservation) (bool, error)
+	// Transact runs fn inside the repository's database transaction so the QR
+	// verification service can compose status flip + token debit + ledger as
+	// ONE unit (feat-token-economy-config D4).
+	Transact(fn func(tx *gorm.DB) error) error
+	// CompleteVerificationTx is the tx-aware variant of CompleteVerification.
+	CompleteVerificationTx(tx *gorm.DB, reservationID uint) (bool, error)
 	UpdatePersonnelID(reservationID uint, personnelID uint) error
 	DeleteReservationServices(reservationID uint) error
 }

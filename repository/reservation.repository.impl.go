@@ -186,3 +186,28 @@ func (r *ReservationRepositoryImpl) CompleteVerification(reservation *models.Res
 	}
 	return result.RowsAffected > 0, nil
 }
+
+// Transact exposes the repository's database transaction so the QR
+// verification service can compose completion + token debit atomically
+// (feat-token-economy-config D4).
+func (r *ReservationRepositoryImpl) Transact(fn func(tx *gorm.DB) error) error {
+	return r.db.Transaction(fn)
+}
+
+// CompleteVerificationTx is the tx-aware variant of CompleteVerification:
+// same conditional update (PENDING/CONFIRMED → COMPLETED, token cleared),
+// executed inside the caller's transaction. RowsAffected zero means another
+// scan already completed it.
+func (r *ReservationRepositoryImpl) CompleteVerificationTx(tx *gorm.DB, reservationID uint) (bool, error) {
+	result := tx.Model(&models.Reservation{}).
+		Where("id = ? AND status IN ?", reservationID, []string{"PENDING", "CONFIRMED"}).
+		Updates(map[string]interface{}{
+			"status":             "COMPLETED",
+			"verification_token": gorm.Expr("NULL"),
+			"token_expires_at":   gorm.Expr("NULL"),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}

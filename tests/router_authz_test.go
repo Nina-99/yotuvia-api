@@ -29,6 +29,14 @@ func setupRouterAuthzDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("failed to connect: %v", err)
 	}
+	// :memory: databases are per-connection — a pool with >1 connection gives
+	// transactions an EMPTY database (feat-token-economy-config D4 found this
+	// the hard way). Pin every statement to the single shared connection.
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("failed to get sql.DB: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 	modelsToMigrate := []interface{}{
 		&models.AuthAccount{}, &models.BeautyCenter{}, &models.BeautyCenterImage{},
 		&models.Category{}, &models.TokenAccount{}, &models.TokenTopUp{},
@@ -40,6 +48,7 @@ func setupRouterAuthzDB(t *testing.T) *gorm.DB {
 		&models.ReservationService{}, &models.Review{}, &models.Service{},
 		&models.SocialMedia{}, &models.WorkingHour{}, &models.Video{},
 		&models.PersonnelInvitation{}, &models.Notification{}, &models.PushDevice{},
+		&models.MarketConfig{},
 	}
 	for _, m := range modelsToMigrate {
 		if err := db.AutoMigrate(m); err != nil {

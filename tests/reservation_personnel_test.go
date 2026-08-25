@@ -23,10 +23,12 @@ func newReservationTriggerTestService(t *testing.T, db *gorm.DB) service.Reserva
 		repository.NewServiceRepositoryImpl(db),
 		repository.NewPersonnelRepositoryImpl(db),
 		repository.NewClientRepositoryImpl(db),
+		nil, // TokenAccountRepository not needed for these flows
 		service.NewNotificationServiceImpl(notifRepo, repository.NewPushDeviceRepositoryImpl(db)),
 		nil, // LoyaltyService stub not needed for cancel/assign
 		nil, // TokenAccountService stub not needed for cancel/assign
 		nil, // TokenMissionService stub not needed for cancel/assign
+		nil, // MarketConfigService not needed for cancel/assign
 		validate,
 	)
 }

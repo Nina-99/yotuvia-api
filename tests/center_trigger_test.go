@@ -31,7 +31,7 @@ func TestReviewCenterNotifications_Created(t *testing.T) {
 		repository.NewNotificationRepositoryImpl(db),
 		repository.NewPushDeviceRepositoryImpl(db),
 	)
-	svc := service.NewReviewServiceImpl(repository.NewReviewRepositoryImpl(db), notifSvc, validator.New())
+	svc := service.NewReviewServiceImpl(repository.NewReviewRepositoryImpl(db), notifSvc, nil, validator.New())
 
 	assert.NoError(t, svc.Create(5, request.CreateReviewRequest{BeautyCenterID: 1, Rating: 5, Comment: "Great!"}))
 
@@ -59,7 +59,7 @@ func TestReviewCenterNotifications_DuplicateEmitsNothing(t *testing.T) {
 		repository.NewNotificationRepositoryImpl(db),
 		repository.NewPushDeviceRepositoryImpl(db),
 	)
-	svc := service.NewReviewServiceImpl(repository.NewReviewRepositoryImpl(db), notifSvc, validator.New())
+	svc := service.NewReviewServiceImpl(repository.NewReviewRepositoryImpl(db), notifSvc, nil, validator.New())
 
 	assert.NoError(t, svc.Create(5, request.CreateReviewRequest{BeautyCenterID: 1, Rating: 5, Comment: "Great!"}))
 	err := svc.Create(5, request.CreateReviewRequest{BeautyCenterID: 1, Rating: 4, Comment: "Second"})

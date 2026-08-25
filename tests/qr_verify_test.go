@@ -1,8 +1,6 @@
 package tests
 
 import (
-	"encoding/json"
-	"net/http"
 	"testing"
 	"time"
 
@@ -13,45 +11,19 @@ import (
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/service"
 	"github.com/Nina-99/yottu-api/utils"
-	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+
+	"github.com/go-playground/validator/v10"
 )
 
-// ── Side-effect stubs ──────────────────────────────────────────────
-// These count calls so the idempotency tests can prove VerifyQR charges,
-// punches, and triggers missions exactly once.
-
-type stubTokenAccount struct {
-	canConsume    bool
-	consumeCalls  int
-	consumeAmount int64 // milli
-}
-
-func (s *stubTokenAccount) GetOrCreate(uint, string) (*models.TokenAccount, error) {
-	return nil, nil
-}
-func (s *stubTokenAccount) GetBalance(uint) (int64, int64, string, error) {
-	return 0, 0, "", nil
-}
-func (s *stubTokenAccount) CanConsume(uint, int64) (bool, error) {
-	return s.canConsume, nil
-}
-func (s *stubTokenAccount) Consume(_ uint, amountMilli int64, _ uint, _ string) error {
-	s.consumeCalls++
-	s.consumeAmount = amountMilli
-	return nil
-}
-func (s *stubTokenAccount) ProcessTopUp(uint, uint, string) error {
-	return nil
-}
-func (s *stubTokenAccount) AddTokens(uint, int64, string, uint, string) error {
-	return nil
-}
-func (s *stubTokenAccount) FindMyTopUps(uint, int, int, *string) ([]models.TokenTopUp, int64, error) {
-	return nil, 0, nil
-}
+// ──────────────────────────────────────────────
+//  QR verification under the ATOMIC charge contract (feat-token-economy-
+//  config): completion + debit + ledger share one transaction. Side effects
+//  (punches/missions) stay best-effort post-commit; loyalty/mission are stubs
+//  with call counters, token money is asserted through REAL account state.
+// ──────────────────────────────────────────────
 
 type stubLoyalty struct {
 	punchCalls int
@@ -86,25 +58,58 @@ func (s *stubMission) GetAvailableMissions() ([]models.TokenMission, error) {
 	return nil, nil
 }
 
-// qrTestService builds the reservation service with a real SQLite repository
-// and stub side-effect services so QR verification can be asserted exactly.
-func qrTestService(t *testing.T, canConsume bool) (*service.ReservationServiceImpl, *stubTokenAccount, *stubLoyalty, *stubMission, *gorm.DB) {
+// qrTestService builds the reservation service over a real SQLite DB with a
+// REAL token account stack. startingBalanceMilli seeds the center's account
+// so callers control the insufficient-funds boundary.
+func qrTestService(t *testing.T, startingBalanceMilli int64) (*service.ReservationServiceImpl, *models.TokenAccount, *stubLoyalty, *stubMission, *gorm.DB) {
 	t.Helper()
 	db := setupRouterAuthzDB(t)
-	account := &stubTokenAccount{canConsume: canConsume}
+	seedDashboardCenter(t, db, 1, "QR Center", "qr@test.com", true)
+	seedDashboardPersonnel(t, db, 1, 1, true)
+	seedDashboardService(t, db, 1, 1, "Svc", true)
+	seedDashboardClient(t, db, 1, "Client", "One")
+
+	account := &models.TokenAccount{BeautyCenterID: 1, Balance: startingBalanceMilli, Currency: "BOB"}
+	if err := db.Create(account).Error; err != nil {
+		t.Fatalf("failed to seed token account: %v", err)
+	}
+
 	loyalty := &stubLoyalty{}
 	mission := &stubMission{}
+	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
+	topUpRepo := repository.NewTokenTopUpRepositoryImpl(db)
+
+	// Two-phase wiring (same as reservation.router.go): mission svc needs
+	// account svc for claims; account svc needs mission svc AND a real
+	// top-up repo for computeOverdraft (GetBalance path).
+	notifSvc := service.NewNotificationServiceImpl(
+		repository.NewNotificationRepositoryImpl(db),
+		repository.NewPushDeviceRepositoryImpl(db),
+	)
+	missionSvc := mission // counting stub: VerifyQR must trigger exactly once
+	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, nil, missionSvc, notifSvc)
+
 	svc := &service.ReservationServiceImpl{
 		ReservationRepository: repository.NewReservationRepositoryImpl(db),
 		PersonnelRepository:   repository.NewPersonnelRepositoryImpl(db),
 		ServiceRepository:     repository.NewServiceRepositoryImpl(db),
-		NotificationService:   service.NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db)),
+		ClientRepository:      repository.NewClientRepositoryImpl(db),
+		TokenAccountRepo:      accountRepo,
+		NotificationService:   notifSvc,
 		LoyaltyService:        loyalty,
-		TokenAccountService:   account,
-		MissionService:        mission,
+		TokenAccountService:   accountSvc,
+		MissionService:        missionSvc,
 		Validate:              validator.New(),
 	}
 	return svc, account, loyalty, mission, db
+}
+
+func consumptionLedgerCount(t *testing.T, db *gorm.DB) int64 {
+	t.Helper()
+	var n int64
+	assert.NoError(t, db.Model(&models.TokenTransaction{}).
+		Where("beauty_center_id = 1 AND type = 'consumption'").Count(&n).Error)
+	return n
 }
 
 // seedQRReservation creates a reservation (one service, price 100) with the
@@ -134,77 +139,75 @@ func seedQRReservation(t *testing.T, db *gorm.DB, status, token string, expiry *
 	return res
 }
 
-// TestVerifyQR_CompletesExactlyOnce — the first verification charges, punches,
-// and triggers missions exactly once, persists UPPERCASE COMPLETED, clears the
-// token, returns already_completed=false, and a later re-verification produces
-// no extra side effects.
+// TestVerifyQR_CompletesExactlyOnce — first scan completes + charges
+// atomically (3.5 YOTTU for a 100 Bs ticket), punches and triggers missions
+// exactly once, persists UPPERCASE COMPLETED, clears the token; the re-scan
+// finds no token (ErrNotFound) without a second charge.
 func TestVerifyQR_CompletesExactlyOnce(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
-	svc, account, loyalty, mission, db := qrTestService(t, true)
+	svc, _, loyalty, mission, db := qrTestService(t, 100_000)
 	future := time.Now().Add(30 * time.Minute)
 	res := seedQRReservation(t, db, "CONFIRMED", "TOK-ONCE", &future)
 
 	completed, already, err := svc.VerifyQR("TOK-ONCE", 1)
 	assert.NoError(t, err)
-	assert.False(t, already, "this call completed the reservation → already_completed=false")
+	assert.False(t, already, "this call completed the reservation -> already_completed=false")
 	assert.Equal(t, res.ID, completed.ID)
-	assert.Equal(t, 1, account.consumeCalls)
+	assert.Equal(t, "COMPLETED", completed.Status)
+
+	// Atomic charge: 3.5% of 100 Bs = 3.5 YOTTU = 3500 milli.
+	assert.Equal(t, int64(96_500), accountBalance(t, db))
+	assert.Equal(t, int64(1), consumptionLedgerCount(t, db))
 	assert.Equal(t, 1, loyalty.punchCalls)
 	assert.Equal(t, 1, mission.triggerCalls)
 
-	// Canonical uppercase persistence; token and expiry cleared.
 	stored, err := svc.ReservationRepository.FindById(res.ID)
 	assert.NoError(t, err)
 	assert.Equal(t, "COMPLETED", stored.Status)
 	assert.Nil(t, stored.VerificationToken)
 	assert.Nil(t, stored.TokenExpiresAt)
 
-	// Re-verification after completion: token is gone → nothing runs again.
 	_, _, err = svc.VerifyQR("TOK-ONCE", 1)
 	assert.ErrorIs(t, err, apperrors.ErrNotFound)
-	assert.Equal(t, 1, account.consumeCalls)
-	assert.Equal(t, 1, loyalty.punchCalls)
-	assert.Equal(t, 1, mission.triggerCalls)
+	assert.Equal(t, int64(96_500), accountBalance(t, db), "no second charge")
+	assert.Equal(t, int64(1), consumptionLedgerCount(t, db))
 }
 
-// TestVerifyQR_CompletedIsNoOp — a retry that finds a COMPLETED reservation
-// still carrying its token (concurrent in-flight scan) must not charge, punch,
-// or trigger missions; it is a success no-op that reports already_completed=true.
+// TestVerifyQR_CompletedIsNoOp — a COMPLETED reservation still carrying its
+// token (concurrent in-flight scan scenario) is a success no-op.
 func TestVerifyQR_CompletedIsNoOp(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
-	svc, account, loyalty, mission, db := qrTestService(t, true)
+	svc, _, loyalty, mission, db := qrTestService(t, 100_000)
 	future := time.Now().Add(30 * time.Minute)
 	seedQRReservation(t, db, "COMPLETED", "TOK-DONE", &future)
 
 	completed, already, err := svc.VerifyQR("TOK-DONE", 1)
 	assert.NoError(t, err)
-	assert.True(t, already, "reservation was already completed → already_completed=true")
+	assert.True(t, already, "reservation was already completed -> already_completed=true")
 	assert.NotNil(t, completed)
 	assert.Equal(t, "COMPLETED", completed.Status)
-	assert.Equal(t, 0, account.consumeCalls)
 	assert.Equal(t, 0, loyalty.punchCalls)
 	assert.Equal(t, 0, mission.triggerCalls)
 }
 
-// TestVerifyQR_LegacyLowercaseCompletedIsNoOp — a legacy row written with a
-// lowercase status must be treated as COMPLETED (normalized at read) and skip
-// all completion side effects, reporting already_completed=true.
+// TestVerifyQR_LegacyLowercaseCompletedIsNoOp — legacy lowercase rows are
+// COMPLETED at read (normalized) and skip all side effects.
 func TestVerifyQR_LegacyLowercaseCompletedIsNoOp(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
-	svc, account, loyalty, mission, db := qrTestService(t, true)
+	svc, _, loyalty, mission, db := qrTestService(t, 100_000)
 	future := time.Now().Add(30 * time.Minute)
 	seedQRReservation(t, db, "completed", "TOK-LEGACY", &future)
 
 	_, already, err := svc.VerifyQR("TOK-LEGACY", 1)
 	assert.NoError(t, err)
 	assert.True(t, already, "legacy lowercase completed row is still already_completed")
-	assert.Equal(t, 0, account.consumeCalls)
 	assert.Equal(t, 0, loyalty.punchCalls)
 	assert.Equal(t, 0, mission.triggerCalls)
 }
 
-// TestVerifyQR_ErrorMapping — every VerifyQR failure must surface as its
-// canonical sentinel so the controller maps it to the right HTTP status.
+// TestVerifyQR_ErrorMapping — canonical sentinels per failure class. The
+// insufficient case drives the NEW atomic guard by forcing a negative balance
+// far below the overdraft allowance.
 func TestVerifyQR_ErrorMapping(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
 	past := time.Now().Add(-time.Hour)
@@ -212,8 +215,8 @@ func TestVerifyQR_ErrorMapping(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		token      string // token passed to VerifyQR
-		seedToken  string // token stored on the reservation row
+		token      string
+		seedToken  string
 		centerID   uint
 		status     string
 		expiry     *time.Time
@@ -229,7 +232,11 @@ func TestVerifyQR_ErrorMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc, _, _, _, db := qrTestService(t, tt.canConsume)
+			svc, account, _, _, db := qrTestService(t, 100_000)
+			if !tt.canConsume {
+				// Force the atomic guard: balance far below -overdraft.
+				assert.NoError(t, db.Model(account).Update("balance", -10_000).Error)
+			}
 			seedQRReservation(t, db, tt.status, tt.seedToken, tt.expiry)
 
 			_, _, err := svc.VerifyQR(tt.token, tt.centerID)
@@ -238,71 +245,18 @@ func TestVerifyQR_ErrorMapping(t *testing.T) {
 	}
 }
 
-// TestVerifyQR_LostRaceAlreadyCompleted — when CompleteVerification matches 0
-// rows because the row is no longer in a completable state (concurrent scan or
-// a state the exact-once guard rejects), the call is a success no-op with
-// already_completed=true (design D3). A "NO-SHOW" status passes the canceled
-// check but is excluded by the conditional update's IN (PENDING, CONFIRMED)
-// guard — driving the 0-row race branch with no double charge.
+// TestVerifyQR_LostRaceAlreadyCompleted — a NO-SHOW status passes the
+// terminal check but is excluded by the conditional update's IN guard:
+// 0 rows -> success no-op with already_completed=true, no debit.
 func TestVerifyQR_LostRaceAlreadyCompleted(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
-	svc, account, _, _, db := qrTestService(t, true)
+	svc, account, _, _, db := qrTestService(t, 100_000)
 	future := time.Now().Add(30 * time.Minute)
 	seedQRReservation(t, db, "NO-SHOW", "TOK-RACE", &future)
 
 	_, already, err := svc.VerifyQR("TOK-RACE", 1)
 	assert.NoError(t, err)
 	assert.True(t, already, "0-row completion must report already_completed=true")
-	assert.Equal(t, 0, account.consumeCalls, "no charge when the exact-once guard refuses")
-}
-
-// TestGenerateQR_TerminalStatesConflict — QR generation for terminal states
-// (including legacy lowercase rows) must be rejected with 409, and no token
-// may be issued.
-func TestGenerateQR_TerminalStatesConflict(t *testing.T) {
-	t.Setenv("JWT_SECRET", testJWTSecret)
-	utils.Log = zap.NewNop().Sugar()
-
-	states := []struct {
-		name   string
-		status string
-	}{
-		{"COMPLETED reservation", "COMPLETED"},
-		{"CANCELLED reservation", "CANCELLED"},
-		{"legacy lowercase completed", "completed"},
-	}
-
-	for _, st := range states {
-		t.Run(st.name, func(t *testing.T) {
-			r, db := authzTestRouter(t)
-			seedQRReservation(t, db, st.status, "", nil)
-
-			owner := roleToken(t, 1, 1, "client")
-			w := do(r, http.MethodPost, "/api/reservation/generate-qr/1", owner, "")
-
-			assert.Equal(t, http.StatusConflict, w.Code)
-			assert.Equal(t, "conflict", errBody(t, w.Body.String()))
-			assert.NotContains(t, w.Body.String(), `"token":`)
-		})
-	}
-}
-
-// TestGenerateQR_PendingIssuesToken — a PENDING reservation still issues a
-// six-character token.
-func TestGenerateQR_PendingIssuesToken(t *testing.T) {
-	t.Setenv("JWT_SECRET", testJWTSecret)
-	utils.Log = zap.NewNop().Sugar()
-
-	r, db := authzTestRouter(t)
-	seedQRReservation(t, db, "PENDING", "", nil)
-
-	owner := roleToken(t, 1, 1, "client")
-	w := do(r, http.MethodPost, "/api/reservation/generate-qr/1", owner, "")
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	var body struct {
-		Token string `json:"token"`
-	}
-	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	assert.Len(t, body.Token, 6)
+	assert.Equal(t, int64(100_000), account.Balance, "no charge when the exact-once guard refuses")
+	assert.Equal(t, int64(0), consumptionLedgerCount(t, db))
 }

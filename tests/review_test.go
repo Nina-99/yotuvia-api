@@ -56,7 +56,7 @@ func TestReviewController_CreateValidation(t *testing.T) {
 	db := setupReviewTestDB(t)
 	repo := repository.NewReviewRepositoryImpl(db)
 	notifSvc := service.NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db))
-	svc := service.NewReviewServiceImpl(repo, notifSvc, validate)
+	svc := service.NewReviewServiceImpl(repo, notifSvc, nil, validate)
 	ctrl := controller.NewReviewController(svc)
 
 	r := gin.Default()
@@ -105,7 +105,7 @@ func TestReviewService_OwnershipUpdateDelete(t *testing.T) {
 	db := setupReviewTestDB(t)
 	repo := repository.NewReviewRepositoryImpl(db)
 	notifSvc := service.NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db))
-	svc := service.NewReviewServiceImpl(repo, notifSvc, validate)
+	svc := service.NewReviewServiceImpl(repo, notifSvc, nil, validate)
 
 	// User 2 trying to update User 1's review (ID 1)
 	rating := 4

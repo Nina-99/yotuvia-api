@@ -12,7 +12,10 @@ import (
 
 func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
 	loyaltyRepo := repository.NewLoyaltyRepositoryImpl(db)
-	loyaltySvc := service.NewLoyaltyService(loyaltyRepo, validate)
+	tokenMissionRepo := repository.NewTokenMissionRepositoryImpl(db)
+	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
+	loyaltySvc := service.NewLoyaltyService(loyaltyRepo,
+		service.NewTokenMissionServiceImpl(tokenMissionRepo, nil, accountRepo), validate)
 
 	serviceRepo := repository.NewServiceRepositoryImpl(db)
 	repo := repository.NewReservationRepositoryImpl(db)
@@ -22,15 +25,14 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	notifSvc := service.NewNotificationServiceImpl(notifRepo, pushRepo)
 
 	// Token services
-	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
 	topUpRepo := repository.NewTokenTopUpRepositoryImpl(db)
-	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
-	missionSvc := service.NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
+	missionSvc := service.NewTokenMissionServiceImpl(tokenMissionRepo, nil, accountRepo)
 	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
-	missionSvc = service.NewTokenMissionServiceImpl(missionRepo, accountSvc, accountRepo)
+	missionSvc = service.NewTokenMissionServiceImpl(tokenMissionRepo, accountSvc, accountRepo)
 
-	svc := service.NewReservationServiceImpl(repo, serviceRepo, personnelRepo, repository.NewClientRepositoryImpl(db), notifSvc, loyaltySvc, accountSvc, missionSvc, validate)
+	marketCfgSvc := service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db))
+	svc := service.NewReservationServiceImpl(repo, serviceRepo, personnelRepo, repository.NewClientRepositoryImpl(db), accountRepo, notifSvc, loyaltySvc, accountSvc, missionSvc, marketCfgSvc, validate)
 	ctrl := controller.NewReservationController(svc)
 
 	reservation := rg.Group("/reservation")
