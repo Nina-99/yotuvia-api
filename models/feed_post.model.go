@@ -15,6 +15,10 @@ type FeedPost struct {
 	ViewsCount   int    `gorm:"default:0" json:"views_count"`
 	LikesCount   int    `gorm:"default:0" json:"likes_count"`
 	IsActive     bool   `gorm:"default:true" json:"is_active"`
+	// feat-video-feed-unification: is_promo pins the post in the Promociones
+	// lane; moderation_note holds the center's suspension note for staff videos.
+	IsPromo        bool   `gorm:"default:false" json:"is_promo"`
+	ModerationNote string `gorm:"size:255" json:"moderation_note,omitempty"`
 
 	Likes        []PostLike   `gorm:"foreignKey:FeedPostID" json:"-"`
 	Service      Service      `gorm:"foreignKey:ServiceID" json:"service"`

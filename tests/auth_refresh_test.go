@@ -33,8 +33,7 @@ func authRefreshModels() []interface{} {
 		&models.Personnel{}, &models.PersonnelImage{}, &models.PersonnelService{},
 		&models.PostLike{}, &models.PunchHistory{}, &models.Reservation{},
 		&models.ReservationService{}, &models.Review{}, &models.Service{},
-		&models.SocialMedia{}, &models.WorkingHour{}, &models.Video{},
-		&models.PersonnelInvitation{}, &models.Notification{}, &models.PushDevice{},
+		&models.SocialMedia{}, &models.WorkingHour{}, &models.PersonnelInvitation{}, &models.Notification{}, &models.PushDevice{},
 		&models.UserSession{},
 	}
 }

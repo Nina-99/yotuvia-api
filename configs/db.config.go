@@ -51,7 +51,6 @@ func DBConnection() {
 		&models.Service{},
 		&models.SocialMedia{},
 		&models.WorkingHour{},
-		&models.Video{},
 		&models.PersonnelInvitation{},
 		&models.Notification{},
 		&models.PushDevice{},
@@ -69,4 +68,5 @@ func DBConnection() {
 
 	SeedDefaultMissions()
 	SeedMarketConfigs()
+	BackfillLegacyVideos()
 }

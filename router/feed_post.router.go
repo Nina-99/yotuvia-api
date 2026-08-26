@@ -13,20 +13,33 @@ import (
 func FeedPostRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
 	repo := repository.NewFeedPostRepositoryImpl(db)
 	repoBC := repository.NewBeautyCenterRepositoryImpl(db)
-	svc := service.NewFeedPostServiceImpl(repo, repoBC, validate)
+	repoPersonnel := repository.NewPersonnelRepositoryImpl(db)
+	repoService := repository.NewServiceRepositoryImpl(db)
+	svc := service.NewFeedPostServiceImpl(repo, repoBC, repoPersonnel, repoService, validate)
 	ctrl := controller.NewFeedPostController(svc)
 
 	posts := rg.Group("/feed-posts")
 	{
+		// Public: unified feed (active posts only) and center profiles.
 		posts.GET("", ctrl.FindAll)
-		posts.GET("/:id", ctrl.FindByID)
+		posts.POST("/:id/views", ctrl.IncrementViews)
+		posts.GET("/center/:id", ctrl.FindByBeautyCenterID)
 
-		posts.Use(middleware.JWTAuthMiddleware())
+		protected := posts.Group("")
+		protected.Use(middleware.JWTAuthMiddleware())
 		{
-			posts.POST("", ctrl.Create)
-			posts.PUT("/:id", ctrl.Update)
-			posts.DELETE("/:id", ctrl.Delete)
-			posts.GET("/center/:id", ctrl.FindByBeautyCenterID)
+			// staff + beauty_center creators (role-scoped in service).
+			protected.POST("", middleware.RequireRole("personnel", "beauty_center"), ctrl.Create)
+			protected.PUT("/:id", ctrl.Update)
+			protected.DELETE("/:id", ctrl.Delete)
+			protected.GET("/mine", ctrl.FindMine)
+
+			// Center moderation over staff videos of their own center.
+			suspend := protected.Group("")
+			suspend.Use(middleware.RequireRole("beauty_center"))
+			{
+				suspend.PUT(":id/suspend", ctrl.Suspend)
+			}
 		}
 	}
 }

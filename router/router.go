@@ -41,7 +41,6 @@ func SetupRouter() *gin.Engine {
 		NotificationRoutes(api, db)
 		ServiceRoutes(api, db, validate)
 		SocialMediaRoutes(api, db, validate)
-		VideoRoutes(api, db, validate)
 	}
 
 	UploadRoutes(api)

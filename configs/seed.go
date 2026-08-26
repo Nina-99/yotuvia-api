@@ -162,3 +162,66 @@ func SeedMarketConfigs() {
 		}
 	}
 }
+
+// BackfillLegacyVideos migrates legacy `videos` rows into feed_posts and then
+// drops the legacy table (feat-video-feed-unification D1/D7). No-op when the
+// legacy table is absent. Invalid rows are log-and-skip — the batch never
+// aborts. PR body documents DB-backup expectation for rollback.
+func BackfillLegacyVideos() {
+	if !DB.Migrator().HasTable("videos") {
+		return
+	}
+
+	type legacyRow struct {
+		BeautyCenterID uint
+		Title          string
+		Description    string
+		FilePath       string
+		ThumbnailURL   string
+		Views          int
+	}
+
+	var legacy []legacyRow
+	if err := DB.Table("videos").
+		Select("beauty_center_id, title, description, file_path, thumbnail_url, views").
+		Where("deleted_at IS NULL").
+		Scan(&legacy).Error; err != nil {
+		utils.Log.Errorf("[SEED] legacy videos backfill read failed: %v", err)
+		return
+	}
+	if len(legacy) == 0 {
+		utils.Log.Infof("[SEED] legacy videos table empty — nothing to backfill")
+		return
+	}
+
+	migrated := 0
+	for _, row := range legacy {
+		if row.FilePath == "" || row.BeautyCenterID == 0 {
+			utils.Log.Warnf("[SEED] skipping invalid legacy video (center %d): %q", row.BeautyCenterID, row.Title)
+			continue
+		}
+		caption := row.Title
+		if len(caption) < 3 && len(row.Description) <= 255 {
+			caption = row.Description
+		}
+		post := models.FeedPost{
+			BeautyCenterID: row.BeautyCenterID,
+			VideoURL:       row.FilePath,
+			ThumbnailURL:   row.ThumbnailURL,
+			Caption:        caption,
+			ViewsCount:     row.Views,
+			IsActive:       true,
+		}
+		if err := DB.Create(&post).Error; err != nil {
+			utils.Log.Errorf("[SEED] failed to migrate legacy video %q: %v", row.Title, err)
+			continue
+		}
+		migrated++
+	}
+
+	if err := DB.Migrator().DropTable("videos"); err != nil {
+		utils.Log.Errorf("[SEED] backfill complete but failed to drop legacy videos table: %v", err)
+		return
+	}
+	utils.Log.Infof("[SEED] Backfilled %d/%d legacy videos into feed_posts; legacy table dropped", migrated, len(legacy))
+}

@@ -31,28 +31,77 @@ func (r *FeedPostRepositoryImpl) Delete(id uint) error {
 // FindByID implements FeedPostRepository
 func (r *FeedPostRepositoryImpl) FindByID(id uint) (*models.FeedPost, error) {
 	var post models.FeedPost
-	err := r.db.Preload("BeautyCenter").Preload("Likes").Preload("Service").Preload("Personnel").First(&post, id).Error
+	err := applyFeedPreloads(r.db).First(&post, id).Error
 	if err != nil {
 		return nil, err
 	}
 	return &post, nil
 }
 
-// FindAll implements FeedPostRepository
-func (r *FeedPostRepositoryImpl) FindAll(page, limit int) ([]models.FeedPost, int64, error) {
+// feedPreloads lists every association the feed surfaces require, including
+// the category chain for filter inheritance.
+var feedPreloads = []string{
+	"BeautyCenter",
+	"Likes",
+	"Service",
+	"Service.Category",
+	"Personnel",
+}
+
+func applyFeedPreloads(q *gorm.DB) *gorm.DB {
+	for _, p := range feedPreloads {
+		q = q.Preload(p)
+	}
+	return q
+}
+
+// FindAllActive implements FeedPostRepository — public feed filters suspended.
+func (r *FeedPostRepositoryImpl) FindAllActive(page, limit int) ([]models.FeedPost, int64, error) {
 	var posts []models.FeedPost
 	var total int64
 
-	r.db.Model(&models.FeedPost{}).Count(&total)
+	q := r.db.Model(&models.FeedPost{}).Where("is_active = ?", true)
+	q.Count(&total)
 
 	offset := (page - 1) * limit
-	err := r.db.Preload("BeautyCenter").Preload("Likes").Preload("Service").Preload("Personnel").Order("created_at desc").Offset(offset).Limit(limit).Find(&posts).Error
+	err := applyFeedPreloads(q).
+		Order("is_promo DESC, created_at DESC").
+		Offset(offset).Limit(limit).Find(&posts).Error
 	return posts, total, err
 }
 
-// FindByBeautyCenterID implements FeedPostRepository
-func (r *FeedPostRepositoryImpl) FindByBeautyCenterID(centerID uint) ([]models.FeedPost, error) {
+// FindActiveByCenter implements FeedPostRepository — public profile variant.
+func (r *FeedPostRepositoryImpl) FindActiveByCenter(centerID uint) ([]models.FeedPost, error) {
 	var posts []models.FeedPost
-	err := r.db.Preload("BeautyCenter").Preload("Likes").Preload("Service").Preload("Personnel").Where("beauty_center_id = ?", centerID).Order("created_at desc").Find(&posts).Error
+	err := applyFeedPreloads(r.db).
+		Where("beauty_center_id = ? AND is_active = ?", centerID, true).
+		Order("is_promo DESC, created_at DESC").Find(&posts).Error
 	return posts, err
+}
+
+// FindByPersonnelID implements FeedPostRepository — management list: all states.
+func (r *FeedPostRepositoryImpl) FindByPersonnelID(personnelID uint) ([]models.FeedPost, error) {
+	var posts []models.FeedPost
+	err := r.db.Preload("BeautyCenter").Preload("Likes").
+		Preload("Service.Category").
+		Where("personnel_id = ?", personnelID).
+		Order("created_at desc").Find(&posts).Error
+	return posts, err
+}
+
+// FindAllByCenter implements FeedPostRepository — center moderation list:
+// every post of the center (own + staff) in all states.
+func (r *FeedPostRepositoryImpl) FindAllByCenter(centerID uint) ([]models.FeedPost, error) {
+	var posts []models.FeedPost
+	err := applyFeedPreloads(r.db).
+		Where("beauty_center_id = ?", centerID).
+		Order("created_at desc").Find(&posts).Error
+	return posts, err
+}
+
+// IncrementViews bumps views for an active post (public, best-effort caller).
+func (r *FeedPostRepositoryImpl) IncrementViews(id uint) error {
+	return r.db.Model(&models.FeedPost{}).
+		Where("id = ? AND is_active = ?", id, true).
+		UpdateColumn("views_count", gorm.Expr("views_count + 1")).Error
 }

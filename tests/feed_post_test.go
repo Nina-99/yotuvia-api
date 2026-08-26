@@ -2,185 +2,170 @@ package tests
 
 import (
 	"bytes"
-	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/Nina-99/yottu-api/controller"
-	"github.com/Nina-99/yottu-api/data/request"
+	"github.com/Nina-99/yottu-api/middleware"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/service"
+	"github.com/Nina-99/yottu-api/utils"
 	"github.com/gin-gonic/gin"
-	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
-	"gorm.io/driver/sqlite"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
-func setupFeedPostTestDB(t *testing.T) *gorm.DB {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("Failed to connect to database: %v", err)
-	}
+// HTTP-level smoke for the NEW feed contract (feat-video-feed-unification):
+// multipart create, author-scoped writes, suspend endpoint, public list.
+// Identity comes from injected claims (mirrors JWTAuthMiddleware).
 
-	err = db.AutoMigrate(
-		&models.BeautyCenter{},
-		&models.BeautyCenterImage{},
-		&models.WorkingHour{},
-		&models.Personnel{},
-		&models.Service{},
-		&models.Category{},
-		&models.FeedPost{},
-		&models.PostLike{},
-	)
-	if err != nil {
-		t.Fatalf("Failed to migrate database: %v", err)
-	}
-
-	// Seed Beauty Center
-	bc := models.BeautyCenter{
-		Name:    "Test Beauty Center",
-		Address: "123 Test St",
-		Email:   "test@bc.com",
-		Phone:   "123456789",
-	}
-	db.Create(&bc)
-
-	// Seed a FeedPost directly so controller/service paths that do NOT hit the
-	// Postgres-only `::numeric` cast in BeautyCenterRepository still run on SQLite.
-	db.Create(&models.FeedPost{
-		BeautyCenterID: bc.ID,
-		VideoURL:       "https://test.com/video.mp4",
-		ThumbnailURL:   "https://test.com/thumb.jpg",
-		Caption:        "New Post",
-	})
-
-	return db
-}
-
-func TestFeedPostCRUD(t *testing.T) {
+func setupFeedHTTPRouter(t *testing.T, db *gorm.DB, role string, userID, centerID uint) *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	db := setupFeedPostTestDB(t)
-	validate := validator.New()
+	zapLogger := zap.NewNop()
 
+	feedRepo := repository.NewFeedPostRepositoryImpl(db)
 	bcRepo := repository.NewBeautyCenterRepositoryImpl(db)
-	repo := repository.NewFeedPostRepositoryImpl(db)
-	svc := service.NewFeedPostServiceImpl(repo, bcRepo, validate)
+	personnelRepo := repository.NewPersonnelRepositoryImpl(db)
+	serviceRepo := repository.NewServiceRepositoryImpl(db)
+	svc := service.NewFeedPostServiceImpl(feedRepo, bcRepo, personnelRepo, serviceRepo, nil)
 	ctrl := controller.NewFeedPostController(svc)
 
-	r := gin.Default()
-	r.POST("/feed-posts", ctrl.Create)
-	r.GET("/feed-posts", ctrl.FindAll)
-	r.GET("/feed-posts/:id", ctrl.FindByID)
-	r.PUT("/feed-posts/:id", ctrl.Update)
-	r.DELETE("/feed-posts/:id", ctrl.Delete)
-	r.GET("/feed-posts/center/:id", ctrl.FindByBeautyCenterID)
-
-	t.Run("Create FeedPost Success", func(t *testing.T) {
-		// BeautyCenterRepository.FindByID uses a Postgres-only `::numeric` cast in its
-		// avg_rating subquery; on SQLite the existence check fails. Postgres-conditional.
-		if db.Dialector.Name() != "postgres" {
-			t.Skip("beauty-center existence check uses Postgres-only ::numeric cast; covered by Postgres integration")
+	r := gin.New()
+	// Fake auth middleware injecting claims like JWTAuthMiddleware would.
+	r.Use(func(c *gin.Context) {
+		c.Set("role", role)
+		c.Set("clientID", userID)
+		if centerID != 0 {
+			c.Set("centerID", centerID)
 		}
-		reqBody := request.CreateFeedPostRequest{
-			BeautyCenterID: 1,
-			VideoURL:       "https://test.com/video.mp4",
-			ThumbnailURL:   "https://test.com/thumb.jpg",
-			Caption:        "New Post",
-		}
-		jsonValue, _ := json.Marshal(reqBody)
-		req, _ := http.NewRequest("POST", "/feed-posts", bytes.NewBuffer(jsonValue))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Contains(t, w.Body.String(), "New Post")
+		c.Next()
 	})
 
-	t.Run("Create FeedPost Validation Fail - Missing Field", func(t *testing.T) {
-		reqBody := request.CreateFeedPostRequest{
-			BeautyCenterID: 1,
-			// VideoURL missing
-			ThumbnailURL: "https://test.com/thumb.jpg",
-			Caption:      "Invalid Post",
-		}
-		jsonValue, _ := json.Marshal(reqBody)
-		req, _ := http.NewRequest("POST", "/feed-posts", bytes.NewBuffer(jsonValue))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("Create FeedPost Validation Fail - Invalid BC ID", func(t *testing.T) {
-		reqBody := request.CreateFeedPostRequest{
-			BeautyCenterID: 999, // Non-existent
-			VideoURL:       "https://test.com/video.mp4",
-			ThumbnailURL:   "https://test.com/thumb.jpg",
-			Caption:        "Invalid BC",
-		}
-		jsonValue, _ := json.Marshal(reqBody)
-		req, _ := http.NewRequest("POST", "/feed-posts", bytes.NewBuffer(jsonValue))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "beauty center not found")
-	})
-
-	t.Run("Get Global Feed", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/feed-posts", nil)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "Test Beauty Center") // Preload check
-	})
-
-	t.Run("Get Posts by Beauty Center", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/feed-posts/center/1", nil)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "New Post")
-	})
-
-	t.Run("Update FeedPost", func(t *testing.T) {
-		reqBody := request.UpdateFeedPostRequest{
-			Caption: "Updated Caption",
-		}
-		jsonValue, _ := json.Marshal(reqBody)
-		req, _ := http.NewRequest("PUT", "/feed-posts/1", bytes.NewBuffer(jsonValue))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "Updated Caption")
-	})
-
-	t.Run("Delete FeedPost (Soft Delete)", func(t *testing.T) {
-		// Delete
-		req, _ := http.NewRequest("DELETE", "/feed-posts/1", nil)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		// Verify 404 on subsequent get
-		req2, _ := http.NewRequest("GET", "/feed-posts/1", nil)
-		w2 := httptest.NewRecorder()
-		r.ServeHTTP(w2, req2)
-		assert.Equal(t, http.StatusNotFound, w2.Code)
-
-		// Verify it's still in DB but has DeletedAt
-		var post models.FeedPost
-		db.Unscoped().First(&post, 1)
-		assert.NotNil(t, post.DeletedAt)
-	})
+	posts := r.Group("/feed-posts")
+	{
+		posts.GET("", ctrl.FindAll)
+		posts.POST("", middleware.RequireRole("personnel", "beauty_center"), ctrl.Create)
+		posts.PUT("/:id", ctrl.Update)
+		posts.DELETE("/:id", ctrl.Delete)
+		posts.PUT("/:id/suspend", middleware.RequireRole("beauty_center"), ctrl.Suspend)
+	}
+	_ = zapLogger
+	return r
 }
+
+func multipartUpload(t *testing.T, caption string) (*bytes.Buffer, string) {
+	t.Helper()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	writer.WriteField("caption", caption)
+	part, err := writer.CreateFormFile("video", "clip.mp4")
+	assert.NoError(t, err)
+	_, err = part.Write([]byte("fake-video"))
+	assert.NoError(t, err)
+	assert.NoError(t, writer.Close())
+	contentType := writer.FormDataContentType()
+	return body, contentType
+}
+
+// setupFeedPostTestDB mirrors the shared authz migration set (includes
+// feed_posts and its associations).
+func setupFeedPostTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	return setupRouterAuthzDB(t)
+}
+
+func TestFeedHTTP_NewContract(t *testing.T) {
+	utils.Log = zap.NewNop().Sugar()
+	db := setupFeedPostTestDB(t)
+
+	seedDashboardCenter(t, db, 1, "HTTP Center", "http@test.com", true)
+	seedDashboardPersonnel(t, db, 7, 1, true)
+
+	// Center creates a post via multipart.
+	centerRouter := setupFeedHTTPRouter(t, db, "beauty_center", 1, 1)
+	body, contentType := multipartUpload(t, "Promo de apertura")
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/feed-posts", body)
+	req.Header.Set("Content-Type", contentType)
+	centerRouter.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	// Public list renders it.
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("GET", "/feed-posts", nil)
+	centerRouter.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code)
+	assert.Contains(t, w2.Body.String(), "Promo de apertura")
+
+	// Staff cannot delete a center-authored post.
+	staffRouter := setupFeedHTTPRouter(t, db, "personnel", 7, 0)
+	w3 := httptest.NewRecorder()
+	req3, _ := http.NewRequest("DELETE", "/feed-posts/1", nil)
+	staffRouter.ServeHTTP(w3, req3)
+	assert.Equal(t, http.StatusForbidden, w3.Code)
+
+	// Author deletes it.
+	w4 := httptest.NewRecorder()
+	req4, _ := http.NewRequest("DELETE", "/feed-posts/1", nil)
+	centerRouter.ServeHTTP(w4, req4)
+	assert.Equal(t, http.StatusOK, w4.Code)
+
+	// Client role cannot create posts at all.
+	clientRouter := setupFeedHTTPRouter(t, db, "client", 5, 0)
+	body5, ct5 := multipartUpload(t, "intruso")
+	w5 := httptest.NewRecorder()
+	req5, _ := http.NewRequest("POST", "/feed-posts", body5)
+	req5.Header.Set("Content-Type", ct5)
+	clientRouter.ServeHTTP(w5, req5)
+	assert.Equal(t, http.StatusForbidden, w5.Code)
+}
+
+// TestFeedHTTP_SuspendRoundTrip covers center moderation over staff videos.
+func TestFeedHTTP_SuspendRoundTrip(t *testing.T) {
+	utils.Log = zap.NewNop().Sugar()
+	db := setupFeedPostTestDB(t)
+	seedDashboardCenter(t, db, 1, "Suspend Center", "sus@test.com", true)
+	seedDashboardPersonnel(t, db, 9, 1, true)
+
+	// Staff uploads directly through the repository-backed service.
+	post := &models.FeedPost{
+		BeautyCenterID: 1,
+		PersonnelID:    9,
+		VideoURL:       "/videos/stream/staff.mp4",
+		Caption:        "Mi trabajo",
+		IsActive:       true,
+	}
+	assert.NoError(t, db.Create(post).Error)
+
+	centerRouter := setupFeedHTTPRouter(t, db, "beauty_center", 1, 1)
+
+	// Suspend with note.
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/feed-posts/1/suspend", bytes.NewBufferString(`{"note":"Fuera de política"}`))
+	req.Header.Set("Content-Type", "application/json")
+	centerRouter.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var after models.FeedPost
+	assert.NoError(t, db.First(&after, 1).Error)
+	assert.False(t, after.IsActive)
+	assert.Equal(t, "Fuera de política", after.ModerationNote)
+
+	// Re-enable with empty note.
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("PUT", "/feed-posts/1/suspend", bytes.NewBufferString(`{}`))
+	req2.Header.Set("Content-Type", "application/json")
+	centerRouter.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code)
+
+	var restored models.FeedPost
+	assert.NoError(t, db.First(&restored, 1).Error)
+	assert.True(t, restored.IsActive)
+	assert.Empty(t, restored.ModerationNote)
+}
+
+var _ = gorm.ErrRecordNotFound // reserved

@@ -1,15 +1,19 @@
 package service
 
 import (
+	"mime/multipart"
+
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
 )
 
 type FeedPostService interface {
-	Create(req request.CreateFeedPostRequest) (response.FeedPostResponse, error)
-	Update(id uint, req request.UpdateFeedPostRequest) (response.FeedPostResponse, error)
-	Delete(id uint) error
-	FindByID(id uint) (response.FeedPostResponse, error)
+	CreateFromUpload(actor FeedActor, req request.CreateFeedPostRequest, file *multipart.FileHeader) (response.FeedPostResponse, error)
+	Update(actor FeedActor, id uint, req request.UpdateFeedPostRequest) (response.FeedPostResponse, error)
+	Delete(actor FeedActor, id uint) error
+	SetSuspended(centerID, postID uint, suspend bool, note string) error
+	IncrementViews(id uint) error
 	FindAll(page, limit int) ([]response.FeedPostResponse, int64, error)
+	FindMine(actor FeedActor) ([]response.FeedPostResponse, error)
 	FindByBeautyCenterID(centerID uint) ([]response.FeedPostResponse, error)
 }

@@ -22,3 +22,9 @@ func SaveUploadedFile(file *multipart.FileHeader, dst string) error {
 	_, err = io.Copy(out, src)
 	return err
 }
+
+// RemoveFile deletes a stored file best-effort (used to clean orphaned
+// uploads when a subsequent DB write fails).
+func RemoveFile(path string) error {
+	return os.Remove(path)
+}

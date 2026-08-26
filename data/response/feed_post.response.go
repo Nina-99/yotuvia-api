@@ -15,4 +15,13 @@ type FeedPostResponse struct {
 	ViewsCount     int                  `json:"views_count"`
 	LikesCount     int                  `json:"likes_count"`
 	CreatedAt      time.Time            `json:"created_at"`
+
+	// feat-video-feed-unification
+	IsPromo        bool   `json:"is_promo"`
+	ModerationNote string `json:"moderation_note,omitempty"`
+	IsActive       bool   `json:"is_active"`
+	ServiceName    string `json:"service_name,omitempty"`
+	CategoryID     uint   `json:"category_id,omitempty"`
+	CategoryName   string `json:"category_name,omitempty"`
+	PersonnelName  string `json:"personnel_name,omitempty"`
 }

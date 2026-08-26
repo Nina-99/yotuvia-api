@@ -159,4 +159,3 @@ func TestMission_Claim_DoubleClaimConflict(t *testing.T) {
 	assert.NoError(t, sut.db.Where("beauty_center_id = 1").First(&account).Error)
 	assert.Equal(t, int64(5000), account.Balance, "balance unchanged after rejected claim")
 }
-

@@ -8,10 +8,12 @@ type CreateFeedPostRequest struct {
 	ThumbnailURL   string `json:"thumbnail_url" validate:"required,url"`
 	Caption        string `json:"caption" validate:"max=255"`
 	Duration       int    `json:"duration"`
+	IsPromo        bool   `json:"is_promo"`
 }
 
 type UpdateFeedPostRequest struct {
 	Caption      string `json:"caption" validate:"max=255"`
+	IsPromo      bool   `json:"is_promo"`
 	VideoURL     string `json:"video_url" validate:"omitempty,url"`
 	ThumbnailURL string `json:"thumbnail_url" validate:"omitempty,url"`
 }
