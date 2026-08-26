@@ -132,9 +132,10 @@ func TestFeedHTTP_SuspendRoundTrip(t *testing.T) {
 	seedDashboardPersonnel(t, db, 9, 1, true)
 
 	// Staff uploads directly through the repository-backed service.
+	pID := uint(9)
 	post := &models.FeedPost{
 		BeautyCenterID: 1,
-		PersonnelID:    9,
+		PersonnelID:    &pID,
 		VideoURL:       "/videos/stream/staff.mp4",
 		Caption:        "Mi trabajo",
 		IsActive:       true,

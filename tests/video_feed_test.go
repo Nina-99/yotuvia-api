@@ -13,6 +13,7 @@ import (
 	"github.com/Nina-99/yottu-api/service"
 	"github.com/Nina-99/yottu-api/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -79,7 +80,8 @@ func TestFeed_StaffUploadForcesOwnIdentity(t *testing.T) {
 
 	res, err := svc.CreateFromUpload(staffActor, req, file)
 	assert.NoError(t, err)
-	assert.Equal(t, uint(7), res.PersonnelID, "personnel_id forced from claims")
+	require.NotNil(t, res.PersonnelID)
+	assert.Equal(t, uint(7), *res.PersonnelID, "personnel_id forced from claims")
 	assert.Equal(t, uint(3), res.BeautyCenterID)
 	assert.True(t, res.IsActive)
 	assert.False(t, res.IsPromo)

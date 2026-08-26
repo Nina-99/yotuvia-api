@@ -108,7 +108,7 @@ func (s *FeedPostServiceImpl) CreateFromUpload(actor FeedActor, req request.Crea
 		return response.FeedPostResponse{}, err
 	}
 
-	centerID, personnelID, err := s.resolveAuthorship(actor, req.PersonnelID)
+	centerID, rawPersonnelID, err := s.resolveAuthorship(actor, req.PersonnelID)
 	if err != nil {
 		return response.FeedPostResponse{}, err
 	}
@@ -119,6 +119,10 @@ func (s *FeedPostServiceImpl) CreateFromUpload(actor FeedActor, req request.Crea
 			return response.FeedPostResponse{}, errors.New("service does not belong to your center")
 		}
 		serviceID = &req.ServiceID
+	}
+	var personnelID *uint
+	if rawPersonnelID != 0 {
+		personnelID = &rawPersonnelID
 	}
 
 	timestamp := time.Now().UnixNano()
@@ -191,7 +195,7 @@ func (s *FeedPostServiceImpl) SetSuspended(centerID, postID uint, suspend bool, 
 	if post.BeautyCenterID != centerID {
 		return errors.New("post does not belong to your center")
 	}
-	if post.PersonnelID == 0 {
+	if post.PersonnelID == nil {
 		return errors.New("center-authored posts cannot be suspended")
 	}
 	post.IsActive = !suspend
@@ -309,7 +313,7 @@ func saveFeedVideo(file *multipart.FileHeader, fileName string) (string, error) 
 // them; centers own the posts they published without staff credit.
 func ownsPost(actor FeedActor, post *models.FeedPost) bool {
 	if actor.asStaff() {
-		return post.PersonnelID != 0 && post.PersonnelID == actor.UserID
+		return post.PersonnelID != nil && *post.PersonnelID == actor.UserID
 	}
-	return actor.CenterID != 0 && post.BeautyCenterID == actor.CenterID && post.PersonnelID == 0
+	return actor.CenterID != 0 && post.BeautyCenterID == actor.CenterID && post.PersonnelID == nil
 }

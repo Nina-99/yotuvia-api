@@ -5,7 +5,7 @@ import "gorm.io/gorm"
 type FeedPost struct {
 	gorm.Model
 	BeautyCenterID uint  `gorm:"index"`
-	PersonnelID    uint  `gorm:"index"`
+	PersonnelID    *uint `gorm:"index" json:"personnel_id,omitempty"`
 	ServiceID      *uint `gorm:"index" json:"service_id,omitempty"`
 
 	VideoURL     string `gorm:"not null" json:"video_url"`
@@ -15,8 +15,6 @@ type FeedPost struct {
 	ViewsCount   int    `gorm:"default:0" json:"views_count"`
 	LikesCount   int    `gorm:"default:0" json:"likes_count"`
 	IsActive     bool   `gorm:"default:true" json:"is_active"`
-	// feat-video-feed-unification: is_promo pins the post in the Promociones
-	// lane; moderation_note holds the center's suspension note for staff videos.
 	IsPromo        bool   `gorm:"default:false" json:"is_promo"`
 	ModerationNote string `gorm:"size:255" json:"moderation_note,omitempty"`
 
