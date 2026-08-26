@@ -163,8 +163,8 @@ func (s *FeedPostServiceImpl) Update(actor FeedActor, id uint, req request.Updat
 	if req.Caption != "" {
 		post.Caption = req.Caption
 	}
-	if req.IsPromo {
-		post.IsPromo = true
+	if req.IsPromo != nil {
+		post.IsPromo = *req.IsPromo
 	}
 	if err := s.FeedPostRepository.Update(post); err != nil {
 		return response.FeedPostResponse{}, err
