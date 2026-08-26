@@ -29,6 +29,7 @@ func SetupRouter() *gin.Engine {
 		DashboardRoutes(api, db, validate)
 		FavoriteRoutes(api, db, validate)
 		FeedPostRoutes(api, db, validate)
+		VideoCommentRoutes(api, db, validate)
 		LoyaltyRoutes(api, db, validate)
 		TokenRoutes(api, db, validate)
 		PersonnelRoutes(api, db, validate)

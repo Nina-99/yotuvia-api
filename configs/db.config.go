@@ -56,6 +56,7 @@ func DBConnection() {
 		&models.PushDevice{},
 		&models.UserSession{},
 		&models.MarketConfig{},
+		&models.VideoComment{},
 	}
 
 	for _, model := range list_models {
