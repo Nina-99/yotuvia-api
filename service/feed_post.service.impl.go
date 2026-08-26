@@ -136,7 +136,7 @@ func (s *FeedPostServiceImpl) CreateFromUpload(actor FeedActor, req request.Crea
 		BeautyCenterID: centerID,
 		PersonnelID:    personnelID,
 		ServiceID:      serviceID,
-		VideoURL:       "/videos/stream/" + fileName,
+		VideoURL:       "/uploads/videos/" + fileName,
 		Caption:        req.Caption,
 		IsPromo:        req.IsPromo,
 		IsActive:       true,
