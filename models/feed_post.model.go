@@ -4,9 +4,9 @@ import "gorm.io/gorm"
 
 type FeedPost struct {
 	gorm.Model
-	BeautyCenterID uint `gorm:"index"`
-	PersonnelID    uint `gorm:"index"`
-	ServiceID      uint `gorm:"index"`
+	BeautyCenterID uint  `gorm:"index"`
+	PersonnelID    uint  `gorm:"index"`
+	ServiceID      *uint `gorm:"index" json:"service_id,omitempty"`
 
 	VideoURL     string `gorm:"not null" json:"video_url"`
 	ThumbnailURL string `gorm:"not null" json:"thumbnail_url"`

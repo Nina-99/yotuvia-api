@@ -7,7 +7,7 @@ type FeedPostResponse struct {
 	BeautyCenterID uint                 `json:"beauty_center_id"`
 	BeautyCenter   BeautyCenterResponse `json:"beauty_center,omitempty"`
 	PersonnelID    uint                 `json:"personnel_id"`
-	ServiceID      uint                 `json:"service_id"`
+	ServiceID      *uint                `json:"service_id,omitempty"`
 	VideoURL       string               `json:"video_url"`
 	ThumbnailURL   string               `json:"thumbnail_url"`
 	Caption        string               `json:"caption"`

@@ -112,11 +112,13 @@ func (s *FeedPostServiceImpl) CreateFromUpload(actor FeedActor, req request.Crea
 	if err != nil {
 		return response.FeedPostResponse{}, err
 	}
+	var serviceID *uint
 	if req.ServiceID != 0 {
 		svcRow, svcErr := s.ServiceRepository.FindById(req.ServiceID)
 		if svcErr != nil || svcRow == nil || svcRow.BeautyCenterID != centerID {
 			return response.FeedPostResponse{}, errors.New("service does not belong to your center")
 		}
+		serviceID = &req.ServiceID
 	}
 
 	timestamp := time.Now().UnixNano()
@@ -129,7 +131,7 @@ func (s *FeedPostServiceImpl) CreateFromUpload(actor FeedActor, req request.Crea
 	post := models.FeedPost{
 		BeautyCenterID: centerID,
 		PersonnelID:    personnelID,
-		ServiceID:      req.ServiceID,
+		ServiceID:      serviceID,
 		VideoURL:       "/videos/stream/" + fileName,
 		Caption:        req.Caption,
 		IsPromo:        req.IsPromo,
