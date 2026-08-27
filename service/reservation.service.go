@@ -31,6 +31,11 @@ type ReservationService interface {
 	Update(reservationID uint, req request.CreateReservationRequest, clientID, centerID uint, role string) error
 	Delete(reservationID uint, clientID, centerID uint, role string) error
 	UpdateStatus(reservationID uint, status string, centerID uint) error
+	// UpdateStatusByPersonnel lets a staff member transition ONLY their own
+	// reservations (personnelID = JWT subject). Same state machine as
+	// UpdateStatus plus ownership: the reservation must be assigned to the
+	// acting staff member and belong to the acting center.
+	UpdateStatusByPersonnel(reservationID uint, status string, personnelID, centerID uint) error
 	Cancel(reservationID uint, clientID uint, reason string) error
 	// FindAll is scoped to the caller's centerID claim (beauty_center only).
 	FindAll(page, limit int, centerID uint) ([]models.Reservation, int64, error)

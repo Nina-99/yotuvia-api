@@ -327,6 +327,41 @@ func (c *ReservationController) UpdateStatus(ctx *gin.Context) {
 }
 
 // ──────────────────────────────────────────────
+//  STATUS BY PERSONNEL — staff accepts/rejects own turno
+// ──────────────────────────────────────────────
+
+// UpdateMyStatus lets a staff member transition one of their OWN reservations
+// (PENDING→CONFIRMED/CANCELLED, CONFIRMED→COMPLETED/CANCELLED). The personnel
+// identity is the JWT clientID claim — never a path parameter (design D1).
+func (c *ReservationController) UpdateMyStatus(ctx *gin.Context) {
+	reservationID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if err := c.reservationService.UpdateStatusByPersonnel(
+		reservationID,
+		req.Status,
+		ctx.GetUint("clientID"),
+		ctx.GetUint("centerID"),
+	); err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Status updated successfully"})
+}
+
+// ──────────────────────────────────────────────
 //  ASSIGN PERSONNEL
 // ──────────────────────────────────────────────
 

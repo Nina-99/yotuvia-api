@@ -66,6 +66,10 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 		// personnel-only self-service agenda (design D1: claim-scoped, never a
 		// path parameter). Static /me wins over /:id in Gin's tree.
 		reservation.GET("/me", middleware.RequireRole("personnel"), ctrl.FindMyReservations)
+		// personnel-only status transition on the staff's own reservations
+		// (accept/reject pending turnos). Stays isolated from the admin
+		// /:id/status group above (beauty_center-only).
+		reservation.PATCH("/me/:id/status", middleware.RequireRole("personnel"), ctrl.UpdateMyStatus)
 
 		// verify-qr widening lives in its OWN isolated group (design D4):
 		// granting personnel access here must NOT leak /status or /assign,

@@ -406,11 +406,32 @@ func (s *ReservationServiceImpl) UpdateStatus(reservationID uint, status string,
 		return apperrors.ErrForbidden
 	}
 
-	// State machine: valid transitions
-	// PENDING   → CONFIRMED, CANCELLED
-	// CONFIRMED → COMPLETED, CANCELLED
-	// COMPLETED → (terminal)
-	// CANCELLED → (terminal)
+	return s.updateStatus(reservation, status)
+}
+
+// UpdateStatusByPersonnel lets a staff member transition ONLY their own
+// reservations (design D1: claim-scoped, never a path parameter). Same state
+// machine as the admin UpdateStatus, plus ownership: the reservation must be
+// assigned to the acting staff member and belong to the acting center.
+func (s *ReservationServiceImpl) UpdateStatusByPersonnel(reservationID uint, status string, personnelID, centerID uint) error {
+	reservation, err := s.ReservationRepository.FindById(reservationID)
+	if err != nil || reservation == nil {
+		return apperrors.ErrNotFound
+	}
+
+	if reservation.PersonnelID != personnelID || reservation.BeautyCenterID != centerID {
+		return apperrors.ErrForbidden
+	}
+
+	return s.updateStatus(reservation, status)
+}
+
+// updateStatus applies the shared state machine:
+//   PENDING   → CONFIRMED, CANCELLED
+//   CONFIRMED → COMPLETED, CANCELLED
+//   COMPLETED → (terminal)
+//   CANCELLED → (terminal)
+func (s *ReservationServiceImpl) updateStatus(reservation *models.Reservation, status string) error {
 	validTransitions := map[string]map[string]bool{
 		"PENDING":   {"CONFIRMED": true, "CANCELLED": true},
 		"CONFIRMED": {"COMPLETED": true, "CANCELLED": true},
