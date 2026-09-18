@@ -207,3 +207,25 @@ func (c *BeautyCenterController) FindNearby(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, res)
 }
+
+// FindRanking returns beauty centers ranked by composite score for the
+// given period (week, month, or all-time).
+func (c *BeautyCenterController) FindRanking(ctx *gin.Context) {
+	period := ctx.DefaultQuery("period", "all")
+	if period != "week" && period != "month" && period != "all" {
+		period = "all"
+	}
+
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "10"))
+	if limit < 1 || limit > 50 {
+		limit = 10
+	}
+
+	res, err := c.beautyCenterService.FindRanking(period, limit)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, res)
+}

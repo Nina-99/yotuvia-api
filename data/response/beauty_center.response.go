@@ -57,3 +57,20 @@ type AvailableSlotsResponse struct {
 	Slots    []AvailableSlot `json:"slots"`
 	Currency string          `json:"currency"`
 }
+
+// RankingResponse is one rank of the beauty-center leaderboard.
+type RankingResponse struct {
+	Position       int                     `json:"position"`
+	CenterID       uint                    `json:"center_id"`
+	CenterName     string                  `json:"center_name"`
+	Address        string                  `json:"address"`
+	AvgRating      float64                 `json:"avg_rating"`
+	ReviewCount    int64                   `json:"review_count"`
+	ReservationCnt int64                   `json:"reservation_count"`
+	CompletionRate float64                 `json:"completion_rate"`
+	VideoViews     int64                   `json:"video_views"`
+	VideoLikes     int64                   `json:"video_likes"`
+	FavoritesCount int64                   `json:"favorites_count"`
+	Score          float64                 `json:"score"`
+	Images         []BeautyCenterImageResp `json:"images"`
+}

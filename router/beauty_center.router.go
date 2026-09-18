@@ -27,6 +27,7 @@ func BeautyCenterRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Va
 		beautyCenter.GET("/search", ctrl.Search)
 		beautyCenter.GET("/top-rated", ctrl.FindTopRated)
 		beautyCenter.GET("/nearby", ctrl.FindNearby)
+		beautyCenter.GET("/ranking", ctrl.FindRanking)
 
 		// Protected routes
 		beautyCenter.Use(middleware.JWTAuthMiddleware())

@@ -32,6 +32,10 @@ type BeautyCenterRepositoryImpl struct {
 	db *gorm.DB
 }
 
+// DB returns the underlying *gorm.DB for queries outside the repository
+// scope (e.g. image fetching in the ranking service).
+func (r *BeautyCenterRepositoryImpl) DB() *gorm.DB { return r.db }
+
 func NewBeautyCenterRepositoryImpl(db *gorm.DB) BeautyCenterRepository {
 	return &BeautyCenterRepositoryImpl{db: db}
 }
@@ -64,17 +68,19 @@ func (r *BeautyCenterRepositoryImpl) FindByID(id uint) (*models.BeautyCenter, er
 		return nil, err
 	}
 	return &center, nil
-} // FindAll implements BeautyCenterRepository
+} // FindAll implements BeautyCenterRepository — only active centers
+// are returned so inactive/deleted centers never appear on the client map.
 func (r *BeautyCenterRepositoryImpl) FindAll(page, limit int) ([]models.BeautyCenter, int64, error) {
 	var centers []models.BeautyCenter
 	var total int64
 
-	r.db.Model(&models.BeautyCenter{}).Count(&total)
+	r.db.Model(&models.BeautyCenter{}).Where("is_active = ?", true).Count(&total)
 
 	offset := (page - 1) * limit
 	err := r.db.
 		Scopes(withAverageRating("")).
 		Preload("BeautyCenterImage").
+		Where("is_active = ?", true).
 		Offset(offset).Limit(limit).
 		Find(&centers).Error
 	return centers, total, err
@@ -162,6 +168,7 @@ func (r *BeautyCenterRepositoryImpl) Search(query string, page, limit int) ([]mo
 	searchPattern := "%" + query + "%"
 
 	base := r.db.Model(&models.BeautyCenter{}).
+		Where("is_active = ?", true).
 		Where("name ILIKE ? OR address ILIKE ? OR description ILIKE ?", searchPattern, searchPattern, searchPattern)
 
 	if err := base.Count(&total).Error; err != nil {
@@ -177,13 +184,14 @@ func (r *BeautyCenterRepositoryImpl) Search(query string, page, limit int) ([]mo
 	return centers, total, err
 }
 
-// FindTopRated implements BeautyCenterRepository
+// FindTopRated returns top-rated active beauty centers.
 func (r *BeautyCenterRepositoryImpl) FindTopRated(limit int) ([]models.BeautyCenter, error) {
 	var centers []models.BeautyCenter
 
 	err := r.db.
 		Scopes(withAverageRating("")).
 		Preload("BeautyCenterImage").
+		Where("is_active = ?", true).
 		Order("avg_rating DESC, review_count DESC").
 		Limit(limit).
 		Find(&centers).Error
@@ -191,7 +199,7 @@ func (r *BeautyCenterRepositoryImpl) FindTopRated(limit int) ([]models.BeautyCen
 	return centers, err
 }
 
-// FindNearby implements BeautyCenterRepository
+// FindNearby returns active beauty centers sorted by distance.
 func (r *BeautyCenterRepositoryImpl) FindNearby(latitude, longitude float64, limit int) ([]models.BeautyCenter, error) {
 	var centers []models.BeautyCenter
 
@@ -200,7 +208,7 @@ func (r *BeautyCenterRepositoryImpl) FindNearby(latitude, longitude float64, lim
 			"(6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance",
 			latitude, longitude, latitude)).
 		Preload("BeautyCenterImage").
-		Where("latitude != 0 AND longitude != 0").
+		Where("is_active = ? AND latitude != 0 AND longitude != 0", true).
 		Order("distance ASC").
 		Limit(limit).
 		Find(&centers).Error
@@ -283,4 +291,109 @@ func (r *BeautyCenterRepositoryImpl) VerifyCenter(centerID uint) (bool, *uint, e
 		}
 	}
 	return transitioned, referrerID, nil
+}
+
+// FindRanking returns beauty centers ranked by a composite score within the
+// given time window. When from is nil the ranking is all-time (no date filter).
+//
+// Score = (reviews × 0.35) + (reservations × 0.30) + (engagement × 0.20) + (favorites × 0.15)
+//
+// Each component is normalized to 0–100 via max-value scaling within the result set.
+func (r *BeautyCenterRepositoryImpl) FindRanking(from *time.Time, limit int) ([]RankingRow, error) {
+	// Date filter conditions — empty string when from is nil (all-time).
+	dateFilter := ""
+	dateArgs := []interface{}{}
+	if from != nil {
+		dateFilter = "AND r.created_at >= ?"
+		dateArgs = append(dateArgs, *from)
+	}
+
+	// Video date filter (separate table with different alias).
+	videoDateFilter := ""
+	videoDateArgs := []interface{}{}
+	if from != nil {
+		videoDateFilter = "AND fp.created_at >= ?"
+		videoDateArgs = append(videoDateArgs, *from)
+	}
+
+	// Favorite date filter.
+	favDateFilter := ""
+	favDateArgs := []interface{}{}
+	if from != nil {
+		favDateFilter = "AND f.created_at >= ?"
+		favDateArgs = append(favDateArgs, *from)
+	}
+
+	query := `
+		SELECT
+			bc.id AS center_id,
+			bc.name AS center_name,
+			bc.address AS center_address,
+			COALESCE(rev.avg_rating, 0) AS avg_rating,
+			COALESCE(rev.review_count, 0) AS review_count,
+			COALESCE(res.reservation_cnt, 0) AS reservation_cnt,
+			COALESCE(res.completion_rate, 0) AS completion_rate,
+			COALESCE(vid.video_views, 0) AS video_views,
+			COALESCE(vid.video_likes, 0) AS video_likes,
+			COALESCE(fav.favorites_count, 0) AS favorites_count,
+			-- Composite score: each component weighted
+			(
+				COALESCE(rev.avg_rating, 0) * LOG(COALESCE(rev.review_count, 0) + 1) * 0.35 +
+				COALESCE(res.completion_rate, 0) * LOG(COALESCE(res.reservation_cnt, 0) + 1) * 0.30 +
+				(COALESCE(vid.video_views, 0) + COALESCE(vid.video_likes, 0) * 3) * 0.20 +
+				COALESCE(fav.favorites_count, 0) * 0.15
+			) AS score
+		FROM beauty_centers bc
+		-- Reviews subquery (period-filtered)
+		LEFT JOIN (
+			SELECT beauty_center_id,
+				AVG(rating) AS avg_rating,
+				COUNT(*) AS review_count
+			FROM reviews
+			WHERE deleted_at IS NULL ` + dateFilter + `
+			GROUP BY beauty_center_id
+		) rev ON rev.beauty_center_id = bc.id
+		-- Reservations subquery (period-filtered)
+		LEFT JOIN (
+			SELECT beauty_center_id,
+				COUNT(*) AS reservation_cnt,
+				CASE WHEN COUNT(*) > 0
+					THEN CAST(SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS FLOAT) / COUNT(*)
+					ELSE 0
+				END AS completion_rate
+			FROM reservations
+			WHERE deleted_at IS NULL ` + dateFilter + `
+			GROUP BY beauty_center_id
+		) res ON res.beauty_center_id = bc.id
+		-- Video engagement subquery (period-filtered)
+		LEFT JOIN (
+			SELECT beauty_center_id,
+				SUM(views_count) AS video_views,
+				SUM(likes_count) AS video_likes
+			FROM feed_posts
+			WHERE deleted_at IS NULL AND is_active = true ` + videoDateFilter + `
+			GROUP BY beauty_center_id
+		) vid ON vid.beauty_center_id = bc.id
+		-- Favorites subquery (period-filtered)
+		LEFT JOIN (
+			SELECT beauty_center_id,
+				COUNT(*) AS favorites_count
+			FROM favorites
+			WHERE deleted_at IS NULL ` + favDateFilter + `
+			GROUP BY beauty_center_id
+		) fav ON fav.beauty_center_id = bc.id
+		WHERE bc.is_active = true AND bc.deleted_at IS NULL
+		ORDER BY score DESC
+		LIMIT ?
+	`
+
+	args := append(dateArgs, videoDateArgs...)
+	args = append(args, favDateArgs...)
+	args = append(args, limit)
+
+	var rows []RankingRow
+	if err := r.db.Raw(query, args...).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
 }

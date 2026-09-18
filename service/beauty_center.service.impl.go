@@ -457,3 +457,70 @@ func (s *BeautyCenterServiceImpl) FindNearby(latitude, longitude float64, limit 
 	}
 	return resps, nil
 }
+
+// FindRanking implements BeautyCenterService
+func (s *BeautyCenterServiceImpl) FindRanking(period string, limit int) ([]response.RankingResponse, error) {
+	var from *time.Time
+
+	switch period {
+	case "week":
+		t := time.Now().UTC().AddDate(0, 0, -7)
+		from = &t
+	case "month":
+		t := time.Now().UTC().AddDate(0, -1, 0)
+		from = &t
+	case "all":
+		from = nil
+	default:
+		from = nil
+	}
+
+	rows, err := s.repo.FindRanking(from, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []response.RankingResponse
+	for i, row := range rows {
+		// Fetch images for each center.
+		var images []models.BeautyCenterImage
+		_ = s.repo.(*repository.BeautyCenterRepositoryImpl)
+		// Use a simple query to get images.
+		var imgModels []models.BeautyCenterImage
+		if dbErr := s.repo.(*repository.BeautyCenterRepositoryImpl).DB().
+			Where("beauty_center_id = ?", row.CenterID).
+			Order("position ASC").
+			Find(&imgModels).Error; dbErr == nil {
+			images = imgModels
+		}
+
+		var imgResps []response.BeautyCenterImageResp
+		for _, img := range images {
+			imgResps = append(imgResps, response.BeautyCenterImageResp{
+				ID:        img.ID,
+				ImageUrl:  img.ImageUrl,
+				IsCover:   img.IsCover,
+				IsProfile: img.IsProfile,
+				Position:  img.Position,
+			})
+		}
+
+		results = append(results, response.RankingResponse{
+			Position:       i + 1,
+			CenterID:       row.CenterID,
+			CenterName:     row.CenterName,
+			Address:        row.Address,
+			AvgRating:      row.AvgRating,
+			ReviewCount:    row.ReviewCount,
+			ReservationCnt: row.ReservationCnt,
+			CompletionRate: row.CompletionRate,
+			VideoViews:     row.VideoViews,
+			VideoLikes:     row.VideoLikes,
+			FavoritesCount: row.FavoritesCount,
+			Score:          row.Score,
+			Images:         imgResps,
+		})
+	}
+
+	return results, nil
+}

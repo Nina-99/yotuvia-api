@@ -18,4 +18,7 @@ type BeautyCenterService interface {
 	// and fires the referrer's referral mission when a referral links the
 	// center. Idempotent no-op for already-verified centers.
 	MarkVerified(id uint) error
+	// FindRanking returns beauty centers ranked by composite score for the
+	// given period ("week", "month", or "all").
+	FindRanking(period string, limit int) ([]response.RankingResponse, error)
 }
