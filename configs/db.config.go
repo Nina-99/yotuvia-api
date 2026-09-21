@@ -40,6 +40,7 @@ func DBConnection() {
 		&models.Favorite{},
 		&models.FeedPost{},
 		&models.LoyaltyProgram{},
+		&models.LoyaltyRedemption{},
 		&models.Personnel{},
 		&models.PersonnelImage{},
 		&models.PersonnelService{},
@@ -57,6 +58,11 @@ func DBConnection() {
 		&models.UserSession{},
 		&models.MarketConfig{},
 		&models.VideoComment{},
+		&models.Promotion{},
+		&models.PromotionRedemption{},
+		&models.PaymentConfig{},
+		&models.SavedVideo{},
+		&models.VideoWatchEvent{},
 	}
 
 	for _, model := range list_models {
@@ -70,4 +76,5 @@ func DBConnection() {
 	SeedDefaultMissions()
 	SeedMarketConfigs()
 	BackfillLegacyVideos()
+	SeedDemoCenters()
 }

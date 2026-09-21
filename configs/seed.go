@@ -1,6 +1,11 @@
 package configs
 
 import (
+	"fmt"
+	"math/rand"
+	"os"
+	"time"
+
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/utils"
 )
@@ -224,4 +229,245 @@ func BackfillLegacyVideos() {
 		return
 	}
 	utils.Log.Infof("[SEED] Backfilled %d/%d legacy videos into feed_posts; legacy table dropped", migrated, len(legacy))
+}
+
+// SeedDemoCenters creates realistic demo beauty centers in Oruro, Bolivia
+// when SEED_DEMO_CENTERS=true. Idempotent — skips if centers already exist.
+// Only intended for development environments.
+func SeedDemoCenters() {
+	if os.Getenv("SEED_DEMO_CENTERS") != "true" {
+		return
+	}
+
+	// Check if demo centers already exist
+	var count int64
+	DB.Model(&models.BeautyCenter{}).Where("email LIKE '%@demo.yottu.bo'").Count(&count)
+	if count > 0 {
+		utils.Log.Infof("[SEED] Demo centers already exist (%d), skipping", count)
+		return
+	}
+
+	utils.Log.Infof("[SEED] Seeding demo beauty centers for Oruro, Bolivia...")
+
+	rng := rand.New(rand.NewSource(42)) // deterministic for reproducibility
+
+	// Oruro city center: -17.9667, -67.1000
+	// Neighborhoods with real coordinates around Oruro
+	type centerDef struct {
+		Name        string
+		Address     string
+		Neighborhood string
+		Lat         float64
+		Lng         float64
+		Rating      float64 // 3.5 – 5.0
+		ReviewCount int
+		ResCount    int
+		PostCount   int
+		FavCount    int
+	}
+
+	centers := []centerDef{
+		// ── Centro Histórico (4) ─────────────────────
+		{"Salón Belleza Real", "Av. 6 de Octubre #1234, entre Bolívar y Colón", "Centro", -17.9645, -67.1023, 4.8, 42, 85, 6, 28},
+		{"Studio Hair Design", "Calle Bolívar #567, frente a la Catedral", "Centro", -17.9660, -67.0998, 4.5, 31, 62, 4, 19},
+		{"Glamour Spa & Beauty", "Av. El Campesino #890, Local 3", "Centro", -17.9672, -67.1035, 4.2, 18, 45, 3, 12},
+		{"Kami Beauty Studio", "Calle 6 de Octubre #1500, piso 2", "Centro", -17.9638, -67.1010, 4.9, 56, 110, 8, 35},
+
+		// ── Ciudadela / Zona Norte (4) ────────────────
+		{"Optimal Hair Studio", "Av. Juan Lechín Oquendo #2345, Zona Norte", "Ciudadela", -17.9580, -67.1080, 4.3, 22, 38, 3, 8},
+		{"Maribel's Beauty Salon", "Calle Fortín Boquerón #678, Barrio Minero", "Ciudadela", -17.9565, -67.1055, 4.0, 15, 28, 2, 6},
+		{"Glow Up Oruro", "Av. Ferroviaria #1122, cerca al mercado", "Ciudadela", -17.9590, -67.1095, 3.8, 9, 20, 2, 4},
+		{"Centro de Estética Victoria", "Calle Comercio #456, Ciudadela", "Ciudadela", -17.9575, -67.1070, 4.6, 28, 55, 5, 16},
+
+		// ── San Juan / Zona Sur (4) ──────────────────
+		{"Bella Vista Spa", "Av. Sánchez de Lozada #3210, San Juan", "San Juan", -17.9720, -67.0950, 4.7, 35, 72, 5, 22},
+		{"Style & Color Studio", "Calle Warnes #890, esq. Linares", "San Juan", -17.9735, -67.0975, 4.1, 14, 30, 3, 7},
+		{"Nails & Beauty Oruro", "Av. Villazón #1567, Local 5", "San Juan", -17.9710, -67.0935, 3.9, 11, 22, 2, 5},
+		{"Tu Look Oruro", "Calle Mercado #234, frente al parque", "San Juan", -17.9740, -67.0960, 4.4, 20, 42, 4, 11},
+
+		// ── Zona Este / Dispersion (4) ───────────────
+		{"Peluquería Los Andes", "Av. Circunvalación #4567, zona este", "Zona Este", -17.9620, -67.0880, 3.7, 7, 15, 1, 3},
+		{"Beauty Corner", "Calle Sucre #1890, barrio ferroviario", "Ferroviario", -17.9605, -67.0910, 4.0, 12, 25, 2, 6},
+		{"Espacio Belleza Urmiri", "Av. Tacna #2678, cerca al estadio", "Urmiri", -17.9695, -67.1120, 4.5, 25, 48, 4, 14},
+		{"Hair Lab Oruro", "Calle Víctor Paz Estenssoro #3456, zona sur", "Zona Sur", -17.9760, -67.1000, 4.2, 16, 35, 3, 9},
+	}
+
+	// Shared password hash for all demo centers
+	hashedPwd, _ := utils.HashPassword("Demo1234!")
+	now := time.Now()
+
+	for i, def := range centers {
+		centerID := uint(i + 100) // start IDs at 100 to avoid collision with real data
+
+		center := models.BeautyCenter{
+			Name:         def.Name,
+			Address:      fmt.Sprintf("%s, %s, Oruro", def.Address, def.Neighborhood),
+			Email:        fmt.Sprintf("%s@demo.yottu.bo", slugify(def.Name)),
+			Phone:        fmt.Sprintf("591-4-%d", 5000000+i),
+			Url:          fmt.Sprintf("https://yottu.bo/center/%d", centerID),
+			Description:  fmt.Sprintf("Salón de belleza en %s, Oruro. Servicios de peluquería, manicuría y estética.", def.Neighborhood),
+			Latitude:     def.Lat,
+			Longitude:    def.Lng,
+			Password:     hashedPwd,
+			Currency:     "BOB",
+			IsActive:     true,
+			ReferralCode: fmt.Sprintf("DEMO%03d", i+1),
+		}
+
+		if err := DB.Create(&center).Error; err != nil {
+			utils.Log.Errorf("[SEED] Failed to create demo center %q: %v", def.Name, err)
+			continue
+		}
+
+		// ── Images ─────────────────────────────────
+		profileImg := models.BeautyCenterImage{
+			BeautyCenterID: centerID,
+			ImageUrl:       fmt.Sprintf("https://picsum.photos/seed/%s/400/400", slugify(def.Name)),
+			IsProfile:      true,
+			Position:       0,
+		}
+		coverImg := models.BeautyCenterImage{
+			BeautyCenterID: centerID,
+			ImageUrl:       fmt.Sprintf("https://picsum.photos/seed/%s-cover/800/400", slugify(def.Name)),
+			IsCover:        true,
+			Position:       1,
+		}
+		DB.Create(&profileImg)
+		DB.Create(&coverImg)
+
+		// ── Working Hours (Mon-Sat 09:00-18:00, some variations) ──
+		for day := 1; day <= 6; day++ { // Mon=1 .. Sat=6
+			startH := 9
+			endH := 18
+			if day == 6 { // Saturday shorter
+				endH = 15
+			}
+			if def.Lat < -17.97 { // south zone opens later
+				startH = 10
+			}
+			wh := models.WorkingHour{
+				BeautyCenterID: centerID,
+				DayOfWeek:      day,
+				StartTime:      fmt.Sprintf("%02d:00", startH),
+				EndTime:        fmt.Sprintf("%02d:00", endH),
+			}
+			DB.Create(&wh)
+		}
+
+		// ── Reviews ────────────────────────────────
+		reviewComments := []string{
+			"Muy buen servicio, recomendado!",
+			"Excelente atención, volveré seguro.",
+			" Buen trabajo, pero un poco lento.",
+			"La mejor peluquería de Oruro.",
+			"Profesionales y amables.",
+			"Me encantó el resultado.",
+			"Regular, esperaba más calidad.",
+			"Fantástico lugar, muy limpio.",
+			"Precios justos y buen trato.",
+			"Quedé conforme con el corte.",
+			"Sempre vuelvo, nunca me fallan.",
+			"Instalaciones modernas y cómodas.",
+		}
+
+		for r := 0; r < def.ReviewCount; r++ {
+			clientID := uint(rng.Intn(50) + 1) // random client 1-50
+			rating := clampFloat(def.Rating+float64(rng.Intn(3)-1), 1, 5)
+			daysAgo := rng.Intn(90) + 1
+			review := models.Review{
+				BeautyCenterID: centerID,
+				ClientID:       clientID,
+				Rating:         int(rating),
+				Comment:        reviewComments[rng.Intn(len(reviewComments))],
+			}
+			review.CreatedAt = now.AddDate(0, 0, -daysAgo)
+			review.UpdatedAt = review.CreatedAt
+			DB.Create(&review)
+		}
+
+		// ── Reservations (mix of COMPLETED, PENDING, CANCELLED) ──
+		statuses := []string{"COMPLETED", "COMPLETED", "COMPLETED", "PENDING", "CANCELLED"}
+		for res := 0; res < def.ResCount; res++ {
+			clientID := uint(rng.Intn(50) + 1)
+			personnelID := uint(rng.Intn(3) + 1)
+			daysAgo := rng.Intn(60) + 1
+			hour := 9 + rng.Intn(9)
+			status := statuses[rng.Intn(len(statuses))]
+
+			reservation := models.Reservation{
+				BeautyCenterID: centerID,
+				ClientID:       clientID,
+				PersonnelID:    personnelID,
+				Date:           now.AddDate(0, 0, -daysAgo),
+				StartTime:      fmt.Sprintf("%02d:00", hour),
+				EndTime:        fmt.Sprintf("%02d:30", hour),
+				TotalPrice:     float64(50 + rng.Intn(200)),
+				Status:         status,
+			}
+			reservation.CreatedAt = now.AddDate(0, 0, -daysAgo)
+			reservation.UpdatedAt = reservation.CreatedAt
+			DB.Create(&reservation)
+		}
+
+		// ── Feed Posts (videos) ────────────────────
+		for p := 0; p < def.PostCount; p++ {
+			daysAgo := rng.Intn(30) + 1
+			post := models.FeedPost{
+				BeautyCenterID: centerID,
+				VideoURL:       fmt.Sprintf("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"),
+				ThumbnailURL:   fmt.Sprintf("https://picsum.photos/seed/%s-post%d/360/640", slugify(def.Name), p),
+				Caption:        fmt.Sprintf("Trabajo #%d en %s ✨", p+1, def.Name),
+				Duration:       30 + rng.Intn(60),
+				ViewsCount:     100 + rng.Intn(2000),
+				LikesCount:     10 + rng.Intn(200),
+				IsActive:       true,
+			}
+			post.CreatedAt = now.AddDate(0, 0, -daysAgo)
+			post.UpdatedAt = post.CreatedAt
+			DB.Create(&post)
+		}
+
+		// ── Favorites ──────────────────────────────
+		for f := 0; f < def.FavCount; f++ {
+			clientID := uint(rng.Intn(50) + 1)
+			fav := models.Favorite{
+				ClientID:       clientID,
+				BeautyCenterID: centerID,
+			}
+			fav.CreatedAt = now.AddDate(0, 0, -(rng.Intn(60) + 1))
+			fav.UpdatedAt = fav.CreatedAt
+			DB.Create(&fav)
+		}
+
+		utils.Log.Infof("[SEED] Created demo center: %s (%d reviews, %d reservations, %d posts, %d favs)",
+			def.Name, def.ReviewCount, def.ResCount, def.PostCount, def.FavCount)
+	}
+
+	utils.Log.Infof("[SEED] ✅ Seeded %d demo beauty centers in Oruro, Bolivia", len(centers))
+}
+
+// slugify converts a name to a simple slug (lowercase, no spaces/special chars).
+func slugify(s string) string {
+	result := ""
+	for _, c := range s {
+		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
+			result += string(c)
+		} else if c >= 'A' && c <= 'Z' {
+			result += string(c + 32)
+		} else if c == ' ' || c == '&' || c == '\'' {
+			result += "-"
+		}
+	}
+	return result
+}
+
+// clampFloat clamps a float64 between min and max.
+func clampFloat(v, min, max float64) float64 {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
