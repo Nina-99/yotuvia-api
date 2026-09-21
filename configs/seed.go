@@ -239,10 +239,11 @@ func SeedDemoCenters() {
 		return
 	}
 
-	// Check if demo centers already exist
+	// Check if demo centers already exist (count by referral code prefix to avoid
+	// LIKE escaping issues with special chars in email addresses).
 	var count int64
-	DB.Model(&models.BeautyCenter{}).Where("email LIKE '%@demo.yottu.bo'").Count(&count)
-	if count > 0 {
+	DB.Model(&models.BeautyCenter{}).Where("referral_code LIKE 'DEMO%'").Count(&count)
+	if count >= 16 {
 		utils.Log.Infof("[SEED] Demo centers already exist (%d), skipping", count)
 		return
 	}
@@ -250,20 +251,76 @@ func SeedDemoCenters() {
 	utils.Log.Infof("[SEED] Seeding demo beauty centers for Oruro, Bolivia...")
 
 	rng := rand.New(rand.NewSource(42)) // deterministic for reproducibility
+	hashedPwd, _ := utils.HashPassword("Demo1234!")
+	now := time.Now()
 
-	// Oruro city center: -17.9667, -67.1000
-	// Neighborhoods with real coordinates around Oruro
+	// ── Create demo clients ────────────────────────
+	var existingClients int64
+	DB.Model(&models.Client{}).Where("username LIKE 'demo_%'").Count(&existingClients)
+	var demoClientIDs []uint
+
+	if existingClients == 0 {
+		clientNames := []struct{ First, Last, User string }{
+			{"María", "González", "maria_g"},
+			{"Juan", "Quispe", "juan_q"},
+			{"Ana", "Mamani", "ana_m"},
+			{"Carlos", "Flores", "carlos_f"},
+			{"Laura", "Torres", "laura_t"},
+			{"Pedro", "Vargas", "pedro_v"},
+			{"Sofía", "Ramos", "sofia_r"},
+			{"Diego", "Castro", "diego_c"},
+			{"Valentina", "Herrera", "valentina_h"},
+			{"Luis", "Mendoza", "luis_m"},
+			{"Camila", "Silva", "camila_s"},
+			{"Andrés", "Reyes", "andres_r"},
+			{"Isabella", "Cruz", "isabella_c"},
+			{"Fernando", "Ortega", "fernando_o"},
+			{"Gabriela", "Morales", "gabriela_m"},
+		}
+
+		for i, c := range clientNames {
+			client := models.Client{
+				FirstName: c.First,
+				LastName:  c.Last,
+				Username:  "demo_" + c.User,
+				Phone:     fmt.Sprintf("591-7%d%04d", i%10, 1000+i),
+				Email:     fmt.Sprintf("demo_%s@demo.yottu.bo", c.User),
+				Password:  hashedPwd,
+				IsActive:  true,
+			}
+			if err := DB.Create(&client).Error; err != nil {
+				utils.Log.Errorf("[SEED] Failed to create demo client %s: %v", c.First, err)
+				continue
+			}
+			demoClientIDs = append(demoClientIDs, client.ID)
+		}
+		utils.Log.Infof("[SEED] Created %d demo clients", len(demoClientIDs))
+	} else {
+		// Use existing demo clients
+		var clients []models.Client
+		DB.Where("username LIKE 'demo_%'").Find(&clients)
+		for _, c := range clients {
+			demoClientIDs = append(demoClientIDs, c.ID)
+		}
+	}
+
+	if len(demoClientIDs) == 0 {
+		utils.Log.Errorf("[SEED] No demo clients available, cannot seed centers")
+		return
+	}
+
+	// ── Center definitions ─────────────────────────
 	type centerDef struct {
-		Name        string
-		Address     string
+		Name         string
+		Address      string
 		Neighborhood string
-		Lat         float64
-		Lng         float64
-		Rating      float64 // 3.5 – 5.0
-		ReviewCount int
-		ResCount    int
-		PostCount   int
-		FavCount    int
+		Lat          float64
+		Lng          float64
+		Rating       float64 // 3.5 – 5.0
+		ReviewCount  int
+		ResCount     int
+		PostCount    int
+		FavCount     int
 	}
 
 	centers := []centerDef{
@@ -292,19 +349,31 @@ func SeedDemoCenters() {
 		{"Hair Lab Oruro", "Calle Víctor Paz Estenssoro #3456, zona sur", "Zona Sur", -17.9760, -67.1000, 4.2, 16, 35, 3, 9},
 	}
 
-	// Shared password hash for all demo centers
-	hashedPwd, _ := utils.HashPassword("Demo1234!")
-	now := time.Now()
+	reviewComments := []string{
+		"Muy buen servicio, recomendado!",
+		"Excelente atención, volveré seguro.",
+		"Buen trabajo, pero un poco lento.",
+		"La mejor peluquería de Oruro.",
+		"Profesionales y amables.",
+		"Me encantó el resultado.",
+		"Regular, esperaba más calidad.",
+		"Fantástico lugar, muy limpio.",
+		"Precios justos y buen trato.",
+		"Quedé conforme con el corte.",
+		"Siempre vuelvo, nunca me fallan.",
+		"Instalaciones modernas y cómodas.",
+	}
+
+	statuses := []string{"COMPLETED", "COMPLETED", "COMPLETED", "PENDING", "CANCELLED"}
 
 	for i, def := range centers {
-		centerID := uint(i + 100) // start IDs at 100 to avoid collision with real data
-
+		// ── Center ───────────────────────────────────
 		center := models.BeautyCenter{
 			Name:         def.Name,
 			Address:      fmt.Sprintf("%s, %s, Oruro", def.Address, def.Neighborhood),
 			Email:        fmt.Sprintf("%s@demo.yottu.bo", slugify(def.Name)),
 			Phone:        fmt.Sprintf("591-4-%d", 5000000+i),
-			Url:          fmt.Sprintf("https://yottu.bo/center/%d", centerID),
+			Url:          fmt.Sprintf("https://yottu.bo/center/%d", i+1),
 			Description:  fmt.Sprintf("Salón de belleza en %s, Oruro. Servicios de peluquería, manicuría y estética.", def.Neighborhood),
 			Latitude:     def.Lat,
 			Longitude:    def.Lng,
@@ -318,60 +387,63 @@ func SeedDemoCenters() {
 			utils.Log.Errorf("[SEED] Failed to create demo center %q: %v", def.Name, err)
 			continue
 		}
+		// Use the auto-assigned ID from the database
+		centerID := center.ID
+
+		// ── Personnel (2 per center) ─────────────────
+		var personnelIDs []uint
+		for p := 0; p < 2; p++ {
+			personnel := models.Personnel{
+				BeautyCenterID: centerID,
+				FirstName:      []string{"Carlos", "María"}[p],
+				LastName:       []string{"Mamani", "Condori"}[p],
+				Email:          fmt.Sprintf("staff%d_%d@demo.yottu.bo", centerID, p+1),
+				Phone:          fmt.Sprintf("591-7-%d", 60000+int(centerID)*10+p),
+				Password:       hashedPwd,
+				IsActive:       true,
+			}
+			if err := DB.Create(&personnel).Error; err != nil {
+				utils.Log.Errorf("[SEED] Failed to create personnel for %s: %v", def.Name, err)
+				continue
+			}
+			personnelIDs = append(personnelIDs, personnel.ID)
+		}
 
 		// ── Images ─────────────────────────────────
-		profileImg := models.BeautyCenterImage{
+		DB.Create(&models.BeautyCenterImage{
 			BeautyCenterID: centerID,
 			ImageUrl:       fmt.Sprintf("https://picsum.photos/seed/%s/400/400", slugify(def.Name)),
 			IsProfile:      true,
 			Position:       0,
-		}
-		coverImg := models.BeautyCenterImage{
+		})
+		DB.Create(&models.BeautyCenterImage{
 			BeautyCenterID: centerID,
 			ImageUrl:       fmt.Sprintf("https://picsum.photos/seed/%s-cover/800/400", slugify(def.Name)),
 			IsCover:        true,
 			Position:       1,
-		}
-		DB.Create(&profileImg)
-		DB.Create(&coverImg)
+		})
 
-		// ── Working Hours (Mon-Sat 09:00-18:00, some variations) ──
-		for day := 1; day <= 6; day++ { // Mon=1 .. Sat=6
+		// ── Working Hours (Mon-Sat) ────────────────
+		for day := 1; day <= 6; day++ {
 			startH := 9
 			endH := 18
-			if day == 6 { // Saturday shorter
-				endH = 15
+			if day == 6 {
+				endH = 15 // Saturday shorter
 			}
 			if def.Lat < -17.97 { // south zone opens later
 				startH = 10
 			}
-			wh := models.WorkingHour{
+			DB.Create(&models.WorkingHour{
 				BeautyCenterID: centerID,
 				DayOfWeek:      day,
 				StartTime:      fmt.Sprintf("%02d:00", startH),
 				EndTime:        fmt.Sprintf("%02d:00", endH),
-			}
-			DB.Create(&wh)
+			})
 		}
 
-		// ── Reviews ────────────────────────────────
-		reviewComments := []string{
-			"Muy buen servicio, recomendado!",
-			"Excelente atención, volveré seguro.",
-			" Buen trabajo, pero un poco lento.",
-			"La mejor peluquería de Oruro.",
-			"Profesionales y amables.",
-			"Me encantó el resultado.",
-			"Regular, esperaba más calidad.",
-			"Fantástico lugar, muy limpio.",
-			"Precios justos y buen trato.",
-			"Quedé conforme con el corte.",
-			"Sempre vuelvo, nunca me fallan.",
-			"Instalaciones modernas y cómodas.",
-		}
-
+		// ── Reviews (use real client IDs) ───────────
 		for r := 0; r < def.ReviewCount; r++ {
-			clientID := uint(rng.Intn(50) + 1) // random client 1-50
+			clientID := demoClientIDs[rng.Intn(len(demoClientIDs))]
 			rating := clampFloat(def.Rating+float64(rng.Intn(3)-1), 1, 5)
 			daysAgo := rng.Intn(90) + 1
 			review := models.Review{
@@ -385,11 +457,15 @@ func SeedDemoCenters() {
 			DB.Create(&review)
 		}
 
-		// ── Reservations (mix of COMPLETED, PENDING, CANCELLED) ──
-		statuses := []string{"COMPLETED", "COMPLETED", "COMPLETED", "PENDING", "CANCELLED"}
+		// ── Reservations (use real client + personnel IDs) ──
 		for res := 0; res < def.ResCount; res++ {
-			clientID := uint(rng.Intn(50) + 1)
-			personnelID := uint(rng.Intn(3) + 1)
+			clientID := demoClientIDs[rng.Intn(len(demoClientIDs))]
+			var personnelID uint
+			if len(personnelIDs) > 0 {
+				personnelID = personnelIDs[rng.Intn(len(personnelIDs))]
+			} else {
+				personnelID = 1 // fallback
+			}
 			daysAgo := rng.Intn(60) + 1
 			hour := 9 + rng.Intn(9)
 			status := statuses[rng.Intn(len(statuses))]
@@ -409,12 +485,12 @@ func SeedDemoCenters() {
 			DB.Create(&reservation)
 		}
 
-		// ── Feed Posts (videos) ────────────────────
+		// ── Feed Posts ────────────────────────────
 		for p := 0; p < def.PostCount; p++ {
 			daysAgo := rng.Intn(30) + 1
 			post := models.FeedPost{
 				BeautyCenterID: centerID,
-				VideoURL:       fmt.Sprintf("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"),
+				VideoURL:       "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
 				ThumbnailURL:   fmt.Sprintf("https://picsum.photos/seed/%s-post%d/360/640", slugify(def.Name), p),
 				Caption:        fmt.Sprintf("Trabajo #%d en %s ✨", p+1, def.Name),
 				Duration:       30 + rng.Intn(60),
@@ -427,9 +503,9 @@ func SeedDemoCenters() {
 			DB.Create(&post)
 		}
 
-		// ── Favorites ──────────────────────────────
+		// ── Favorites (use real client IDs) ──────────
 		for f := 0; f < def.FavCount; f++ {
-			clientID := uint(rng.Intn(50) + 1)
+			clientID := demoClientIDs[rng.Intn(len(demoClientIDs))]
 			fav := models.Favorite{
 				ClientID:       clientID,
 				BeautyCenterID: centerID,
