@@ -300,28 +300,24 @@ func (r *BeautyCenterRepositoryImpl) VerifyCenter(centerID uint) (bool, *uint, e
 //
 // Each component is normalized to 0–100 via max-value scaling within the result set.
 func (r *BeautyCenterRepositoryImpl) FindRanking(from *time.Time, limit int) ([]RankingRow, error) {
-	// Date filter conditions — empty string when from is nil (all-time).
-	dateFilter := ""
-	dateArgs := []interface{}{}
-	if from != nil {
-		dateFilter = "AND r.created_at >= ?"
-		dateArgs = append(dateArgs, *from)
-	}
-
-	// Video date filter (separate table with different alias).
+	// Each subquery has its own table — no shared alias.  We build the
+	// date condition per-table and duplicate the arg for every placeholder.
+	//
+	// When from is nil (all-time) the filters are empty strings and no
+	// date args are appended — no placeholders to fill.
+	reviewDateFilter := ""
+	resDateFilter := ""
 	videoDateFilter := ""
-	videoDateArgs := []interface{}{}
-	if from != nil {
-		videoDateFilter = "AND fp.created_at >= ?"
-		videoDateArgs = append(videoDateArgs, *from)
-	}
-
-	// Favorite date filter.
 	favDateFilter := ""
-	favDateArgs := []interface{}{}
+	var allArgs []interface{}
+
 	if from != nil {
-		favDateFilter = "AND f.created_at >= ?"
-		favDateArgs = append(favDateArgs, *from)
+		reviewDateFilter = "AND reviews.created_at >= ?"
+		resDateFilter = "AND reservations.created_at >= ?"
+		videoDateFilter = "AND feed_posts.created_at >= ?"
+		favDateFilter = "AND favorites.created_at >= ?"
+		// Each ? needs its own copy of the date value.
+		allArgs = []interface{}{*from, *from, *from, *from}
 	}
 
 	query := `
@@ -350,7 +346,7 @@ func (r *BeautyCenterRepositoryImpl) FindRanking(from *time.Time, limit int) ([]
 				AVG(rating) AS avg_rating,
 				COUNT(*) AS review_count
 			FROM reviews
-			WHERE deleted_at IS NULL ` + dateFilter + `
+			WHERE deleted_at IS NULL ` + reviewDateFilter + `
 			GROUP BY beauty_center_id
 		) rev ON rev.beauty_center_id = bc.id
 		-- Reservations subquery (period-filtered)
@@ -362,7 +358,7 @@ func (r *BeautyCenterRepositoryImpl) FindRanking(from *time.Time, limit int) ([]
 					ELSE 0
 				END AS completion_rate
 			FROM reservations
-			WHERE deleted_at IS NULL ` + dateFilter + `
+			WHERE deleted_at IS NULL ` + resDateFilter + `
 			GROUP BY beauty_center_id
 		) res ON res.beauty_center_id = bc.id
 		-- Video engagement subquery (period-filtered)
@@ -387,12 +383,10 @@ func (r *BeautyCenterRepositoryImpl) FindRanking(from *time.Time, limit int) ([]
 		LIMIT ?
 	`
 
-	args := append(dateArgs, videoDateArgs...)
-	args = append(args, favDateArgs...)
-	args = append(args, limit)
+	allArgs = append(allArgs, limit)
 
 	var rows []RankingRow
-	if err := r.db.Raw(query, args...).Scan(&rows).Error; err != nil {
+	if err := r.db.Raw(query, allArgs...).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
