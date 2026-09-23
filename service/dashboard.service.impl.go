@@ -11,6 +11,7 @@ import (
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yottu-api/utils"
 	"gorm.io/gorm"
 )
 
@@ -117,14 +118,16 @@ func parseDateish(value string) (time.Time, bool) {
 }
 
 // DashboardServiceImpl implements DashboardService by composing aggregate
-// repository queries. All time boundaries are computed here in UTC (design
-// decision D2) so the repository stays deterministic and easy to test.
+// repository queries and the token account service for balance info.
+// All time boundaries are computed here in UTC (design decision D2) so
+// the repository stays deterministic and easy to test.
 type DashboardServiceImpl struct {
-	repo repository.DashboardRepository
+	repo            repository.DashboardRepository
+	tokenAccountSvc TokenAccountService
 }
 
-func NewDashboardServiceImpl(repo repository.DashboardRepository) DashboardService {
-	return &DashboardServiceImpl{repo: repo}
+func NewDashboardServiceImpl(repo repository.DashboardRepository, tokenAccountSvc TokenAccountService) DashboardService {
+	return &DashboardServiceImpl{repo: repo, tokenAccountSvc: tokenAccountSvc}
 }
 
 func (s *DashboardServiceImpl) GetStats(centerID uint) (*response.DashboardStatsResponse, error) {
@@ -199,6 +202,20 @@ func (s *DashboardServiceImpl) GetStats(centerID uint) (*response.DashboardStats
 		return nil, err
 	}
 
+	// ── Token balance (feat-token-economy) ──
+	var (
+		balanceMilli   int64
+		overdraftMilli int64
+	)
+	if s.tokenAccountSvc != nil {
+		var tokenErr error
+		balanceMilli, overdraftMilli, _, tokenErr = s.tokenAccountSvc.GetBalance(centerID)
+		if tokenErr != nil {
+			balanceMilli = 0
+			overdraftMilli = 0
+		}
+	}
+
 	// Average ticket: total revenue over all COMPLETED reservations; 0.0 when
 	// there are none (spec: "0.0 if none").
 	averageTicket := 0.0
@@ -220,6 +237,9 @@ func (s *DashboardServiceImpl) GetStats(centerID uint) (*response.DashboardStats
 		AverageTicket:        averageTicket,
 		TopServices:          []response.TopServiceDTO{},
 		UpcomingReservations: []response.UpcomingReservationDTO{},
+		Balance:              utils.FromMilli(balanceMilli),
+		OverdraftLimit:       utils.FromMilli(overdraftMilli),
+		AvailableBalance:     utils.FromMilli(balanceMilli + overdraftMilli),
 	}
 
 	for _, row := range topServices {
@@ -314,6 +334,20 @@ func (s *DashboardServiceImpl) GetStatsWithRange(centerID uint, from, to time.Ti
 	}
 	if upcoming, err = s.repo.UpcomingReservations(centerID, todayStart, topListLimit); err != nil {
 		return nil, err
+	}
+
+	// ── Token balance (feat-token-economy) ──
+	var (
+		balanceMilli   int64
+		overdraftMilli int64
+	)
+	if s.tokenAccountSvc != nil {
+		var tokenErr error
+		balanceMilli, overdraftMilli, _, tokenErr = s.tokenAccountSvc.GetBalance(centerID)
+		if tokenErr != nil {
+			balanceMilli = 0
+			overdraftMilli = 0
+		}
 	}
 
 	// Average ticket
@@ -535,6 +569,10 @@ func (s *DashboardServiceImpl) GetStatsWithRange(centerID uint, from, to time.Ti
 		PersonnelOccupancy: occupancyDTOs,
 		TicketSeries:       ticketSeries,
 		RatingSeries:       ratingSeries,
+
+		Balance:          utils.FromMilli(balanceMilli),
+		OverdraftLimit:   utils.FromMilli(overdraftMilli),
+		AvailableBalance: utils.FromMilli(balanceMilli + overdraftMilli),
 	}
 
 	for _, row := range topServicesByRevenue {

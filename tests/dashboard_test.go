@@ -673,7 +673,7 @@ func TestDashboardService_GetStatsWithRange_ZeroFill(t *testing.T) {
 
 	db := setupRouterAuthzDB(t)
 	repo := repository.NewDashboardRepositoryImpl(db)
-	svc := service.NewDashboardServiceImpl(repo)
+	svc := service.NewDashboardServiceImpl(repo, nil)
 
 	seedDashboardCenter(t, db, 1, "Service Test Center", "svc@test.com", true)
 	seedDashboardClient(t, db, 1, "Client", "One")
@@ -739,7 +739,7 @@ func TestDashboardService_GetStatsWithRange_RangeDefaults(t *testing.T) {
 
 	db := setupRouterAuthzDB(t)
 	repo := repository.NewDashboardRepositoryImpl(db)
-	svc := service.NewDashboardServiceImpl(repo)
+	svc := service.NewDashboardServiceImpl(repo, nil)
 
 	seedDashboardCenter(t, db, 1, "Service Test Center", "svc@test.com", true)
 	seedDashboardClient(t, db, 1, "Client", "One")
@@ -786,7 +786,7 @@ func TestDashboardService_GetStatsWithRange_FutureToAllowed(t *testing.T) {
 
 	db := setupRouterAuthzDB(t)
 	repo := repository.NewDashboardRepositoryImpl(db)
-	svc := service.NewDashboardServiceImpl(repo)
+	svc := service.NewDashboardServiceImpl(repo, nil)
 
 	seedDashboardCenter(t, db, 1, "Service Test Center", "svc@test.com", true)
 	seedDashboardClient(t, db, 1, "Client", "One")
@@ -1355,7 +1355,7 @@ func TestDashboardService_HourHeatmap(t *testing.T) {
 
 	db := setupRouterAuthzDB(t)
 	repo := repository.NewDashboardRepositoryImpl(db)
-	svc := service.NewDashboardServiceImpl(repo)
+	svc := service.NewDashboardServiceImpl(repo, nil)
 
 	seedDashboardCenter(t, db, 1, "Matrix Center", "matrix@test.com", true)
 	seedDashboardClient(t, db, 1, "Client", "One")
@@ -1412,7 +1412,7 @@ func TestDashboardService_DeltaPct(t *testing.T) {
 	newSUT := func(t *testing.T) (*gorm.DB, service.DashboardService) {
 		db := setupRouterAuthzDB(t)
 		repo := repository.NewDashboardRepositoryImpl(db)
-		return db, service.NewDashboardServiceImpl(repo)
+		return db, service.NewDashboardServiceImpl(repo, nil)
 	}
 	seedBase := func(t *testing.T, db *gorm.DB) {
 		seedDashboardCenter(t, db, 1, "Delta Center", "delta@test.com", true)
@@ -1665,7 +1665,7 @@ func TestDashboardService_TicketAndRatingSeries(t *testing.T) {
 
 	db := setupRouterAuthzDB(t)
 	repo := repository.NewDashboardRepositoryImpl(db)
-	svc := service.NewDashboardServiceImpl(repo)
+	svc := service.NewDashboardServiceImpl(repo, nil)
 
 	seedDashboardCenter(t, db, 1, "Trend Center", "trend@test.com", true)
 	seedDashboardPersonnel(t, db, 1, 1, true)
@@ -1715,7 +1715,7 @@ func TestDashboardService_Occupancy(t *testing.T) {
 
 	db := setupRouterAuthzDB(t)
 	repo := repository.NewDashboardRepositoryImpl(db)
-	svc := service.NewDashboardServiceImpl(repo)
+	svc := service.NewDashboardServiceImpl(repo, nil)
 
 	seedDashboardCenter(t, db, 1, "Occupancy Center", "occ@test.com", true)
 	seedDashboardClient(t, db, 1, "Client", "One")
