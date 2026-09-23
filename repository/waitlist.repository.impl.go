@@ -60,6 +60,7 @@ func (r *WaitlistRepositoryImpl) FindOfferedExpired(now time.Time) ([]models.Wai
 func (r *WaitlistRepositoryImpl) FindLive(clientID uint) ([]models.WaitlistEntry, error) {
 	var out []models.WaitlistEntry
 	err := r.db.Where("client_id = ? AND status IN ?", clientID, []string{models.WaitlistWaiting, models.WaitlistOffered}).
+		Preload("BeautyCenter").
 		Order("created_at DESC").Find(&out).Error
 	return out, err
 }
