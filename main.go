@@ -24,6 +24,10 @@ func main() {
 	// validate := validator.New()
 	configs.DBConnection()
 
+	// Phase 3 maintenance loop (reminders, no-shows, holds, waitlist).
+	// Non-blocking; disable with SCHEDULER_ENABLED=false.
+	configs.StartBackgroundScheduler(configs.DB)
+
 	// NOTE: Use port of the .env or 8080 for default
 	// Usar el puerto del .env o 8080 por defecto
 	port := os.Getenv("PORT")
