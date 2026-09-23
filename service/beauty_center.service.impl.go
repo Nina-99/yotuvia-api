@@ -98,6 +98,24 @@ func (s *BeautyCenterServiceImpl) Update(id uint, req request.UpdateBeautyCenter
 	if req.Longitude != nil {
 		center.Longitude = *req.Longitude
 	}
+	if req.DepositRequired != nil {
+		center.DepositRequired = *req.DepositRequired
+	}
+	if req.DepositAmount != nil {
+		center.DepositAmount = *req.DepositAmount
+	}
+	if req.DepositPercent != nil {
+		center.DepositPercent = *req.DepositPercent
+	}
+	if req.DepositTrustThreshold != nil {
+		center.DepositTrustThreshold = *req.DepositTrustThreshold
+	}
+	if req.DepositHoldMinutes != nil {
+		center.DepositHoldMinutes = *req.DepositHoldMinutes
+	}
+	if req.DepositQRURL != nil {
+		center.DepositQRURL = *req.DepositQRURL
+	}
 
 	if req.Email != "" && req.Email != center.Email {
 		existingEmail, err := s.repo.FindByEmail(req.Email)
@@ -365,20 +383,26 @@ func parseMinutes(timeStr string) int {
 // Internal mapper
 func (s *BeautyCenterServiceImpl) mapToResponse(center models.BeautyCenter) response.BeautyCenterResponse {
 	resp := response.BeautyCenterResponse{
-		ID:          center.ID,
-		Name:        center.Name,
-		Address:     center.Address,
-		Email:       center.Email,
-		Phone:       center.Phone,
-		Url:         center.Url,
-		Description: center.Description,
-		Latitude:    center.Latitude,
-		Longitude:   center.Longitude,
-		IsActive:    center.IsActive,
-		AvgRating:   center.AvgRating,
-		ReviewCount: center.ReviewCount,
-		Currency:    center.Currency,
-		SocialMedia: mapSocialMedia(center.SocialMedia),
+		ID:                    center.ID,
+		Name:                  center.Name,
+		Address:               center.Address,
+		Email:                 center.Email,
+		Phone:                 center.Phone,
+		Url:                   center.Url,
+		Description:           center.Description,
+		Latitude:              center.Latitude,
+		Longitude:             center.Longitude,
+		IsActive:              center.IsActive,
+		AvgRating:             center.AvgRating,
+		ReviewCount:           center.ReviewCount,
+		Currency:              center.Currency,
+		SocialMedia:           mapSocialMedia(center.SocialMedia),
+		DepositRequired:       center.DepositRequired,
+		DepositAmount:         center.DepositAmount,
+		DepositPercent:        center.DepositPercent,
+		DepositTrustThreshold: center.DepositTrustThreshold,
+		DepositHoldMinutes:    center.DepositHoldMinutes,
+		DepositQRURL:          center.DepositQRURL,
 	}
 
 	for _, img := range center.BeautyCenterImage {

@@ -67,21 +67,29 @@ func (r *ReservationRepositoryImpl) FindByClientID(clientID uint) ([]models.Rese
 	return reservations, err
 }
 
-func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint, date *time.Time, clientID *uint) ([]models.Reservation, error) {
+func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint, from, to *time.Time, clientID *uint) ([]models.Reservation, error) {
 	var reservations []models.Reservation
 	query := r.db.
 		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
 		Where("beauty_center_id = ?", beautyCenterID)
 
-	if clientID != nil {
+	if from != nil && to != nil {
+		// Range-scoped agenda (design D4): inclusive range, chronological ordering.
+		query = query.Where("date >= ? AND date <= ?", *from, *to).Order("start_time ASC")
+	} else if from == nil && to == nil && clientID == nil {
+		// No filters: return all reservations for this center (unchanged behavior).
+		// The existing callers that only pass `date` will now pass nil, nil.
+	} else if clientID != nil {
 		// Client-scoped history (design D3): strict center+client filter with
 		// reverse chronological order. Takes precedence over the date-agenda
 		// ordering when both params are present.
 		query = query.Where("client_id = ?", *clientID).Order("date DESC, start_time DESC")
-	} else if date != nil {
-		// Date-scoped agenda (design D2/D3): exact day equality plus
-		// chronological ordering; a nil date keeps current behavior untouched.
-		query = query.Where("date = ?", *date).Order("start_time ASC")
+} else if from != nil && to == nil {
+		// Single from-date: treat as exact day query.
+		query = query.Where("date = ?", *from).Order("start_time ASC")
+	} else if from == nil && to != nil {
+		// Single to-date: treat as exact day query.
+		query = query.Where("date = ?", *to).Order("start_time ASC")
 	}
 
 	err := query.Find(&reservations).Error
@@ -152,6 +160,31 @@ func (r *ReservationRepositoryImpl) UpdatePersonnelID(reservationID uint, person
 
 func (r *ReservationRepositoryImpl) DeleteReservationServices(reservationID uint) error {
 	return r.db.Where("reservation_id = ?", reservationID).Delete(&models.ReservationService{}).Error
+}
+
+// FindExpiredHolds implements ReservationRepository. Only live holds
+// (PENDING/CONFIRMED) qualify — terminal rows are never rewritten.
+func (r *ReservationRepositoryImpl) FindExpiredHolds(now time.Time) ([]models.Reservation, error) {
+	var out []models.Reservation
+	err := r.db.Where("payment_status = ?", "PENDING_PROOF").
+		Where("status IN ?", []string{"PENDING", "CONFIRMED"}).
+		Where("hold_expires_at IS NOT NULL AND hold_expires_at < ?", now).
+		Find(&out).Error
+	return out, err
+}
+
+// FindConfirmedInDateRange implements ReservationRepository. The upper
+// bound is exclusive next-day-start ("date < to+1d") instead of "<= to":
+// SQLite compares datetimes lexicographically, so a same-day row stored as
+// "2026-09-22 00:00:00+00:00" would fail "<= 2026-09-22". Both Postgres
+// (date type) and SQLite (string compare) evaluate the exclusive bound
+// correctly.
+func (r *ReservationRepositoryImpl) FindConfirmedInDateRange(from, to time.Time) ([]models.Reservation, error) {
+	var out []models.Reservation
+	err := r.db.Where("status = ?", "CONFIRMED").
+		Where("date >= ? AND date < ?", from.Format("2006-01-02"), to.Add(24*time.Hour).Format("2006-01-02")).
+		Find(&out).Error
+	return out, err
 }
 
 func (r *ReservationRepositoryImpl) FindByToken(token string) (*models.Reservation, error) {

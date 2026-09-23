@@ -12,6 +12,10 @@ type Client struct {
 	Password  string `gorm:"size:255" json:"password"`
 	AvatarURL string `json:"avatar_url"`
 	IsActive  bool   `gorm:"default:true" json:"is_active"`
+	// TrustScore is the client's reliability reputation (0-100, starts 100).
+	// -20 per no-show, +2 per attendance. Centers exempt high-score clients
+	// from deposit requirements. Clamped at the repository boundary.
+	TrustScore int `gorm:"default:100" json:"trust_score"`
 
 	Reservations []Reservation `gorm:"constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
 }

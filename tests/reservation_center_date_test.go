@@ -128,7 +128,7 @@ func TestReservationCenter_DateScoping(t *testing.T) {
 		},
 		{
 			name:           "valid date filters to that day ordered by start_time ASC",
-			queryPath:      "/api/reservation/center/1?date=2026-08-16",
+			queryPath:      "/api/reservation/center/1?from=2026-08-16&to=2026-08-16",
 			wantStatus:     http.StatusOK,
 			wantLen:        2,
 			wantIDs:        []uint{seed.dayOne[0].ID, seed.dayOne[1].ID},

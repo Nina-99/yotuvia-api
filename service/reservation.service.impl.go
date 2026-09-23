@@ -22,9 +22,11 @@ type ReservationServiceImpl struct {
 	ReservationRepository repository.ReservationRepository
 	ServiceRepository     repository.ServiceRepository
 	ClientRepository      repository.ClientRepository
+	CenterRepository      repository.BeautyCenterRepository
 	TokenAccountRepo      repository.TokenAccountRepository
 	NotificationService   NotificationService
 	LoyaltyService        LoyaltyService
+	PromotionService      PromotionService
 	TokenAccountService   TokenAccountService
 	MissionService        TokenMissionService
 	MarketConfigService   MarketConfigService
@@ -39,19 +41,23 @@ func NewReservationServiceImpl(
 	tokenAccountRepository repository.TokenAccountRepository,
 	notificationService NotificationService,
 	loyaltyService LoyaltyService,
+	promotionService PromotionService,
 	tokenAccountService TokenAccountService,
 	missionService TokenMissionService,
 	marketConfigService MarketConfigService,
 	validate *validator.Validate,
+	centerRepository repository.BeautyCenterRepository,
 ) ReservationService {
 	return &ReservationServiceImpl{
 		ReservationRepository: reservationRepository,
 		PersonnelRepository:   personnelRepository,
 		ServiceRepository:     serviceRepository,
 		ClientRepository:      clientRepository,
+		CenterRepository:      centerRepository,
 		TokenAccountRepo:      tokenAccountRepository,
 		NotificationService:   notificationService,
 		LoyaltyService:        loyaltyService,
+		PromotionService:      promotionService,
 		TokenAccountService:   tokenAccountService,
 		MissionService:        missionService,
 		MarketConfigService:   marketConfigService,
@@ -134,16 +140,108 @@ func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID,
 		return 0, apperrors.ErrConflict
 	}
 
+	// ── Loyalty reward redemption (only if center has loyalty enabled) ──
+	// Check if the client has any completed punch cards for the services being
+	// booked. Calculate the discount WITHOUT committing — we finalize after
+	// reservation creation succeeds.
+	type pendingRedemption struct {
+		cardID   uint
+		discount float64
+	}
+	var redemptions []pendingRedemption
+	var loyaltyDiscount float64
+
+	loyaltyEnabled := false
+	if s.LoyaltyService != nil {
+		settings, settingsErr := s.LoyaltyService.GetCenterSettings(beautyCenterID)
+		if settingsErr == nil {
+			loyaltyEnabled = settings.LoyaltyEnabled
+		}
+	}
+
+	if loyaltyEnabled && s.LoyaltyService != nil {
+		for _, svc := range services {
+			if s.LoyaltyService.HasPendingRedemption(clientID, svc.ID, beautyCenterID) {
+				discount, cardID, calcErr := s.LoyaltyService.CalculateRedemption(clientID, svc.ID, beautyCenterID)
+				if calcErr != nil {
+					utils.Log.Errorf("[LOYALTY] Failed to calculate redemption for client %d, service %d: %v", clientID, svc.ID, calcErr)
+				} else if discount > 0 {
+					redemptions = append(redemptions, pendingRedemption{cardID: cardID, discount: discount})
+					loyaltyDiscount += discount
+					utils.Log.Infof("[LOYALTY] Pending %.2f discount for client %d on service %d (card %d)", discount, clientID, svc.ID, cardID)
+				}
+			}
+		}
+	}
+
+	// Ensure discount doesn't exceed total price
+	if loyaltyDiscount > totalPrice {
+		loyaltyDiscount = totalPrice
+	}
+
+	remainingAfterLoyalty := totalPrice - loyaltyDiscount
+
+	// ── Promotion discount ──
+	// Check for applicable promotions on each service. Only the BEST promo
+	// per service is applied (highest discount).
+	type pendingPromo struct {
+		promoID  uint
+		discount float64
+	}
+	var promoRedemptions []pendingPromo
+	var promotionDiscount float64
+
+	if s.PromotionService != nil {
+		now := time.Now()
+		hour := now.Hour()
+		dayOfWeek := int(now.Weekday())
+
+		for _, svc := range services {
+			applicable, findErr := s.PromotionService.FindApplicable(beautyCenterID, svc.ID, hour, dayOfWeek)
+			if findErr != nil || len(applicable) == 0 {
+				continue
+			}
+
+			// Find the best discount among applicable promos
+			bestDiscount := 0.0
+			bestPromoID := uint(0)
+			for _, p := range applicable {
+				d, calcErr := s.PromotionService.CalculateDiscount(p.ID, svc.Price, len(services))
+				if calcErr != nil {
+					continue
+				}
+				if d > bestDiscount {
+					bestDiscount = d
+					bestPromoID = p.ID
+				}
+			}
+
+			if bestDiscount > 0 {
+				promoRedemptions = append(promoRedemptions, pendingPromo{promoID: bestPromoID, discount: bestDiscount})
+				promotionDiscount += bestDiscount
+				utils.Log.Infof("[PROMO] Best promo %d gives %.2f discount on service %d for center %d", bestPromoID, bestDiscount, svc.ID, beautyCenterID)
+			}
+		}
+	}
+
+	// Ensure combined discounts don't exceed remaining price
+	if promotionDiscount > remainingAfterLoyalty {
+		promotionDiscount = remainingAfterLoyalty
+	}
+
 	// Build reservation with services in a transaction
 	reservation := models.Reservation{
-		BeautyCenterID: beautyCenterID,
-		ClientID:       clientID,
-		PersonnelID:    personnelID,
-		Date:           parsedDate,
-		StartTime:      startTimeStr,
-		EndTime:        endTimeStr,
-		TotalPrice:     totalPrice,
-		Status:         "PENDING",
+		BeautyCenterID:    beautyCenterID,
+		ClientID:          clientID,
+		PersonnelID:       personnelID,
+		Date:              parsedDate,
+		StartTime:         startTimeStr,
+		EndTime:           endTimeStr,
+		TotalPrice:        totalPrice,
+		LoyaltyDiscount:   loyaltyDiscount,
+		PromotionDiscount: promotionDiscount,
+		Status:            "PENDING",
+		PaymentStatus:     PaymentNone,
 	}
 
 	for _, svc := range services {
@@ -158,6 +256,26 @@ func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID,
 	if err := s.ReservationRepository.Create(&reservation); err != nil {
 		return 0, err
 	}
+
+	// ── Finalize loyalty redemptions ──
+	// Now that the reservation exists, link the redemptions to it and reset cards.
+	if len(redemptions) > 0 && s.LoyaltyService != nil {
+		for _, r := range redemptions {
+			if finErr := s.LoyaltyService.FinalizeRedemption(r.cardID, reservation.ID); finErr != nil {
+				utils.Log.Errorf("[LOYALTY] Failed to finalize redemption for card %d on reservation %d: %v", r.cardID, reservation.ID, finErr)
+			}
+		}
+	}
+
+	// ── Finalize promotion redemptions ──
+	if len(promoRedemptions) > 0 && s.PromotionService != nil {
+		for _, pr := range promoRedemptions {
+			if finErr := s.PromotionService.FinalizeRedemption(pr.promoID, reservation.ID, pr.discount); finErr != nil {
+				utils.Log.Errorf("[PROMO] Failed to finalize redemption for promo %d on reservation %d: %v", pr.promoID, reservation.ID, finErr)
+			}
+		}
+	}
+
 	return reservation.ID, nil
 }
 
@@ -165,8 +283,17 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 	if err := s.Validate.Struct(req); err != nil {
 		return err
 	}
-	_, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime)
-	return err
+	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime)
+	if err != nil {
+		return err
+	}
+	// Deposit decision (client flow only — walk-ins pay in person). Trusted
+	// clients and opted-out centers keep PaymentStatus NONE.
+	reservation, err := s.ReservationRepository.FindById(id)
+	if err != nil || reservation == nil {
+		return err
+	}
+	return s.applyDepositDecision(reservation)
 }
 
 // ──────────────────────────────────────────────
@@ -467,6 +594,27 @@ func (s *ReservationServiceImpl) Cancel(reservationID uint, clientID uint, reaso
 		return apperrors.ErrConflict
 	}
 
+	// Late-cancellation policy (Phase 3, opt-in per center): cancelling
+	// inside the deadline window still cancels, but costs half a strike.
+	// Best-effort like the trust engine — the cancel itself never fails here.
+	if s.CenterRepository != nil {
+		if center, cerr := s.CenterRepository.FindByID(reservation.BeautyCenterID); cerr == nil && center != nil && center.CancelDeadlineHours > 0 {
+			if start, perr := slotStart(reservation); perr == nil {
+				deadline := start.Add(-time.Duration(center.CancelDeadlineHours) * time.Hour)
+				if time.Now().After(deadline) {
+					if _, terr := s.ClientRepository.AdjustTrustScore(reservation.ClientID, TrustLateCancelPenalty); terr != nil {
+						utils.Log.Errorf("[TRUST] Failed late-cancel penalty for client %d: %v", reservation.ClientID, terr)
+					} else if s.NotificationService != nil {
+						_ = s.NotificationService.Create(reservation.ClientID, "late_cancel",
+							"Cancelación tardía",
+							fmt.Sprintf("Cancelaste dentro de la ventana de %d hs. Tu confianza bajó 10 puntos.", center.CancelDeadlineHours),
+							fmt.Sprintf(`{"reservation_id":%d}`, reservation.ID))
+					}
+				}
+			}
+		}
+	}
+
 	reservation.Status = "CANCELLED"
 	if reason != "" {
 		reservation.CancelReason = &reason
@@ -484,6 +632,354 @@ func (s *ReservationServiceImpl) Cancel(reservationID uint, clientID uint, reaso
 	}
 
 	return nil
+}
+
+// ──────────────────────────────────────────────
+//  REMINDERS + NO-SHOW SWEEP (Phase 3)
+// ──────────────────────────────────────────────
+
+// Reminder windows before slot start.
+const (
+	Reminder24H = 24 * time.Hour
+	Reminder2H  = 2 * time.Hour
+)
+
+// slotStart combines the date-only field with the HH:MM start time.
+func slotStart(r *models.Reservation) (time.Time, error) {
+	return time.Parse("2006-01-02 15:04",
+		r.Date.Format("2006-01-02")+" "+r.StartTime)
+}
+
+// slotEnd combines the date-only field with the HH:MM end time.
+func slotEnd(r *models.Reservation) (time.Time, error) {
+	return time.Parse("2006-01-02 15:04",
+		r.Date.Format("2006-01-02")+" "+r.EndTime)
+}
+
+// sendReminder delivers one in-app + push reminder and stamps the flag.
+// Best-effort on push: the in-app row is the record, push is the nudge.
+func (s *ReservationServiceImpl) sendReminder(r *models.Reservation, kind string, when time.Time) error {
+	start, err := slotStart(r)
+	if err != nil {
+		return err
+	}
+	title := "Recordatorio de turno"
+	message := fmt.Sprintf("Tenés turno el %s a las %s en %s",
+		start.Format("02/01"), r.StartTime, centerNameOrDefault(r))
+	dataStr := fmt.Sprintf(`{"reservation_id":%d}`, r.ID)
+	pushData := fmt.Sprintf(`{"type":"reminder_%s","data":%q}`, kind, dataStr)
+	if err := s.NotificationService.Create(r.ClientID, "reminder_"+kind, title, message, dataStr); err != nil {
+		return err
+	}
+	_ = s.NotificationService.SendPushToClient(r.ClientID, title, message, pushData)
+	if kind == "24h" {
+		r.Reminder24HSentAt = &when
+	} else {
+		r.Reminder2HSentAt = &when
+	}
+	return s.ReservationRepository.Update(r)
+}
+
+func centerNameOrDefault(r *models.Reservation) string {
+	if r.BeautyCenter.Name != "" {
+		return r.BeautyCenter.Name
+	}
+	return "tu centro"
+}
+
+// SendDueReminders implements ReservationService.
+func (s *ReservationServiceImpl) SendDueReminders(now time.Time) (int, error) {
+	// Only CONFIRMED reservations in the next 48h can need a reminder.
+	rows, err := s.ReservationRepository.FindConfirmedInDateRange(now, now.Add(48*time.Hour))
+	if err != nil {
+		return 0, err
+	}
+	sent := 0
+	for i := range rows {
+		r := rows[i]
+		start, err := slotStart(&r)
+		if err != nil || !start.After(now) {
+			continue
+		}
+		until := start.Sub(now)
+		switch {
+		case until <= Reminder2H && r.Reminder2HSentAt == nil:
+			if err := s.sendReminder(&r, "2h", now); err != nil {
+				utils.Log.Errorf("[REMINDER] Failed 2h reminder for reservation %d: %v", r.ID, err)
+				continue
+			}
+			sent++
+		case until > Reminder2H && until <= Reminder24H && r.Reminder24HSentAt == nil:
+			// The 24h notice only fires while the slot is actually ~a day
+			// out: a last-minute booking must never receive a "24h"
+			// reminder 90 minutes before.
+			if err := s.sendReminder(&r, "24h", now); err != nil {
+				utils.Log.Errorf("[REMINDER] Failed 24h reminder for reservation %d: %v", r.ID, err)
+				continue
+			}
+			sent++
+		}
+	}
+	return sent, nil
+}
+
+// SweepNoShows implements ReservationService.
+func (s *ReservationServiceImpl) SweepNoShows(now time.Time, graceMinutes int) (int, error) {
+	// Look back 3 days: anything older was either swept or predates the engine.
+	rows, err := s.ReservationRepository.FindConfirmedInDateRange(now.Add(-72*time.Hour), now)
+	if err != nil {
+		return 0, err
+	}
+	struck := 0
+	for i := range rows {
+		r := rows[i]
+		end, err := slotEnd(&r)
+		if err != nil {
+			continue
+		}
+		if now.After(end.Add(time.Duration(graceMinutes) * time.Minute)) {
+			if err := s.RecordNoShow(r.ID, r.BeautyCenterID); err != nil {
+				utils.Log.Errorf("[NOSHOW] Sweep failed for reservation %d: %v", r.ID, err)
+				continue
+			}
+			struck++
+		}
+	}
+	return struck, nil
+}
+
+// ──────────────────────────────────────────────
+//  TRUST ENGINE (Phase 1)
+// ──────────────────────────────────────────────
+
+// RecordNoShow implements ReservationService. It marks a past CONFIRMED
+// reservation as NO_SHOW and applies the trust penalty. NO_SHOW is a system
+// terminal state set directly — it deliberately bypasses the updateStatus
+// machine, which only models user-driven transitions.
+func (s *ReservationServiceImpl) RecordNoShow(reservationID uint, centerID uint) error {
+	reservation, err := s.ReservationRepository.FindById(reservationID)
+	if err != nil || reservation == nil {
+		return apperrors.ErrNotFound
+	}
+
+	// System actor must still prove center ownership (staff button or ticker
+	// acting for the center — never a client, never another center).
+	if centerID == 0 || centerID != reservation.BeautyCenterID {
+		return apperrors.ErrForbidden
+	}
+
+	if reservation.Status != "CONFIRMED" {
+		return apperrors.ErrConflict
+	}
+
+	// A no-show can only happen in the past: future slots are rejected so a
+	// misclick or a rogue ticker can never strike a client early.
+	slotStart, err := time.Parse("2006-01-02 15:04",
+		reservation.Date.Format("2006-01-02")+" "+reservation.StartTime)
+	if err != nil {
+		return apperrors.ErrBadRequest
+	}
+	if !time.Now().After(slotStart) {
+		return apperrors.ErrConflict
+	}
+
+	reservation.Status = "NO_SHOW"
+	if err := s.ReservationRepository.Update(reservation); err != nil {
+		return err
+	}
+
+	// Best-effort like the loyalty block: the strike must land, but a trust
+	// write failure must not roll back an already-persisted terminal state.
+	// (Phase 3 adds the client-facing strike notice.)
+	if _, trustErr := s.ClientRepository.AdjustTrustScore(reservation.ClientID, TrustNoShowPenalty); trustErr != nil {
+		utils.Log.Errorf("[TRUST] Failed to penalize no-show for client %d: %v", reservation.ClientID, trustErr)
+	}
+
+	return nil
+}
+
+// RequiresDeposit implements ReservationService. A client whose trust score
+// is below the threshold must place a deposit; trusted clients skip the seña.
+func (s *ReservationServiceImpl) RequiresDeposit(clientID uint, threshold int) (bool, error) {
+	client, err := s.ClientRepository.FindById(clientID)
+	if err != nil || client == nil {
+		return false, apperrors.ErrNotFound
+	}
+	return client.TrustScore < threshold, nil
+}
+
+// ComputeDepositQuote resolves the seña due: a fixed amount wins, else the
+// percent of the total, capped at the total itself. Zero means no deposit.
+func ComputeDepositQuote(required bool, fixed, percent, total float64) float64 {
+	if !required {
+		return 0
+	}
+	if fixed > 0 {
+		if fixed > total {
+			return total
+		}
+		return fixed
+	}
+	if percent > 0 {
+		quote := total * percent / 100
+		if quote > total {
+			return total
+		}
+		return quote
+	}
+	return 0
+}
+
+// ──────────────────────────────────────────────
+//  DEPOSIT ("SEÑA") FLOW — zero-cost, receipt based
+// ──────────────────────────────────────────────
+
+// maybeExpireHold cancels a PENDING_PROOF reservation whose hold deadline
+// passed. It reports whether it expired the row. Payment touchpoints call it
+// first so a stale hold can never accept proof or review.
+func (s *ReservationServiceImpl) maybeExpireHold(reservation *models.Reservation, now time.Time) bool {
+	if reservation.PaymentStatus != PaymentPendingProof {
+		return false
+	}
+	if reservation.Status != "PENDING" && reservation.Status != "CONFIRMED" {
+		return false
+	}
+	if reservation.HoldExpiresAt == nil || !now.After(*reservation.HoldExpiresAt) {
+		return false
+	}
+	reason := "hold expired"
+	reservation.Status = "CANCELLED"
+	reservation.CancelReason = &reason
+	if err := s.ReservationRepository.Update(reservation); err != nil {
+		utils.Log.Errorf("[DEPOSIT] Failed to expire hold on reservation %d: %v", reservation.ID, err)
+		return false
+	}
+	return true
+}
+
+// applyDepositDecision runs after client creation: trusted clients and
+// opted-out centers skip the flow; everyone else gets a PENDING_PROOF hold
+// with a snapshotted amount and deadline.
+func (s *ReservationServiceImpl) applyDepositDecision(reservation *models.Reservation) error {
+	if s.CenterRepository == nil {
+		return nil
+	}
+	center, err := s.CenterRepository.FindByID(reservation.BeautyCenterID)
+	if err != nil || center == nil || !center.DepositRequired {
+		return nil
+	}
+	threshold := center.DepositTrustThreshold
+	if threshold <= 0 {
+		threshold = DefaultDepositThreshold
+	}
+	need, rerr := s.RequiresDeposit(reservation.ClientID, threshold)
+	if rerr != nil {
+		// Fail-closed: unknown trust cannot skip the seña.
+		need = true
+	}
+	if !need {
+		return nil
+	}
+	quote := ComputeDepositQuote(true, center.DepositAmount, center.DepositPercent, reservation.TotalPrice)
+	holdMin := center.DepositHoldMinutes
+	if holdMin <= 0 {
+		holdMin = 30
+	}
+	expires := time.Now().Add(time.Duration(holdMin) * time.Minute)
+	reservation.PaymentStatus = PaymentPendingProof
+	reservation.DepositAmount = quote
+	reservation.HoldExpiresAt = &expires
+	return s.ReservationRepository.Update(reservation)
+}
+
+// UploadProof implements ReservationService.
+func (s *ReservationServiceImpl) UploadProof(reservationID, clientID uint, imageURL string) error {
+	if imageURL == "" || len(imageURL) > 500 {
+		return apperrors.ErrBadRequest
+	}
+	reservation, err := s.ReservationRepository.FindById(reservationID)
+	if err != nil || reservation == nil {
+		return apperrors.ErrNotFound
+	}
+	if reservation.ClientID != clientID {
+		return apperrors.ErrForbidden
+	}
+	if s.maybeExpireHold(reservation, time.Now()) {
+		return apperrors.ErrConflict
+	}
+	if reservation.PaymentStatus != PaymentPendingProof && reservation.PaymentStatus != PaymentRejected {
+		return apperrors.ErrConflict
+	}
+	reservation.ProofImageURL = &imageURL
+	reservation.PaymentStatus = PaymentPendingProof
+	if err := s.ReservationRepository.Update(reservation); err != nil {
+		return err
+	}
+	// Best-effort: the center reviews proofs from the agenda it already opens.
+	_ = s.NotificationService.CreateForCenter(reservation.BeautyCenterID, "proof_uploaded",
+		"Comprobante recibido",
+		fmt.Sprintf("Comprobante de seña para el turno del %s a las %s", reservation.Date.Format("02/01"), reservation.StartTime),
+		fmt.Sprintf(`{"reservation_id":%d}`, reservation.ID))
+	return nil
+}
+
+// ReviewProof implements ReservationService.
+func (s *ReservationServiceImpl) ReviewProof(reservationID, centerID uint, approve bool) error {
+	reservation, err := s.ReservationRepository.FindById(reservationID)
+	if err != nil || reservation == nil {
+		return apperrors.ErrNotFound
+	}
+	if centerID == 0 || centerID != reservation.BeautyCenterID {
+		return apperrors.ErrForbidden
+	}
+	if s.maybeExpireHold(reservation, time.Now()) {
+		return apperrors.ErrConflict
+	}
+	if reservation.PaymentStatus != PaymentPendingProof {
+		return apperrors.ErrConflict
+	}
+	// Terminal reservation states have nothing to confirm.
+	if reservation.Status != "PENDING" && reservation.Status != "CONFIRMED" {
+		return apperrors.ErrConflict
+	}
+	if approve {
+		reservation.PaymentStatus = PaymentApproved
+		if reservation.Status == "PENDING" {
+			// PENDING → CONFIRMED is a legal machine step; persist both.
+			return s.updateStatus(reservation, "CONFIRMED")
+		}
+		return s.ReservationRepository.Update(reservation)
+	}
+	reservation.PaymentStatus = PaymentRejected
+	if err := s.ReservationRepository.Update(reservation); err != nil {
+		return err
+	}
+	_ = s.NotificationService.Create(reservation.ClientID, "proof_rejected",
+		"Comprobante observado",
+		"El centro observó tu comprobante de seña. Subí uno nuevo antes del vencimiento.",
+		fmt.Sprintf(`{"reservation_id":%d}`, reservation.ID))
+	return nil
+}
+
+// ExpireHolds implements ReservationService.
+func (s *ReservationServiceImpl) ExpireHolds(now time.Time) (int, error) {
+	stale, err := s.ReservationRepository.FindExpiredHolds(now)
+	if err != nil {
+		return 0, err
+	}
+	swept := 0
+	for i := range stale {
+		r := stale[i]
+		reason := "hold expired"
+		r.Status = "CANCELLED"
+		r.CancelReason = &reason
+		if err := s.ReservationRepository.Update(&r); err != nil {
+			utils.Log.Errorf("[DEPOSIT] Failed to sweep expired hold %d: %v", r.ID, err)
+			continue
+		}
+		swept++
+	}
+	return swept, nil
 }
 
 // ──────────────────────────────────────────────
@@ -584,11 +1080,15 @@ func (s *ReservationServiceImpl) FindUpcomingByClientID(clientID, actorClientID 
 	return reservation, nil
 }
 
-func (s *ReservationServiceImpl) FindByBeautyCenterID(beautyCenterID, actorCenterID uint, date *time.Time, clientID *uint) ([]models.Reservation, error) {
+func (s *ReservationServiceImpl) FindByBeautyCenterID(beautyCenterID, actorCenterID uint, from, to *time.Time, clientID *uint) ([]models.Reservation, error) {
 	if actorCenterID != beautyCenterID {
 		return nil, apperrors.ErrForbidden
 	}
-	return s.ReservationRepository.FindByBeautyCenterId(beautyCenterID, date, clientID)
+	// If from/to are provided, use them as the inclusive date range; otherwise return all reservations for this center.
+	if from != nil || to != nil {
+		return s.ReservationRepository.FindByBeautyCenterId(beautyCenterID, from, to, clientID)
+	}
+	return s.ReservationRepository.FindByBeautyCenterId(beautyCenterID, nil, nil, clientID)
 }
 
 // FindByPersonnelID returns the caller's own agenda. The personnelID arrives as
@@ -730,11 +1230,21 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 	reservation.VerificationToken = nil
 	reservation.TokenExpiresAt = nil
 
-	// ── Loyalty stamps ──
-	for _, svc := range reservation.ReservationServices {
-		err = s.LoyaltyService.AddPunch(reservation.ID, reservation.ClientID, reservation.BeautyCenterID, svc.ServiceID)
-		if err != nil {
-			utils.Log.Errorf("[Loyalty Error] failed to add punch for service %d via QR for Client %d; %v", svc.ServiceID, reservation.ClientID, err)
+	// ── Trust reward (Phase 1): showing up rebuilds reputation. Best-effort
+	// like the loyalty block below — a trust write must never fail check-in.
+	// Idempotent re-scans (alreadyCompleted) do not double-reward.
+	if _, trustErr := s.ClientRepository.AdjustTrustScore(reservation.ClientID, TrustAttendanceReward); trustErr != nil {
+		utils.Log.Errorf("[TRUST] Failed to reward attendance for client %d: %v", reservation.ClientID, trustErr)
+	}
+
+	// ── Loyalty stamps (only if center has loyalty enabled) ──
+	settings, settingsErr := s.LoyaltyService.GetCenterSettings(authBeautyCenterID)
+	if settingsErr == nil && settings.LoyaltyEnabled {
+		for _, svc := range reservation.ReservationServices {
+			err = s.LoyaltyService.AddPunch(reservation.ID, reservation.ClientID, reservation.BeautyCenterID, svc.ServiceID)
+			if err != nil {
+				utils.Log.Errorf("[Loyalty Error] failed to add punch for service %d via QR for Client %d; %v", svc.ServiceID, reservation.ClientID, err)
+			}
 		}
 	}
 

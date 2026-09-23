@@ -29,4 +29,8 @@ type ClientRepository interface {
 	FindAllAdmin(page, limit int, centerID uint) ([]models.Client, []ClientMetrics, int64, error)
 	FindByEmail(email string) (*models.Client, error)
 	FindByUsername(username string) (*models.Client, error)
+	// AdjustTrustScore atomically shifts a client's trust score by delta,
+	// clamped to [0, 100]. Used by the no-show/attendance engine (Phase 1).
+	// Returns the new score.
+	AdjustTrustScore(clientID uint, delta int) (int, error)
 }

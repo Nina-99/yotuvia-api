@@ -33,6 +33,11 @@ type ReservationResponse struct {
 	EndTime          string                       `json:"end_time"`
 	TotalPrice       float64                      `json:"total_price"`
 	Status           string                       `json:"status"`
+	PaymentStatus    string                       `json:"payment_status"`
+	DepositAmount    float64                      `json:"deposit_amount"`
+	DepositQRURL     string                       `json:"deposit_qr_url"`
+	ProofImageURL    *string                      `json:"proof_image_url,omitempty"`
+	HoldExpiresAt    *time.Time                   `json:"hold_expires_at,omitempty"`
 	CancelReason     *string                      `json:"cancel_reason,omitempty"`
 	Services         []ReservationServiceResponse `json:"services,omitempty"`
 	Client           *ClientLite                  `json:"client,omitempty"`

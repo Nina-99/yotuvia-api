@@ -40,6 +40,27 @@ type BeautyCenter struct {
 	LoyaltyEnabled      bool `gorm:"default:false" json:"loyalty_enabled"`
 	LoyaltyPerPersonnel bool `gorm:"default:false" json:"loyalty_per_personnel"`
 
+	// Deposit ("seña") settings — zero-cost booking protection (Phase 2).
+	// DepositRequired: when false (default), bookings skip the deposit flow
+	// entirely — zero friction until the center opts in.
+	// DepositAmount: fixed deposit in the center's currency. When > 0 it wins
+	// over DepositPercent. When both are 0, no amount is due.
+	// DepositPercent: percent of the reservation total (e.g. 30 = 30%).
+	// DepositTrustThreshold: clients at/above this trust score skip the seña.
+	// DepositHoldMinutes: how long an unconfirmed PENDING_PROOF hold lasts.
+	DepositRequired       bool    `gorm:"default:false" json:"deposit_required"`
+	DepositAmount         float64 `gorm:"type:decimal(10,2);default:0" json:"deposit_amount"`
+	DepositPercent        float64 `gorm:"default:0" json:"deposit_percent"`
+	DepositTrustThreshold int     `gorm:"default:70" json:"deposit_trust_threshold"`
+	DepositHoldMinutes    int     `gorm:"default:30" json:"deposit_hold_minutes"`
+	// DepositQRURL is the center's own collection QR (bank QR photo) shown to
+	// clients on the deposit sheet. Empty = coordinate payment off-app.
+	DepositQRURL string `gorm:"size:500" json:"deposit_qr_url"`
+	// CancelDeadlineHours is the late-cancellation policy (Phase 3): cancelling
+	// closer than this to the slot counts as a late strike (-10 trust).
+	// 0 = no policy (opt-in, consistent with deposits).
+	CancelDeadlineHours int `gorm:"default:0" json:"cancel_deadline_hours"`
+
 	AvgRating   float64 `gorm:"-" json:"avg_rating"`
 	ReviewCount int64   `gorm:"-" json:"review_count"`
 

@@ -10,7 +10,7 @@ func UploadRoutes(rg *gin.RouterGroup) {
 	uploadCtrl := controller.NewUploadController()
 
 	upload := rg.Group("/upload")
-	upload.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("beauty_center"))
+	upload.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("beauty_center", "client"))
 	{
 		upload.POST("/receipt", uploadCtrl.UploadReceipt)
 	}

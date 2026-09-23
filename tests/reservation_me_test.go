@@ -126,9 +126,11 @@ func newReservationServiceForMeTests(t *testing.T, db *gorm.DB) interface {
 		nil, // TokenAccountRepository not needed for these flows
 		service.NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db)),
 		nil, // LoyaltyService stub not needed for reads
+		nil, // PromotionService stub not needed for reads
 		nil, // TokenAccountService stub not needed for reads
 		nil, // TokenMissionService stub not needed for reads
 		nil, // MarketConfigService not needed for reads
 		validator.New(),
+		repository.NewBeautyCenterRepositoryImpl(db),
 	)
 }

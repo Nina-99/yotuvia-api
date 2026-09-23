@@ -17,6 +17,41 @@ type ReservationActor struct {
 	Role string
 }
 
+// Payment status values for the zero-cost deposit ("seña") flow (Phase 1).
+const (
+	PaymentNone         = "NONE"
+	PaymentPendingProof = "PENDING_PROOF"
+	PaymentApproved     = "APPROVED"
+	PaymentRejected     = "REJECTED"
+)
+
+// ValidPaymentStatus reports whether s is a known deposit payment status.
+func ValidPaymentStatus(s string) bool {
+	switch s {
+	case PaymentNone, PaymentPendingProof, PaymentApproved, PaymentRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Trust engine tuning (Phase 1). Score range is [TrustMin, TrustMax];
+// new clients start at TrustInitial.
+const (
+	TrustInitial          = 100
+	TrustMin              = 0
+	TrustMax              = 100
+	TrustNoShowPenalty    = -20
+	TrustAttendanceReward = 2
+	// TrustLateCancelPenalty applies when a client cancels inside the
+	// center's late window (Phase 3). Half a no-show: they warned, but the
+	// slot is likely lost.
+	TrustLateCancelPenalty = -10
+	// DefaultDepositThreshold is the score below which a center should
+	// require a deposit. Centers calibrate their own threshold via config.
+	DefaultDepositThreshold = 70
+)
+
 type ReservationService interface {
 	Create(req request.CreateReservationRequest) error
 	// CreateAdminReservation books a walk-in on behalf of a center admin or
@@ -44,11 +79,11 @@ type ReservationService interface {
 	// match the actor's clientID claim.
 	FindByClientID(clientID, actorClientID uint) ([]models.Reservation, error)
 	FindUpcomingByClientID(clientID, actorClientID uint) (*models.Reservation, error)
-	// FindByBeautyCenterID allows center staff only for their own centerID.
-	// The optional date (parsed YYYY-MM-DD) scopes the agenda to one day; the
-	// optional clientID scopes it to one client's history at that center
-	// (design D3). Nil params keep the current unfiltered behavior.
-	FindByBeautyCenterID(beautyCenterID, actorCenterID uint, date *time.Time, clientID *uint) ([]models.Reservation, error)
+// FindByBeautyCenterID allows center staff only for their own centerID.
+// The optional from/to date range scopes the agenda to that inclusive range
+// (design D4); the optional date (parsed YYYY-MM-DD) scopes it to one day
+// (design D3); nil params keep the current unfiltered behavior.
+FindByBeautyCenterID(beautyCenterID, actorCenterID uint, from, to *time.Time, clientID *uint) ([]models.Reservation, error)
 	// FindByPersonnelID returns a staff member's agenda. The personnelID is the
 	// caller's own claim (never a path parameter); from/to are an optional
 	// inclusive date range (nil = open-ended).
@@ -60,4 +95,32 @@ type ReservationService interface {
 	// exactly-once race.
 	VerifyQR(token string, authBeautyCenterID uint) (*models.Reservation, bool, error)
 	AssignPersonnel(reservationID uint, personnelID uint, centerID uint) error
+	// RecordNoShow marks a past CONFIRMED reservation as NO_SHOW and applies
+	// the trust penalty to the client. Only the owning center may call it
+	// (staff button today, system ticker in Phase 3). Future slots and
+	// non-CONFIRMED states are rejected — a no-show can only happen in the past.
+	RecordNoShow(reservationID uint, centerID uint) error
+	// RequiresDeposit reports whether a client must place a deposit, i.e. its
+	// trust score is below the given threshold. Trusted clients skip the seña.
+	RequiresDeposit(clientID uint, threshold int) (bool, error)
+	// UploadProof attaches the bank receipt photo to a deposit hold. Only the
+	// owning client, only while PENDING_PROOF (or REJECTED for re-upload).
+	// An expired hold is cancelled first and reported as conflict.
+	UploadProof(reservationID, clientID uint, imageURL string) error
+	// ReviewProof approves or rejects a deposit receipt. Only the owning
+	// center. Approving a PENDING reservation also CONFIRMs it; rejecting
+	// returns it to REJECTED so the client can re-upload while the hold runs.
+	ReviewProof(reservationID, centerID uint, approve bool) error
+	// ExpireHolds cancels every PENDING_PROOF hold past its deadline and
+	// returns how many were swept. No trust penalty: nothing was confirmed.
+	// Called by the Phase 3 ticker; payment touchpoints also expire lazily.
+	ExpireHolds(now time.Time) (int, error)
+	// SendDueReminders sends the one-shot 24h/2h push+in-app reminders for
+	// CONFIRMED reservations and returns how many reminders were sent.
+	// Idempotent: each flag is set once (Phase 3 ticker calls this).
+	SendDueReminders(now time.Time) (int, error)
+	// SweepNoShows marks past CONFIRMED reservations (slot end + grace
+	// elapsed, no check-in) as NO_SHOW with trust penalty. Returns the
+	// count struck. Called by the Phase 3 ticker.
+	SweepNoShows(now time.Time, graceMinutes int) (int, error)
 }

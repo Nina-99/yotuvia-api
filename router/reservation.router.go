@@ -32,7 +32,9 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	missionSvc = service.NewTokenMissionServiceImpl(tokenMissionRepo, accountSvc, accountRepo)
 
 	marketCfgSvc := service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db))
-	svc := service.NewReservationServiceImpl(repo, serviceRepo, personnelRepo, repository.NewClientRepositoryImpl(db), accountRepo, notifSvc, loyaltySvc, accountSvc, missionSvc, marketCfgSvc, validate)
+	promoRepo := repository.NewPromotionRepositoryImpl(db)
+	promoSvc := service.NewPromotionService(promoRepo, validate)
+	svc := service.NewReservationServiceImpl(repo, serviceRepo, personnelRepo, repository.NewClientRepositoryImpl(db), accountRepo, notifSvc, loyaltySvc, promoSvc, accountSvc, missionSvc, marketCfgSvc, validate, repository.NewBeautyCenterRepositoryImpl(db))
 	waitlistSvc := service.NewWaitlistServiceImpl(
 		repository.NewWaitlistRepositoryImpl(db),
 		repo,
@@ -63,6 +65,7 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 			clientOnly.GET("/:clientId/upcoming", ctrl.FindUpcomingByClient)
 		}
 		reservation.PATCH("/:id/cancel", middleware.RequireRole("client"), ctrl.Cancel)
+		reservation.POST("/:id/proof", middleware.RequireRole("client"), ctrl.UploadProof)
 
 		// Waitlist (Phase 3, client-owned). Static /mine and /:id/claim win
 		// over /:id in Gin's tree (same pattern as /me above).
@@ -77,6 +80,7 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 			admin.GET("", ctrl.FindAll)
 			admin.PATCH("/:id/status", ctrl.UpdateStatus)
 			admin.PATCH("/:id/assign", ctrl.AssignPersonnel)
+			admin.PATCH("/:id/proof", ctrl.ReviewProof)
 		}
 
 		// personnel-only self-service agenda (design D1: claim-scoped, never a

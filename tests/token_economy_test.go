@@ -158,10 +158,12 @@ func newEconomyVerifySUT(t *testing.T) (*gorm.DB, service.ReservationService) {
 		accountRepo,
 		notifSvc,
 		nil,
+		nil, // PromotionService stub not needed for these flows
 		accountSvc,
 		missionSvc,
 		marketSvc,
 		validator.New(),
+		repository.NewBeautyCenterRepositoryImpl(db),
 	)
 	return db, svc
 }

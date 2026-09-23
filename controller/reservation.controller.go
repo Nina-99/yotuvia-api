@@ -161,6 +161,60 @@ func (c *ReservationController) Cancel(ctx *gin.Context) {
 }
 
 // ──────────────────────────────────────────────
+//  DEPOSIT PROOF — seña con comprobante (Phase 2)
+// ──────────────────────────────────────────────
+
+// UploadProof attaches the bank receipt to the caller's own deposit hold:
+// POST /reservation/:id/proof (client).
+func (c *ReservationController) UploadProof(ctx *gin.Context) {
+	clientID := ctx.GetUint("clientID")
+
+	reservationID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	var req request.UploadProofRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if err := c.reservationService.UploadProof(reservationID, clientID, req.ImageURL); err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Proof uploaded successfully"})
+}
+
+// ReviewProof approves or rejects a deposit receipt:
+// PATCH /reservation/:id/proof (beauty_center). Approving a PENDING
+// reservation also confirms it.
+func (c *ReservationController) ReviewProof(ctx *gin.Context) {	centerID := ctx.GetUint("centerID")
+
+	reservationID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	var req request.ReviewProofRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if err := c.reservationService.ReviewProof(reservationID, centerID, req.Approve); err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Proof reviewed successfully"})
+}
+
+// ──────────────────────────────────────────────
 //  DELETE
 // ──────────────────────────────────────────────
 
@@ -273,16 +327,24 @@ func (c *ReservationController) FindByBeautyCenter(ctx *gin.Context) {
 		return
 	}
 
-	// Optional date=YYYY-MM-DD scopes the agenda to one day (design D3).
-	// Parsing mirrors /reservation/me: malformed → 400, absent → nil.
-	var parsedDate *time.Time
-	if raw := ctx.Query("date"); raw != "" {
+	// Optional from=YYYY-MM-DD and to=YYYY-MM-DD scopes the agenda to a date range (design D4).
+	// Malformed or out-of-order values → 400, absent → nil (unchanged behavior).
+	var parsedFrom, parsedTo *time.Time
+	if raw := ctx.Query("from"); raw != "" {
 		d, err := time.Parse("2006-01-02", raw)
 		if err != nil {
 			c.writeError(ctx, apperrors.ErrBadRequest)
 			return
 		}
-		parsedDate = &d
+		parsedFrom = &d
+	}
+	if raw := ctx.Query("to"); raw != "" {
+		d, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			c.writeError(ctx, apperrors.ErrBadRequest)
+			return
+		}
+		parsedTo = &d
 	}
 
 	// Optional clientId=X scopes the agenda to one client's history at this
@@ -299,7 +361,7 @@ func (c *ReservationController) FindByBeautyCenter(ctx *gin.Context) {
 		clientID = &parsed
 	}
 
-	reservations, err := c.reservationService.FindByBeautyCenterID(centerID, ctx.GetUint("centerID"), parsedDate, clientID)
+	reservations, err := c.reservationService.FindByBeautyCenterID(centerID, ctx.GetUint("centerID"), parsedFrom, parsedTo, clientID)
 	if err != nil {
 		c.writeError(ctx, err)
 		return
@@ -605,6 +667,11 @@ func mapToReservationResponse(r *models.Reservation) response.ReservationRespons
 		EndTime:          r.EndTime,
 		TotalPrice:       r.TotalPrice,
 		Status:           r.Status,
+		PaymentStatus:    r.PaymentStatus,
+		DepositAmount:    r.DepositAmount,
+		DepositQRURL:     r.BeautyCenter.DepositQRURL,
+		ProofImageURL:    r.ProofImageURL,
+		HoldExpiresAt:    r.HoldExpiresAt,
 		CancelReason:     r.CancelReason,
 	}
 

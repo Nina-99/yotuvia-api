@@ -27,6 +27,13 @@ type UpdateBeautyCenterRequest struct {
 	IsActive    *bool                      `json:"is_active"`
 	Images      []BeautyCenterImageRequest `json:"images"`
 	Schedules   []WorkingHourRequest       `json:"schedules"`
+	// Deposit ("seña") settings — pointers so false/0 are settable.
+	DepositRequired       *bool    `json:"deposit_required"`
+	DepositAmount         *float64 `json:"deposit_amount"`
+	DepositPercent        *float64 `json:"deposit_percent"`
+	DepositTrustThreshold *int     `json:"deposit_trust_threshold"`
+	DepositHoldMinutes    *int     `json:"deposit_hold_minutes"`
+	DepositQRURL          *string  `json:"deposit_qr_url"`
 }
 
 type WorkingHourRequest struct {

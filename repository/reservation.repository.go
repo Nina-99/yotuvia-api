@@ -15,12 +15,13 @@ type ReservationRepository interface {
 	FindById(reservationID uint) (*models.Reservation, error)
 	FindByClientID(clientID uint) ([]models.Reservation, error)
 	FindUpcomingByClientID(clientID uint) (*models.Reservation, error)
-	// FindByBeautyCenterId returns a center's reservations. An optional date
-	// (typically a parsed YYYY-MM-DD) scopes the query to that day and orders
-	// by start_time ascending. An optional clientID scopes the query to one
-	// client's history at that center and orders date DESC, start_time DESC
-	// (design D3). All-nil keeps the current unfiltered, unordered behavior.
-	FindByBeautyCenterId(beautyCenterID uint, date *time.Time, clientID *uint) ([]models.Reservation, error)
+// FindByBeautyCenterId returns a center's reservations. An optional date
+// (typically a parsed YYYY-MM-DD) scopes the query to that day and orders
+// by start_time ascending. An optional clientID scopes the query to one
+// client's history at that center and orders date DESC, start_time DESC
+// (design D3). An optional from/to date range scopes the query to that
+// inclusive range (design D4). All-nil keeps the current unfiltered, unordered behavior.
+FindByBeautyCenterId(beautyCenterID uint, from, to *time.Time, clientID *uint) ([]models.Reservation, error)
 	// FindByPersonnelId returns a staff member's reservations (agenda). from/to
 	// are an optional inclusive date range; nil means open-ended on that side.
 	// Results are ordered by date then start_time ascending.
@@ -42,4 +43,11 @@ type ReservationRepository interface {
 	CompleteVerificationTx(tx *gorm.DB, reservationID uint) (bool, error)
 	UpdatePersonnelID(reservationID uint, personnelID uint) error
 	DeleteReservationServices(reservationID uint) error
+	// FindExpiredHolds returns PENDING_PROOF reservations past their hold
+	// deadline, for the ExpireHolds sweep (Phase 2; ticker in Phase 3).
+	FindExpiredHolds(now time.Time) ([]models.Reservation, error)
+	// FindConfirmedInDateRange returns CONFIRMED reservations in [from, to]
+	// for the reminder/no-show sweeps. Range filtering stays portable SQL;
+	// slot-time logic lives in the service (Phase 3).
+	FindConfirmedInDateRange(from, to time.Time) ([]models.Reservation, error)
 }

@@ -37,3 +37,15 @@ type JoinWaitlistRequest struct {
 	PersonnelID    uint   `json:"personnel_id" validate:"required"`
 	ServiceIDs     []uint `json:"service_ids" validate:"required,min=1"`
 }
+
+// UploadProofRequest carries the pre-uploaded bank receipt image URL for the
+// deposit hold. The file itself travels through the existing /upload surface;
+// the reservation only stores the URL.
+type UploadProofRequest struct {
+	ImageURL string `json:"image_url" validate:"required"`
+}
+
+// ReviewProofRequest approves (confirm) or rejects (re-upload) a receipt.
+type ReviewProofRequest struct {
+	Approve bool `json:"approve"`
+}

@@ -32,6 +32,26 @@ func (r *ClientRepositoryImpl) Delete(client *models.Client) error {
 	return r.db.Delete(client).Error
 }
 
+// AdjustTrustScore implements ClientRepository. Single UPDATE with a CASE
+// clamp so concurrent no-show and attendance writes never escape [0, 100]
+// and never overwrite each other (no read-modify-write race). CASE WHEN is
+// used instead of GREATEST/LEAST so the statement runs on both Postgres
+// (production) and SQLite (tests).
+func (r *ClientRepositoryImpl) AdjustTrustScore(clientID uint, delta int) (int, error) {
+	var client models.Client
+	if err := r.db.First(&client, clientID).Error; err != nil {
+		return 0, err
+	}
+	if err := r.db.Model(&models.Client{}).Where("id = ?", clientID).
+		Update("trust_score", gorm.Expr("CASE WHEN trust_score + ? < 0 THEN 0 WHEN trust_score + ? > 100 THEN 100 ELSE trust_score + ? END", delta, delta, delta)).Error; err != nil {
+		return 0, err
+	}
+	if err := r.db.First(&client, clientID).Error; err != nil {
+		return 0, err
+	}
+	return client.TrustScore, nil
+}
+
 // adminClientRow pairs a client row with its aggregate metrics from the
 // FindAllAdmin join query — the internal Scan target (design D1). LastVisit is
 // kept as sql.NullString because the SQLite driver returns date expressions as

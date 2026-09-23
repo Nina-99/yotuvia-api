@@ -3,22 +3,28 @@ package response
 import "time"
 
 type BeautyCenterResponse struct {
-	Currency    string                  `json:"currency"`
-	ID          uint                    `json:"id"`
-	Name        string                  `json:"name"`
-	Address     string                  `json:"address"`
-	Email       string                  `json:"email"`
-	Phone       string                  `json:"phone"`
-	Url         string                  `json:"url"`
-	Description string                  `json:"description"`
-	IsActive    bool                    `json:"is_active"`
-	Latitude    float64                 `json:"latitude"`
-	Longitude   float64                 `json:"longitude"`
-	AvgRating   float64                 `json:"avg_rating"`
-	ReviewCount int64                   `json:"review_count"`
-	Images      []BeautyCenterImageResp `json:"images"`
-	Schedules   []WorkingHourResp       `json:"schedules"`
-	SocialMedia *SocialMediaResp        `json:"social_media,omitempty"`
+	Currency              string                  `json:"currency"`
+	ID                    uint                    `json:"id"`
+	Name                  string                  `json:"name"`
+	Address               string                  `json:"address"`
+	Email                 string                  `json:"email"`
+	Phone                 string                  `json:"phone"`
+	Url                   string                  `json:"url"`
+	Description           string                  `json:"description"`
+	IsActive              bool                    `json:"is_active"`
+	Latitude              float64                 `json:"latitude"`
+	Longitude             float64                 `json:"longitude"`
+	AvgRating             float64                 `json:"avg_rating"`
+	ReviewCount           int64                   `json:"review_count"`
+	DepositRequired       bool                    `json:"deposit_required"`
+	DepositAmount         float64                 `json:"deposit_amount"`
+	DepositPercent        float64                 `json:"deposit_percent"`
+	DepositTrustThreshold int                     `json:"deposit_trust_threshold"`
+	DepositHoldMinutes    int                     `json:"deposit_hold_minutes"`
+	DepositQRURL          string                  `json:"deposit_qr_url"`
+	Images                []BeautyCenterImageResp `json:"images"`
+	Schedules             []WorkingHourResp       `json:"schedules"`
+	SocialMedia           *SocialMediaResp        `json:"social_media,omitempty"`
 }
 
 type BeautyCenterImageResp struct {
