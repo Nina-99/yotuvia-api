@@ -35,7 +35,7 @@ func newFeedSUT(t *testing.T) (service.FeedPostService, *gorm.DB) {
 		repository.NewBeautyCenterRepositoryImpl(db),
 		repository.NewPersonnelRepositoryImpl(db),
 		repository.NewServiceRepositoryImpl(db),
-		nil,
+		nil, nil, nil, nil,
 	)
 	return svc, db
 }
@@ -147,14 +147,14 @@ func TestFeed_SuspendMatrix(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Public feed sees it before suspension.
-	public, _, err := svc.FindAll(1, 10)
+	public, _, err := svc.FindAll(1, 10, nil)
 	assert.NoError(t, err)
 	assert.Len(t, public, 1)
 
 	// Suspend with note.
 	assert.NoError(t, svc.SetSuspended(3, staffPost.ID, true, "Fuera de línea"))
 
-	public, _, _ = svc.FindAll(1, 10)
+	public, _, _ = svc.FindAll(1, 10, nil)
 	assert.Len(t, public, 0, "suspended hidden from public feed")
 
 	mine, err := svc.FindMine(staffActor)
@@ -166,7 +166,7 @@ func TestFeed_SuspendMatrix(t *testing.T) {
 
 	// Re-enable clears note and restores visibility.
 	assert.NoError(t, svc.SetSuspended(3, staffPost.ID, false, ""))
-	public, _, _ = svc.FindAll(1, 10)
+	public, _, _ = svc.FindAll(1, 10, nil)
 	assert.Len(t, public, 1)
 	mine, _ = svc.FindMine(staffActor)
 	assert.Empty(t, mine[0].ModerationNote)

@@ -15,13 +15,16 @@ func FeedPostRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 	repoBC := repository.NewBeautyCenterRepositoryImpl(db)
 	repoPersonnel := repository.NewPersonnelRepositoryImpl(db)
 	repoService := repository.NewServiceRepositoryImpl(db)
-	svc := service.NewFeedPostServiceImpl(repo, repoBC, repoPersonnel, repoService, validate)
+	repoLike := repository.NewPostLikeRepositoryImpl(db)
+	repoSaved := repository.NewSavedVideoRepositoryImpl(db)
+	repoComment := repository.NewVideoCommentRepositoryImpl(db)
+	svc := service.NewFeedPostServiceImpl(repo, repoBC, repoPersonnel, repoService, repoLike, repoSaved, repoComment, validate)
 	ctrl := controller.NewFeedPostController(svc)
 
 	posts := rg.Group("/feed-posts")
 	{
-		// Public: unified feed (active posts only) and center profiles.
-		posts.GET("", ctrl.FindAll)
+		// Public: unified feed (active posts only) — optional auth for personalization.
+		posts.GET("", middleware.OptionalJWTAuthMiddleware(), ctrl.FindAll)
 		posts.POST("/:id/views", ctrl.IncrementViews)
 		posts.GET("/center/:id", ctrl.FindByBeautyCenterID)
 

@@ -137,7 +137,15 @@ func (c *FeedPostController) FindAll(ctx *gin.Context) {
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
 
-	res, total, err := c.feedPostService.FindAll(page, limit)
+	// Optionally extract clientID if JWT is present (feed is public, auth is optional)
+	var clientID *uint
+	if id, exists := ctx.Get("clientID"); exists {
+		if uid, ok := id.(uint); ok {
+			clientID = &uid
+		}
+	}
+
+	res, total, err := c.feedPostService.FindAll(page, limit, clientID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

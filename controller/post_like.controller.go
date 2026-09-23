@@ -120,3 +120,28 @@ func (c *PostLikeController) CheckIfUserLiked(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, gin.H{"liked": liked})
 }
+
+// Toggle handles POST /post-likes/toggle — atomic like/unlike.
+func (c *PostLikeController) Toggle(ctx *gin.Context) {
+	var req struct {
+		FeedPostID uint `json:"feed_post_id" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	clientID, exists := ctx.Get("clientID")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	liked, err := c.postLikeService.Toggle(clientID.(uint), req.FeedPostID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"liked": liked})
+}

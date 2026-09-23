@@ -30,8 +30,56 @@ func (p *PostLikeRepositoryImpl) FindByPostAndClient(postID uint, clientID uint)
 	return &postLike, nil
 }
 
+// FindByPostAndClientUnscoped finds a like even if soft-deleted.
+func (p *PostLikeRepositoryImpl) FindByPostAndClientUnscoped(postID uint, clientID uint) (*models.PostLike, error) {
+	var postLike models.PostLike
+	err := p.Db.Unscoped().Where("feed_post_id = ? AND client_id = ?", postID, clientID).First(&postLike).Error
+	if err != nil {
+		return nil, err
+	}
+	return &postLike, nil
+}
+
+// Toggle atomically creates or restores a like.
+// Returns (true, nil) if now liked, (false, nil) if now unliked.
+func (p *PostLikeRepositoryImpl) Toggle(postID uint, clientID uint) (bool, error) {
+	// Find even soft-deleted records
+	existing, err := p.FindByPostAndClientUnscoped(postID, clientID)
+	if err == nil && existing != nil {
+		// Record exists — if active, soft-delete (unlike); if soft-deleted, restore (re-like)
+		if existing.DeletedAt.Time.IsZero() {
+			// Currently active → soft-delete (unlike)
+			if delErr := p.Db.Delete(existing).Error; delErr != nil {
+				return false, delErr
+			}
+			return false, nil
+		}
+		// Soft-deleted → restore (re-like)
+		if restoreErr := p.Db.Unscoped().Model(existing).Update("deleted_at", nil).Error; restoreErr != nil {
+			return false, restoreErr
+		}
+		return true, nil
+	}
+
+	// No record at all → create new like
+	postLike := models.PostLike{
+		FeedPostID: postID,
+		ClientID:   clientID,
+	}
+	if createErr := p.Db.Create(&postLike).Error; createErr != nil {
+		return false, createErr
+	}
+	return true, nil
+}
+
 func (p *PostLikeRepositoryImpl) FindByPostID(postID uint) ([]models.PostLike, error) {
 	var postLikes []models.PostLike
 	err := p.Db.Where("feed_post_id = ?", postID).Find(&postLikes).Error
+	return postLikes, err
+}
+
+func (p *PostLikeRepositoryImpl) FindByClientID(clientID uint) ([]models.PostLike, error) {
+	var postLikes []models.PostLike
+	err := p.Db.Where("client_id = ?", clientID).Order("created_at DESC").Find(&postLikes).Error
 	return postLikes, err
 }

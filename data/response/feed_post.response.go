@@ -24,4 +24,9 @@ type FeedPostResponse struct {
 	CategoryID     uint   `json:"category_id,omitempty"`
 	CategoryName   string `json:"category_name,omitempty"`
 	PersonnelName  string `json:"personnel_name,omitempty"`
+
+	// User interaction state (populated when clientID is available)
+	IsLiked       bool `json:"is_liked"`
+	IsSaved       bool `json:"is_saved"`
+	CommentsCount int  `json:"comments_count"`
 }

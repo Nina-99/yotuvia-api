@@ -13,7 +13,7 @@ type FeedPostService interface {
 	Delete(actor FeedActor, id uint) error
 	SetSuspended(centerID, postID uint, suspend bool, note string) error
 	IncrementViews(id uint) error
-	FindAll(page, limit int) ([]response.FeedPostResponse, int64, error)
+	FindAll(page, limit int, clientID *uint) ([]response.FeedPostResponse, int64, error)
 	FindMine(actor FeedActor) ([]response.FeedPostResponse, error)
 	FindByBeautyCenterID(centerID uint) ([]response.FeedPostResponse, error)
 }

@@ -31,6 +31,9 @@ type FeedPostServiceImpl struct {
 	BeautyCenterRepository repository.BeautyCenterRepository
 	PersonnelRepository    repository.PersonnelRepository
 	ServiceRepository      repository.ServiceRepository
+	PostLikeRepository     repository.PostLikeRepository
+	SavedVideoRepository   repository.SavedVideoRepository
+	CommentRepository      repository.VideoCommentRepository
 	Validate               *validator.Validate
 }
 
@@ -39,6 +42,9 @@ func NewFeedPostServiceImpl(
 	beautyCenterRepo repository.BeautyCenterRepository,
 	personnelRepo repository.PersonnelRepository,
 	serviceRepo repository.ServiceRepository,
+	postLikeRepo repository.PostLikeRepository,
+	savedVideoRepo repository.SavedVideoRepository,
+	commentRepo repository.VideoCommentRepository,
 	validate *validator.Validate,
 ) FeedPostService {
 	return &FeedPostServiceImpl{
@@ -46,6 +52,9 @@ func NewFeedPostServiceImpl(
 		BeautyCenterRepository: beautyCenterRepo,
 		PersonnelRepository:    personnelRepo,
 		ServiceRepository:      serviceRepo,
+		PostLikeRepository:     postLikeRepo,
+		SavedVideoRepository:   savedVideoRepo,
+		CommentRepository:      commentRepo,
 		Validate:               validate,
 	}
 }
@@ -213,14 +222,37 @@ func (s *FeedPostServiceImpl) IncrementViews(id uint) error {
 }
 
 // FindAll serves the PUBLIC feed: active posts only, newest first.
-func (s *FeedPostServiceImpl) FindAll(page, limit int) ([]response.FeedPostResponse, int64, error) {
+func (s *FeedPostServiceImpl) FindAll(page, limit int, clientID *uint) ([]response.FeedPostResponse, int64, error) {
 	posts, total, err := s.FeedPostRepository.FindAllActive(page, limit)
 	if err != nil {
 		return nil, total, err
 	}
+
+	// Pre-fetch user's likes and saves for batch (avoid N+1)
+	likedPostIDs := make(map[uint]bool)
+	savedPostIDs := make(map[uint]bool)
+	if clientID != nil {
+		if likes, err := s.PostLikeRepository.FindByClientID(*clientID); err == nil {
+			for _, l := range likes {
+				likedPostIDs[l.FeedPostID] = true
+			}
+		}
+		if saves, err := s.SavedVideoRepository.FindByClientID(*clientID); err == nil {
+			for _, sv := range saves {
+				savedPostIDs[sv.FeedPostID] = true
+			}
+		}
+	}
+
 	res := make([]response.FeedPostResponse, 0, len(posts))
 	for _, post := range posts {
-		res = append(res, s.mapToResponse(post))
+		resp := s.mapToResponse(post)
+		resp.IsLiked = likedPostIDs[post.ID]
+		resp.IsSaved = savedPostIDs[post.ID]
+		if cnt, err := s.CommentRepository.CountByFeedPostID(post.ID); err == nil {
+			resp.CommentsCount = int(cnt)
+		}
+		res = append(res, resp)
 	}
 	return res, total, nil
 }

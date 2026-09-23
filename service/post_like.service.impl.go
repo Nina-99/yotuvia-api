@@ -83,3 +83,8 @@ func (s *PostLikeServiceImpl) CheckIfUserLiked(clientID uint, postID uint) (bool
 	}
 	return true, nil
 }
+
+// Toggle atomically creates or removes a like, returns new liked state.
+func (s *PostLikeServiceImpl) Toggle(clientID uint, postID uint) (bool, error) {
+	return s.PostLikeRepository.Toggle(postID, clientID)
+}

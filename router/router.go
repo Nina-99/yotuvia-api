@@ -39,9 +39,11 @@ func SetupRouter() *gin.Engine {
 		PostLikeRoutes(api, db, validate)
 		ReservationRoutes(api, db, validate)
 		ReviewRoutes(api, db, validate)
+		SavedVideoRoutes(api, db, validate)
 		NotificationRoutes(api, db)
 		ServiceRoutes(api, db, validate)
 		SocialMediaRoutes(api, db, validate)
+		VideoWatchEventRoutes(api, db, validate)
 	}
 
 	UploadRoutes(api)
