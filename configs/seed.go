@@ -231,6 +231,104 @@ func BackfillLegacyVideos() {
 	utils.Log.Infof("[SEED] Backfilled %d/%d legacy videos into feed_posts; legacy table dropped", migrated, len(legacy))
 }
 
+// ── Demo service catalog (realistic Bolivian salon, prices in BOB) ──
+type demoServiceDef struct {
+	Name        string
+	Description string
+	Duration    int
+	Price       float64
+}
+
+type demoCategoryDef struct {
+	Name     string
+	Icon     string
+	Services []demoServiceDef
+}
+
+var demoCatalog = []demoCategoryDef{
+	{
+		Name: "Peluquería", Icon: "💇",
+		Services: []demoServiceDef{
+			{"Corte clásico", "Corte de cabello con lavado y peinado final.", 45, 60},
+			{"Corte + barba", "Corte completo más arreglo y perfilado de barba.", 60, 90},
+			{"Tinte completo", "Coloración completa con productos profesionales.", 120, 250},
+			{"Balayage", "Mechas balayage con matización y tratamiento.", 150, 350},
+		},
+	},
+	{
+		Name: "Manicuría", Icon: "💅",
+		Services: []demoServiceDef{
+			{"Manicuría semipermanente", "Esmaltado semipermanente con diseño base.", 60, 80},
+			{"Uñas acrílicas", "Set completo de uñas acrílicas esculpidas.", 90, 150},
+			{"Nail art", "Decoración personalizada por uña.", 30, 50},
+		},
+	},
+	{
+		Name: "Maquillaje", Icon: "💄",
+		Services: []demoServiceDef{
+			{"Maquillaje social", "Maquillaje para eventos con pestañas incluidas.", 60, 120},
+			{"Maquillaje de novia", "Prueba + maquillaje del día con retoques.", 120, 350},
+		},
+	},
+	{
+		Name: "Estética facial", Icon: "✨",
+		Services: []demoServiceDef{
+			{"Limpieza facial", "Limpieza profunda con hidratación final.", 60, 150},
+			{"Depilación de piernas", "Depilación completa con cera tibia.", 45, 100},
+			{"Masaje relajante", "Masaje corporal de relajación con aceites.", 60, 180},
+		},
+	},
+	{
+		Name: "Barbería", Icon: "💈",
+		Services: []demoServiceDef{
+			{"Corte degradado", "Fade con navaja y acabado a detalle.", 40, 70},
+			{"Afeitado a navaja", "Afeitado clásico con toalla caliente.", 30, 60},
+		},
+	},
+}
+
+// seedCenterServices creates categories + services for one demo center.
+// Rotation by index keeps chips varied across centers: all get Peluquería
+// + Manicuría, plus one rotating category (Estética / Maquillaje / Barbería).
+func seedCenterServices(centerID uint, index int) int {
+	total := 0
+	cats := []demoCategoryDef{demoCatalog[0], demoCatalog[1], demoCatalog[2+(index%3)]}
+	for _, c := range cats {
+		category := models.Category{
+			BeautyCenterID: centerID,
+			Name:           c.Name,
+			Description:    fmt.Sprintf("Servicios de %s.", c.Name),
+			Icon:           c.Icon,
+		}
+		if err := DB.Create(&category).Error; err != nil {
+			utils.Log.Errorf("[SEED] Failed to create category %q: %v", c.Name, err)
+			continue
+		}
+		// Higher-index centers get deeper menus (2-4 services per category)
+		n := 2 + (index % 2)
+		if n > len(c.Services) {
+			n = len(c.Services)
+		}
+		for _, s := range c.Services[:n] {
+			service := models.Service{
+				BeautyCenterID: centerID,
+				CategoryID:     category.ID,
+				Name:           s.Name,
+				Description:    s.Description,
+				Duration:       s.Duration,
+				Price:          s.Price,
+				IsActive:       true,
+			}
+			if err := DB.Create(&service).Error; err != nil {
+				utils.Log.Errorf("[SEED] Failed to create service %q: %v", s.Name, err)
+				continue
+			}
+			total++
+		}
+	}
+	return total
+}
+
 // SeedDemoCenters creates realistic demo beauty centers in Oruro, Bolivia
 // when SEED_DEMO_CENTERS=true. Idempotent — skips if centers already exist.
 // Only intended for development environments.
@@ -244,7 +342,33 @@ func SeedDemoCenters() {
 	var count int64
 	DB.Model(&models.BeautyCenter{}).Where("referral_code LIKE 'DEMO%'").Count(&count)
 	if count >= 16 {
-		utils.Log.Infof("[SEED] Demo centers already exist (%d), skipping", count)
+		// Backfill services for existing demo centers that lack them
+		var ids []uint
+		DB.Model(&models.BeautyCenter{}).Where("referral_code LIKE 'DEMO%'").Pluck("id", &ids)
+		backfilled := 0
+		for idx, id := range ids {
+			var catCount int64
+			DB.Model(&models.Category{}).Where("beauty_center_id = ?", id).Count(&catCount)
+			if catCount == 0 {
+				backfilled += seedCenterServices(id, idx)
+			}
+		}
+		if backfilled > 0 {
+			utils.Log.Infof("[SEED] Backfilled %d demo services", backfilled)
+		} else {
+			utils.Log.Infof("[SEED] Demo centers already exist (%d), skipping", count)
+		}
+		// Backfill deposit settings on the first 3 demo centers so the seña
+		// flow is testable. No QR seeded: a fake QR would misdirect real
+		// money, so the sheet falls back to coordinate-off-app text.
+		var demoIDs []uint
+		DB.Model(&models.BeautyCenter{}).Where("referral_code LIKE 'DEMO%'").Order("id").Limit(3).Pluck("id", &demoIDs)
+		for _, id := range demoIDs {
+			DB.Model(&models.BeautyCenter{}).Where("id = ? AND deposit_required = ?", id, false).Updates(map[string]interface{}{
+				"deposit_required": true, "deposit_percent": 30,
+				"deposit_trust_threshold": 70, "deposit_hold_minutes": 30,
+			})
+		}
 		return
 	}
 
@@ -382,6 +506,13 @@ func SeedDemoCenters() {
 			IsActive:     true,
 			ReferralCode: fmt.Sprintf("DEMO%03d", i+1),
 		}
+		// First 3 demo centers require seña so the deposit flow is testable.
+		if i < 3 {
+			center.DepositRequired = true
+			center.DepositPercent = 30
+			center.DepositTrustThreshold = 70
+			center.DepositHoldMinutes = 30
+		}
 
 		if err := DB.Create(&center).Error; err != nil {
 			utils.Log.Errorf("[SEED] Failed to create demo center %q: %v", def.Name, err)
@@ -440,6 +571,9 @@ func SeedDemoCenters() {
 				EndTime:        fmt.Sprintf("%02d:00", endH),
 			})
 		}
+
+		// ── Categories + Services ────────────────
+		svcCount := seedCenterServices(centerID, i)
 
 		// ── Reviews (use real client IDs) ───────────
 		for r := 0; r < def.ReviewCount; r++ {
@@ -515,8 +649,8 @@ func SeedDemoCenters() {
 			DB.Create(&fav)
 		}
 
-		utils.Log.Infof("[SEED] Created demo center: %s (%d reviews, %d reservations, %d posts, %d favs)",
-			def.Name, def.ReviewCount, def.ResCount, def.PostCount, def.FavCount)
+		utils.Log.Infof("[SEED] Created demo center: %s (%d services, %d reviews, %d reservations, %d posts, %d favs)",
+			def.Name, svcCount, def.ReviewCount, def.ResCount, def.PostCount, def.FavCount)
 	}
 
 	utils.Log.Infof("[SEED] ✅ Seeded %d demo beauty centers in Oruro, Bolivia", len(centers))
