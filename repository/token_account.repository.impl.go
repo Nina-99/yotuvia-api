@@ -133,6 +133,15 @@ func (r *TokenAccountRepositoryImpl) AddTokensInTx(tx *gorm.DB, accountID uint, 
 	return &account, nil
 }
 
+// Transaction executes fn inside a GORM transaction, committing on nil
+// return or rolling back on error. Used by composite operations that
+// must atomically combine a status flip with a token debit.
+func (r *TokenAccountRepositoryImpl) Transaction(fn func(tx *gorm.DB) error) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		return fn(tx)
+	})
+}
+
 // DebitInTx performs the overdraft-aware consumption inside a CALLER-managed
 // transaction (feat-token-economy-config D4): locked read, guard
 // `balance ≥ amount - overdraft`, decrement, TotalConsumed accumulation and

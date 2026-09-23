@@ -50,13 +50,6 @@ func TokenRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate)
 		tokens.GET("/referrals", ctrl.GetReferrals)
 	}
 
-	// Config endpoints (public or auth depending on needs)
-	config := rg.Group("/config")
-	config.Use(middleware.JWTAuthMiddleware())
-	{
-		config.GET("/tiers", ctrl.GetTierConfig)
-	}
-
 	// Admin top-up processing (design D5): the group gains RequireRole so
 	// PUT /admin/tokens/topups/:id (and AdminListTopUps, same group) is only
 	// reachable by a beauty_center; ownership is re-proven inside the service.

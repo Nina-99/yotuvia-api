@@ -10,6 +10,7 @@ import (
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/utils"
+	"gorm.io/gorm"
 )
 
 type TokenAccountServiceImpl struct {
@@ -142,19 +143,22 @@ func (s *TokenAccountServiceImpl) Consume(beautyCenterID uint, amountMilli int64
 		return errors.New("token account not found")
 	}
 
+	overdraftMilli := utils.ToMilli(s.computeOverdraft(beautyCenterID))
 	var refPtr *uint
 	if referenceID != 0 {
 		ref := referenceID
 		refPtr = &ref
 	}
 
-	updated, err := s.accountRepo.Consume(context.Background(), account.ID, amountMilli, "consumption", description, refPtr)
+	err = s.accountRepo.Transaction(func(tx *gorm.DB) error {
+		return s.accountRepo.DebitInTx(tx, account.ID, amountMilli, overdraftMilli, "consumption", description, refPtr)
+	})
 	if err != nil {
 		return err
 	}
 
-	utils.Log.Infof("[TOKEN] Center %d consumed %.2f YOTTUs. Balance: %.2f",
-		beautyCenterID, utils.FromMilli(amountMilli), utils.FromMilli(updated.Balance))
+	utils.Log.Infof("[TOKEN] Center %d consumed %.2f YOTTUs (with overdraft).",
+		beautyCenterID, utils.FromMilli(amountMilli))
 	return nil
 }
 

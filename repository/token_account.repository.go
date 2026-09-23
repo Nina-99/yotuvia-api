@@ -40,4 +40,9 @@ type TokenAccountRepository interface {
 	// transaction rolls back with it.
 	DebitInTx(tx *gorm.DB, accountID uint, amountMilli int64, overdraftMilli int64,
 		txnType string, description string, referenceID *uint) error
+
+	// Transaction executes fn inside a GORM transaction, committing on
+	// nil return or rolling back on error. Used by composite operations
+	// that must atomically combine a status flip with a token debit.
+	Transaction(fn func(tx *gorm.DB) error) error
 }

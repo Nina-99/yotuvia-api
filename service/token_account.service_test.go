@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/utils"
@@ -177,6 +178,55 @@ func TestTokenAccountService_CanConsume(t *testing.T) {
 			assert.Equal(t, tt.canConsume, canConsume)
 		})
 	}
+}
+
+func TestTokenAccountService_Consume(t *testing.T) {
+	// Consume succeeds when balance is 0 but overdraft covers the charge
+	// (new-center tier = -5 YOTTU = 5000 milli).
+	t.Run("consume with zero balance and overdraft", func(t *testing.T) {
+		db := setupTokenTestDB(t)
+		createTestCenter(db, 1)
+		svc := newTokenTestService(db)
+		svc.GetOrCreate(1, "USD")
+
+		// balance is 0, overdraft is 5000. Consume 3000 should succeed.
+		err := svc.Consume(1, 3_000, 0, "test consume")
+		assert.NoError(t, err)
+
+		balance, _, _, err := svc.GetBalance(1)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(-3_000), balance, "balance should be -3 YOTTUs after consuming with overdraft")
+	})
+
+	// Consume fails when balance + overdraft < charge.
+	t.Run("consume exceeds overdraft", func(t *testing.T) {
+		db := setupTokenTestDB(t)
+		createTestCenter(db, 1)
+		svc := newTokenTestService(db)
+		svc.GetOrCreate(1, "USD")
+
+		// balance is 0, overdraft is 5000. Consume 6000 should fail.
+		err := svc.Consume(1, 6_000, 0, "test consume overdraft exceeded")
+		assert.ErrorIs(t, err, apperrors.ErrInsufficientBalance)
+	})
+
+	// Consume succeeds when positive balance covers the charge.
+	t.Run("consume with positive balance", func(t *testing.T) {
+		db := setupTokenTestDB(t)
+		createTestCenter(db, 1)
+		svc := newTokenTestService(db)
+		svc.GetOrCreate(1, "USD")
+
+		err := svc.AddTokens(1, 100_000, "topup", 1, "top-up")
+		assert.NoError(t, err)
+
+		err = svc.Consume(1, 50_000, 0, "test consume positive")
+		assert.NoError(t, err)
+
+		balance, _, _, err := svc.GetBalance(1)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(50_000), balance)
+	})
 }
 
 func TestTokenAccountService_AddTokens(t *testing.T) {
