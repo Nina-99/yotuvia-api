@@ -27,3 +27,13 @@ type CreateAdminReservationRequest struct {
 type CancelReservationRequest struct {
 	Reason string `json:"reason"`
 }
+
+// JoinWaitlistRequest takes a place in line for a concrete slot. Date is
+// YYYY-MM-DD, times HH:MM. The claim rebooks exactly these parameters.
+type JoinWaitlistRequest struct {
+	BeautyCenterID uint   `json:"beauty_center_id" validate:"required"`
+	Date           string `json:"date" validate:"required"`
+	StartTime      string `json:"start_time" validate:"required"`
+	PersonnelID    uint   `json:"personnel_id" validate:"required"`
+	ServiceIDs     []uint `json:"service_ids" validate:"required,min=1"`
+}

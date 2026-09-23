@@ -33,7 +33,16 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 
 	marketCfgSvc := service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db))
 	svc := service.NewReservationServiceImpl(repo, serviceRepo, personnelRepo, repository.NewClientRepositoryImpl(db), accountRepo, notifSvc, loyaltySvc, accountSvc, missionSvc, marketCfgSvc, validate)
-	ctrl := controller.NewReservationController(svc)
+	waitlistSvc := service.NewWaitlistServiceImpl(
+		repository.NewWaitlistRepositoryImpl(db),
+		repo,
+		svc,
+		serviceRepo,
+		repository.NewClientRepositoryImpl(db),
+		notifSvc,
+		validate,
+	)
+	ctrl := controller.NewReservationController(svc, waitlistSvc)
 
 	reservation := rg.Group("/reservation")
 	reservation.Use(middleware.JWTAuthMiddleware())
@@ -54,6 +63,13 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 			clientOnly.GET("/:clientId/upcoming", ctrl.FindUpcomingByClient)
 		}
 		reservation.PATCH("/:id/cancel", middleware.RequireRole("client"), ctrl.Cancel)
+
+		// Waitlist (Phase 3, client-owned). Static /mine and /:id/claim win
+		// over /:id in Gin's tree (same pattern as /me above).
+		reservation.POST("/waitlist", middleware.RequireRole("client"), ctrl.JoinWaitlist)
+		reservation.GET("/waitlist/mine", middleware.RequireRole("client"), ctrl.ListMyWaitlist)
+		reservation.DELETE("/waitlist/:id", middleware.RequireRole("client"), ctrl.LeaveWaitlist)
+		reservation.POST("/waitlist/:id/claim", middleware.RequireRole("client"), ctrl.ClaimWaitlist)
 
 		// beauty_center-only (admin)
 		admin := reservation.Group("", middleware.RequireRole("beauty_center"))

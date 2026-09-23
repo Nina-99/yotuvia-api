@@ -63,6 +63,7 @@ func DBConnection() {
 		&models.PaymentConfig{},
 		&models.SavedVideo{},
 		&models.VideoWatchEvent{},
+		&models.WaitlistEntry{},
 	}
 
 	for _, model := range list_models {

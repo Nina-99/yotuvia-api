@@ -16,10 +16,11 @@ import (
 
 type ReservationController struct {
 	reservationService service.ReservationService
+	waitlistService    service.WaitlistService
 }
 
-func NewReservationController(service service.ReservationService) *ReservationController {
-	return &ReservationController{reservationService: service}
+func NewReservationController(svc service.ReservationService, waitlistSvc service.WaitlistService) *ReservationController {
+	return &ReservationController{reservationService: svc, waitlistService: waitlistSvc}
 }
 
 // writeError maps any service error through apperrors.MapToHTTP so clients get
@@ -146,6 +147,14 @@ func (c *ReservationController) Cancel(ctx *gin.Context) {
 	if err := c.reservationService.Cancel(reservationID, clientID, req.Reason); err != nil {
 		c.writeError(ctx, err)
 		return
+	}
+
+	// Waitlist backfill (Phase 3, best-effort): a freed slot is offered to
+	// the first waiter before the client even sees the confirmation.
+	if c.waitlistService != nil {
+		if doomed, ferr := c.reservationService.FindById(reservationID, clientID, 0, "client"); ferr == nil && doomed != nil {
+			_, _ = c.waitlistService.OfferForFreedSlot(doomed.BeautyCenterID, doomed.Date, doomed.StartTime)
+		}
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Reservation cancelled successfully"})
@@ -474,6 +483,102 @@ func (c *ReservationController) FindMyReservations(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, mapReservationsToResponses(reservations))
+}
+
+// ──────────────────────────────────────────────
+//  WAITLIST (Phase 3) — client-owned queue
+// ──────────────────────────────────────────────
+
+// JoinWaitlist takes a place in line for a concrete future slot:
+// POST /reservation/waitlist (client).
+func (c *ReservationController) JoinWaitlist(ctx *gin.Context) {
+	if c.waitlistService == nil {
+		ctx.JSON(http.StatusNotImplemented, gin.H{"error": "waitlist unavailable"})
+		return
+	}
+	clientID := ctx.GetUint("clientID")
+
+	var req request.JoinWaitlistRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	entry, err := c.waitlistService.Join(req, clientID)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, entry)
+}
+
+// LeaveWaitlist abandons the caller's own entry:
+// DELETE /reservation/waitlist/:id (client).
+func (c *ReservationController) LeaveWaitlist(ctx *gin.Context) {
+	if c.waitlistService == nil {
+		ctx.JSON(http.StatusNotImplemented, gin.H{"error": "waitlist unavailable"})
+		return
+	}
+	clientID := ctx.GetUint("clientID")
+
+	entryID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	if err := c.waitlistService.Leave(entryID, clientID); err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Waitlist entry cancelled"})
+}
+
+// ListMyWaitlist returns the caller's live entries:
+// GET /reservation/waitlist/mine (client). Static path wins over /:id.
+func (c *ReservationController) ListMyWaitlist(ctx *gin.Context) {
+	if c.waitlistService == nil {
+		ctx.JSON(http.StatusNotImplemented, gin.H{"error": "waitlist unavailable"})
+		return
+	}
+	clientID := ctx.GetUint("clientID")
+
+	entries, err := c.waitlistService.ListMine(clientID)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	if entries == nil {
+		entries = []models.WaitlistEntry{}
+	}
+
+	ctx.JSON(http.StatusOK, entries)
+}
+
+// ClaimWaitlist books the offered slot for the owning client:
+// POST /reservation/waitlist/:id/claim (client).
+func (c *ReservationController) ClaimWaitlist(ctx *gin.Context) {
+	if c.waitlistService == nil {
+		ctx.JSON(http.StatusNotImplemented, gin.H{"error": "waitlist unavailable"})
+		return
+	}
+	clientID := ctx.GetUint("clientID")
+
+	entryID, ok := parsePositiveID(ctx.Param("id"))
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	reservation, err := c.waitlistService.Claim(entryID, clientID)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, mapToReservationResponse(reservation))
 }
 
 // ──────────────────────────────────────────────
