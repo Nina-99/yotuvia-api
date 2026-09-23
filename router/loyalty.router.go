@@ -11,7 +11,8 @@ import (
 
 func LoyaltyRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
 	repo := repository.NewLoyaltyRepositoryImpl(db)
-	svc := service.NewLoyaltyService(repo,
+	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
+	svc := service.NewLoyaltyService(repo, centerRepo,
 		service.NewTokenMissionServiceImpl(
 			repository.NewTokenMissionRepositoryImpl(db), nil,
 			repository.NewTokenAccountRepositoryImpl(db),
@@ -22,5 +23,11 @@ func LoyaltyRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validat
 	{
 		loyalty.POST("", ctrl.CreateProgram)
 		loyalty.GET("/client/:clientId", ctrl.GetCLientCards)
+		loyalty.GET("/center/:centerId", ctrl.FindByCenter)
+		loyalty.GET("/center/:centerId/settings", ctrl.GetCenterSettings)
+		loyalty.PUT("/center/:centerId/settings", ctrl.UpdateCenterSettings)
+		loyalty.PUT("/:id", ctrl.UpdateProgram)
+		loyalty.DELETE("/:id", ctrl.DeleteProgram)
+		loyalty.PATCH("/:id/toggle", ctrl.ToggleProgram)
 	}
 }

@@ -39,6 +39,26 @@ func (s *stubLoyalty) AddPunch(uint, uint, uint, uint) error {
 func (s *stubLoyalty) GetClientsCards(uint) ([]response.PunchCardResponse, error) {
 	return nil, nil
 }
+func (s *stubLoyalty) HasPendingRedemption(uint, uint, uint) bool { return false }
+func (s *stubLoyalty) CalculateRedemption(uint, uint, uint) (float64, uint, error) {
+	return 0, 0, nil
+}
+func (s *stubLoyalty) FinalizeRedemption(uint, uint) error { return nil }
+func (s *stubLoyalty) FindRedemptionByReservation(uint) bool { return false }
+func (s *stubLoyalty) FindProgramsByCenter(uint) ([]response.LoyaltyProgramResponse, error) {
+	return nil, nil
+}
+func (s *stubLoyalty) UpdateProgram(uint, request.UpdateLoyaltyProgramRequest) (response.LoyaltyProgramResponse, error) {
+	return response.LoyaltyProgramResponse{}, nil
+}
+func (s *stubLoyalty) DeleteProgram(uint) error             { return nil }
+func (s *stubLoyalty) ToggleProgram(uint, bool) error       { return nil }
+func (s *stubLoyalty) GetCenterSettings(uint) (response.LoyaltySettingsResponse, error) {
+	return response.LoyaltySettingsResponse{}, nil
+}
+func (s *stubLoyalty) UpdateCenterSettings(uint, request.UpdateLoyaltySettingsRequest) error {
+	return nil
+}
 
 type stubMission struct {
 	triggerCalls int

@@ -31,6 +31,15 @@ type BeautyCenter struct {
 	// itself is a platform-ops action until an admin surface exists.
 	VerifiedAt *time.Time `json:"verified_at,omitempty"`
 
+	// Loyalty settings — center-level configuration for the stamp card system.
+	// LoyaltyEnabled: when false, no stamps are collected and no rewards are
+	// redeemed (default: false — loyalty is opt-in per center).
+	// LoyaltyPerPersonnel: when true, stamps are tracked per personnel member
+	// (client gets a separate card for each stylist). When false (default),
+	// stamps are tracked per service regardless of who performed it.
+	LoyaltyEnabled      bool `gorm:"default:false" json:"loyalty_enabled"`
+	LoyaltyPerPersonnel bool `gorm:"default:false" json:"loyalty_per_personnel"`
+
 	AvgRating   float64 `gorm:"-" json:"avg_rating"`
 	ReviewCount int64   `gorm:"-" json:"review_count"`
 

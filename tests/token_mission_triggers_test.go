@@ -165,10 +165,13 @@ func TestTrigger_StampActivated(t *testing.T) {
 	assert.NoError(t, db.Create(mission).Error)
 
 	svc := service.NewLoyaltyService(
-		repository.NewLoyaltyRepositoryImpl(db), missionSvc, validator.New())
+		repository.NewLoyaltyRepositoryImpl(db),
+		repository.NewBeautyCenterRepositoryImpl(db),
+		missionSvc, validator.New())
 
+	serviceID := uint(1)
 	resp, err := svc.CreateProgram(request.CreateLoyaltyProgrmaRequest{
-		BeautyCenterID: 1, ServiceID: 1, RequiredSteps: 5,
+		BeautyCenterID: 1, ServiceID: &serviceID, RequiredSteps: 5,
 		RewardType: "percentage_discount", DiscountValue: 10,
 	})
 	assert.NoError(t, err)
