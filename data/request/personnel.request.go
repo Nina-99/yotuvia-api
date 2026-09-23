@@ -1,9 +1,10 @@
 package request
 
 type PersonnelImageRequest struct {
-	ImageUrl string `json:"image_url" validate:"required,url"`
-	IsCover  bool   `json:"is_cover"`
-	Position int    `json:"position"`
+	ImageUrl  string `json:"image_url" validate:"required,url"`
+	IsCover   bool   `json:"is_cover"`
+	IsProfile bool   `json:"is_profile"`
+	Position  int    `json:"position"`
 }
 
 type CreatePersonnelRequest struct {

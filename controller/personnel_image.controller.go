@@ -19,6 +19,31 @@ func NewPersonnelImageController(personnelImageService service.PersonnelImageSer
 	}
 }
 
+func (c *PersonnelImageController) Upload(ctx *gin.Context) {
+	personnelID := ctx.GetUint("clientID")
+	if personnelID == 0 {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	isCover := ctx.PostForm("is_cover") == "true"
+	isProfile := ctx.PostForm("is_profile") == "true"
+
+	file, err := ctx.FormFile("image")
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "image file is required"})
+		return
+	}
+
+	res, err := c.PersonnelImageService.Upload(personnelID, file, isCover, isProfile)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, res)
+}
+
 func (c *PersonnelImageController) Create(ctx *gin.Context) {
 	var req request.CreatePersonnelImageRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {

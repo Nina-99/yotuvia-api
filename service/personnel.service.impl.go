@@ -83,6 +83,7 @@ func (s *PersonnelServiceImpl) applyImages(personnel *models.Personnel, images [
 			PersonnelID: personnel.ID,
 			ImageUrl:    imgReq.ImageUrl,
 			IsCover:     imgReq.IsCover,
+			IsProfile:   imgReq.IsProfile,
 			Position:    imgReq.Position,
 		})
 	}
@@ -178,6 +179,7 @@ func (s *PersonnelServiceImpl) mapToResponse(p models.Personnel) response.Person
 			ID:        img.ID,
 			ImageUrl:  img.ImageUrl,
 			IsCover:   img.IsCover,
+			IsProfile: img.IsProfile,
 			Position:  img.Position,
 			CreatedAt: img.CreatedAt,
 		})

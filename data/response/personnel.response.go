@@ -7,6 +7,7 @@ type PersonnelImageResponse struct {
 	PersonnelID uint      `json:"personnel_id"`
 	ImageUrl    string    `json:"image_url"`
 	IsCover     bool      `json:"is_cover"`
+	IsProfile   bool      `json:"is_profile"`
 	Position    int       `json:"position"`
 	CreatedAt   time.Time `json:"created_at"`
 }

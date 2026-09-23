@@ -17,6 +17,7 @@ func PersonnelImageRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.
 	ctrl := controller.NewPersonnelImageController(svc)
 	personnelImages := rg.Group("/personnel-images", middleware.JWTAuthMiddleware())
 	{
+		personnelImages.POST("/upload", ctrl.Upload)
 		personnelImages.POST("", ctrl.Create)
 		personnelImages.GET("/:id", ctrl.FindByID)
 		personnelImages.DELETE("/:id", ctrl.Delete)
