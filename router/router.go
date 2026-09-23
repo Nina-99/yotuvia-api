@@ -37,6 +37,7 @@ func SetupRouter() *gin.Engine {
 		PersonnelImageRoutes(api, db, validate)
 		PersonnelServiceRoutes(api, db, validate)
 		PostLikeRoutes(api, db, validate)
+		PromotionRoutes(api, db, validate)
 		ReservationRoutes(api, db, validate)
 		ReviewRoutes(api, db, validate)
 		SavedVideoRoutes(api, db, validate)
