@@ -48,6 +48,8 @@ func setupRouterAuthzDB(t *testing.T) *gorm.DB {
 		&models.ReservationService{}, &models.Review{}, &models.Service{},
 		&models.SocialMedia{}, &models.WorkingHour{}, &models.PersonnelInvitation{}, &models.Notification{}, &models.PushDevice{},
 		&models.MarketConfig{}, &models.VideoComment{}, &models.SavedVideo{}, &models.VideoWatchEvent{},
+		&models.LoyaltyRedemption{}, &models.UserSession{}, &models.Promotion{},
+		&models.PromotionRedemption{}, &models.PaymentConfig{}, &models.WaitlistEntry{},
 	}
 	for _, m := range modelsToMigrate {
 		if err := db.AutoMigrate(m); err != nil {
