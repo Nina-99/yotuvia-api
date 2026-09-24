@@ -148,6 +148,14 @@ func newEconomyVerifySUT(t *testing.T) (*gorm.DB, service.ReservationService) {
 	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, nil, missionSvc, notifSvc)
 	missionSvc = service.NewTokenMissionServiceImpl(missionRepo, accountSvc, accountRepo)
 	marketSvc := service.NewMarketConfigServiceImpl(marketRepo)
+	// VerifyQR reaches LoyaltyService.GetCenterSettings on every successful
+	// scan, so a nil here panics. Wire the real service (production does).
+	loyaltySvc := service.NewLoyaltyService(
+		repository.NewLoyaltyRepositoryImpl(db),
+		repository.NewBeautyCenterRepositoryImpl(db),
+		missionSvc,
+		validator.New(),
+	)
 
 	reservationRepo := repository.NewReservationRepositoryImpl(db)
 	svc := service.NewReservationServiceImpl(
@@ -157,7 +165,7 @@ func newEconomyVerifySUT(t *testing.T) (*gorm.DB, service.ReservationService) {
 		repository.NewClientRepositoryImpl(db),
 		accountRepo,
 		notifSvc,
-		nil,
+		loyaltySvc,
 		nil, // PromotionService stub not needed for these flows
 		accountSvc,
 		missionSvc,

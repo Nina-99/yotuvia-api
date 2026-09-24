@@ -14,6 +14,7 @@ import (
 	"github.com/Nina-99/yottu-api/service"
 	"github.com/Nina-99/yottu-api/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -31,7 +32,12 @@ func setupFeedHTTPRouter(t *testing.T, db *gorm.DB, role string, userID, centerI
 	bcRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	personnelRepo := repository.NewPersonnelRepositoryImpl(db)
 	serviceRepo := repository.NewServiceRepositoryImpl(db)
-	svc := service.NewFeedPostServiceImpl(feedRepo, bcRepo, personnelRepo, serviceRepo, nil, nil, nil, nil)
+	// Real like/save/comment repositories: FindAll dereferences all three as
+	// soon as a client id is present, so nil here panics on GET /feed-posts.
+	likeRepo := repository.NewPostLikeRepositoryImpl(db)
+	savedRepo := repository.NewSavedVideoRepositoryImpl(db)
+	commentRepo := repository.NewVideoCommentRepositoryImpl(db)
+	svc := service.NewFeedPostServiceImpl(feedRepo, bcRepo, personnelRepo, serviceRepo, likeRepo, savedRepo, commentRepo, validator.New())
 	ctrl := controller.NewFeedPostController(svc)
 
 	r := gin.New()

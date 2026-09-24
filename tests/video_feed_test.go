@@ -12,6 +12,7 @@ import (
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/service"
 	"github.com/Nina-99/yottu-api/utils"
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -35,7 +36,10 @@ func newFeedSUT(t *testing.T) (service.FeedPostService, *gorm.DB) {
 		repository.NewBeautyCenterRepositoryImpl(db),
 		repository.NewPersonnelRepositoryImpl(db),
 		repository.NewServiceRepositoryImpl(db),
-		nil, nil, nil, nil,
+		repository.NewPostLikeRepositoryImpl(db),
+		repository.NewSavedVideoRepositoryImpl(db),
+		repository.NewVideoCommentRepositoryImpl(db),
+		validator.New(),
 	)
 	return svc, db
 }
