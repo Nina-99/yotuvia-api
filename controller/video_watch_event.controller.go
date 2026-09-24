@@ -66,7 +66,7 @@ func (c *VideoWatchEventController) GetPersonalizedFeed(ctx *gin.Context) {
 	}
 
 	// Get personalized IDs
-	ids, err := c.watchEventService.GetPersonalizedFeed(clientID.(uint), 50, nil)
+	ids, err := c.watchEventService.GetPersonalizedFeed(clientIDUint, 50)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
