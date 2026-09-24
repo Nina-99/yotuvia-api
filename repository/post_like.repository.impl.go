@@ -83,3 +83,29 @@ func (p *PostLikeRepositoryImpl) FindByClientID(clientID uint) ([]models.PostLik
 	err := p.Db.Where("client_id = ?", clientID).Order("created_at DESC").Find(&postLikes).Error
 	return postLikes, err
 }
+
+// CountByFeedPostIDs runs one grouped COUNT for a page of posts. GORM's default
+// scope excludes soft-deleted rows, so the result is the number of LIVE likes.
+func (p *PostLikeRepositoryImpl) CountByFeedPostIDs(ids []uint) (map[uint]int64, error) {
+	counts := make(map[uint]int64, len(ids))
+	if len(ids) == 0 {
+		return counts, nil
+	}
+
+	var rows []struct {
+		FeedPostID uint
+		Count      int64
+	}
+	err := p.Db.Model(&models.PostLike{}).
+		Select("feed_post_id, COUNT(*) AS count").
+		Where("feed_post_id IN ?", ids).
+		Group("feed_post_id").
+		Scan(&rows).Error
+	if err != nil {
+		return counts, err
+	}
+	for _, row := range rows {
+		counts[row.FeedPostID] = row.Count
+	}
+	return counts, nil
+}

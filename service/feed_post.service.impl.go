@@ -269,6 +269,7 @@ func (s *FeedPostServiceImpl) FindAll(page, limit int, clientID *uint) ([]respon
 
 	// One grouped COUNT per page instead of one COUNT per post (N+1).
 	s.attachCommentCounts(res)
+	s.attachRealLikeCounts(res)
 	return res, total, nil
 }
 
@@ -292,6 +293,27 @@ func (s *FeedPostServiceImpl) attachCommentCounts(res []response.FeedPostRespons
 	}
 }
 
+// attachRealLikeCounts overwrites the stored FeedPost.LikesCount (vestigial —
+// only the seeder ever wrote it) with the real number of live post_likes rows
+// for the page. One grouped query keeps the feed endpoints correct without an
+// N+1, and the value can never drift from post_likes.
+func (s *FeedPostServiceImpl) attachRealLikeCounts(res []response.FeedPostResponse) {
+	if len(res) == 0 {
+		return
+	}
+	ids := make([]uint, 0, len(res))
+	for i := range res {
+		ids = append(ids, res[i].ID)
+	}
+	counts, err := s.PostLikeRepository.CountByFeedPostIDs(ids)
+	if err != nil {
+		return
+	}
+	for i := range res {
+		res[i].LikesCount = int(counts[res[i].ID])
+	}
+}
+
 // FindMine returns every post authored by the actor (staff id or center),
 // including suspended ones, for management surfaces.
 func (s *FeedPostServiceImpl) FindMine(actor FeedActor) ([]response.FeedPostResponse, error) {
@@ -311,6 +333,7 @@ func (s *FeedPostServiceImpl) FindMine(actor FeedActor) ([]response.FeedPostResp
 	for _, post := range posts {
 		res = append(res, s.mapToResponse(post))
 	}
+	s.attachRealLikeCounts(res)
 	return res, nil
 }
 
@@ -323,6 +346,7 @@ func (s *FeedPostServiceImpl) FindByBeautyCenterID(centerID uint) ([]response.Fe
 	for _, post := range posts {
 		res = append(res, s.mapToResponse(post))
 	}
+	s.attachRealLikeCounts(res)
 	return res, nil
 }
 
