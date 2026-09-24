@@ -54,7 +54,11 @@ func (s *stubLoyalty) UpdateProgram(uint, request.UpdateLoyaltyProgramRequest) (
 func (s *stubLoyalty) DeleteProgram(uint) error             { return nil }
 func (s *stubLoyalty) ToggleProgram(uint, bool) error       { return nil }
 func (s *stubLoyalty) GetCenterSettings(uint) (response.LoyaltySettingsResponse, error) {
-	return response.LoyaltySettingsResponse{}, nil
+	// VerifyQR gates punching on the center's loyalty setting. The zero value
+	// reports loyalty DISABLED, which would silently skip the punch block; this
+	// stub stands in for an opted-in center so the stamp path is exercised.
+	// Idempotent re-scans return before this call (no-op), so they still punch 0.
+	return response.LoyaltySettingsResponse{LoyaltyEnabled: true}, nil
 }
 func (s *stubLoyalty) UpdateCenterSettings(uint, request.UpdateLoyaltySettingsRequest) error {
 	return nil
