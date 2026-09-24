@@ -25,10 +25,20 @@ func TestTokenLedger_ConsumeFailureReturnsErrorNoGraceRow(t *testing.T) {
 	notifSvc := service.NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db))
 	svc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
 
-	acct := &models.TokenAccount{BeautyCenterID: 1, Balance: 5000, Currency: "USD"}
+	// Deterministic overdraft floor: computeOverdraft grants the Premium tier
+	// (-30 YOTTU = 30_000 milli) to any center with TotalPurchased >= 500_000
+	// milli (500 YOTTU), independent of account age or top-up count. Seeding it
+	// pins the floor instead of leaning on the "new center" magic default.
+	//
+	//   floor = balance + overdraft = 5_000 + 30_000 = 35_000 milli
+	//
+	// Consuming one milli past the floor must fail atomically (the earlier
+	// 10_000 consume only reached the OLD no-overdraft floor of 5_000 and is no
+	// longer an overdraw — that assertion was stale, not the code).
+	acct := &models.TokenAccount{BeautyCenterID: 1, Balance: 5000, TotalPurchased: 500_000, Currency: "USD"}
 	assert.NoError(t, accountRepo.Create(acct))
 
-	err := svc.Consume(1, 10000, 99, "overdraw attempt")
+	err := svc.Consume(1, 35_001, 99, "overdraw attempt")
 	assert.ErrorIs(t, err, apperrors.ErrInsufficientBalance)
 
 	// No grace row and balance unchanged.
@@ -39,6 +49,47 @@ func TestTokenLedger_ConsumeFailureReturnsErrorNoGraceRow(t *testing.T) {
 	got, err := accountRepo.FindByBeautyCenterID(1)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(5000), got.Balance)
+}
+
+// TestTokenLedger_ConsumeAtOverdraftFloor pins the exact boundary of the
+// overdraft-aware guard from the accepting side: a consumption that lands the
+// balance precisely on -overdraft succeeds, and the next milli is rejected
+// without touching the balance. The grace-row test probes the same floor from
+// the rejecting side; together they prove the guard is `balance >= amount -
+// overdraft` with no off-by-one.
+func TestTokenLedger_ConsumeAtOverdraftFloor(t *testing.T) {
+	db := newTokenLedgerDB(t)
+	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
+	topUpRepo := repository.NewTokenTopUpRepositoryImpl(db)
+	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
+	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
+	missionSvc := service.NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
+	notifSvc := service.NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db))
+	svc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
+
+	// Premium tier (-30 YOTTU = 30_000 milli) via TotalPurchased >= 500_000.
+	// Balance 5_000 + overdraft 30_000 = floor 35_000; consuming exactly 35_000
+	// lands the balance on -30_000.
+	acct := &models.TokenAccount{BeautyCenterID: 1, Balance: 5000, TotalPurchased: 500_000, Currency: "USD"}
+	assert.NoError(t, accountRepo.Create(acct))
+
+	balance, overdraft, _, err := svc.GetBalance(1)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(5000), balance)
+	assert.Equal(t, int64(30_000), overdraft)
+
+	// Exactly the floor: accepted, balance becomes the overdraft floor.
+	assert.NoError(t, svc.Consume(1, 35_000, 0, "consume to the floor"))
+	balance, _, _, err = svc.GetBalance(1)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(-30_000), balance, "balance may go as low as -overdraft, no further")
+
+	// One milli past the floor: rejected, balance unchanged.
+	err = svc.Consume(1, 1, 0, "one milli past the floor")
+	assert.ErrorIs(t, err, apperrors.ErrInsufficientBalance)
+	balance, _, _, err = svc.GetBalance(1)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(-30_000), balance, "rejected consume must not move the balance")
 }
 
 // TestTokenLedger_ProcessTopUpCreditsReceivedPlusBonusOnly — a pending top-up
