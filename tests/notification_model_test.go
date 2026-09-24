@@ -2,7 +2,9 @@ package tests
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
@@ -52,6 +54,65 @@ func TestNotificationClientRowKeepsPersonnelIDNil(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, loaded.PersonnelID)
 	assert.Equal(t, uint(5), loaded.ClientID)
+}
+
+// TestNotificationRepo_ListCap — the client list is bounded by the repository's
+// notificationListLimit so a long-lived account cannot pull an unbounded
+// payload. It proves three things: (1) the list length equals the cap, (2) the
+// cap keeps the NEWEST rows (created_at DESC), and (3) the unread COUNT still
+// reports the true total — the badge is served by a separate COUNT(*) and must
+// not desync from the list.
+func TestNotificationRepo_ListCap(t *testing.T) {
+	db := setupRouterAuthzDB(t)
+	repo := repository.NewNotificationRepositoryImpl(db)
+
+	// Mirrors repository.notificationListLimit (unexported). Keep in sync.
+	const listLimit = 100
+	const seeded = listLimit + 5
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < seeded; i++ {
+		n := &models.Notification{
+			ClientID: 5,
+			Type:     "appointment_reminder",
+			Title:    fmt.Sprintf("notif-%03d", i),
+			Message:  "message",
+			IsRead:   false,
+		}
+		// Distinct, increasing timestamps make "newest" deterministic — a tight
+		// seed loop would otherwise collapse created_at to one value.
+		n.CreatedAt = base.Add(time.Duration(i) * time.Minute)
+		if err := db.Create(n).Error; err != nil {
+			t.Fatalf("failed to seed notification %d: %v", i, err)
+		}
+	}
+
+	rows, err := repo.FindByClientID(5)
+	assert.NoError(t, err)
+	assert.Len(t, rows, listLimit, "list is capped at notificationListLimit")
+
+	// Newest first: rows[0] is the last seeded row; only the five oldest are
+	// dropped by the cap.
+	assert.Equal(t, fmt.Sprintf("notif-%03d", seeded-1), rows[0].Title, "newest row survives the cap")
+	assert.Equal(t, fmt.Sprintf("notif-%03d", seeded-listLimit), rows[len(rows)-1].Title, "oldest surviving row is exactly listLimit rows back")
+	present := titlesOf(rows)
+	for i := 0; i < seeded-listLimit; i++ {
+		assert.NotContains(t, present, fmt.Sprintf("notif-%03d", i), "rows beyond the cap are dropped")
+	}
+
+	// The badge count is independent of the list cap: all unread rows count.
+	count, err := repo.CountUnread(5)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(seeded), count, "unread COUNT is unaffected by the list cap")
+}
+
+// titlesOf extracts the titles of a notification slice for membership checks.
+func titlesOf(rows []models.Notification) []string {
+	titles := make([]string, len(rows))
+	for i, r := range rows {
+		titles[i] = r.Title
+	}
+	return titles
 }
 
 // TestNotificationResponsePersonnelID — the NotificationResponse DTO must

@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+// notificationListLimit caps the LIST queries (FindByClientID,
+// FindByPersonnelID, FindByCenterID) so a long-lived account cannot return an
+// unbounded result set to the mobile screen. The cap keeps the newest rows
+// (created_at DESC) and leaves the unread COUNT untouched: the badge is served
+// by a separate COUNT(*) query, so it still reflects the true unread total
+// even though the list itself is finite. True cursor/offset pagination is a
+// deliberate follow-up — this constant is the interim bound, not an oversight.
+const notificationListLimit = 100
+
 type NotificationRepositoryImpl struct {
 	db *gorm.DB
 }
@@ -22,10 +31,17 @@ func (r *NotificationRepositoryImpl) FindByClientID(clientID uint) ([]models.Not
 	var notifications []models.Notification
 	err := r.db.Where("client_id = ?", clientID).
 		Order("created_at DESC").
+		Limit(notificationListLimit).
 		Find(&notifications).Error
 	return notifications, err
 }
 
+// FindUnreadByClientID is intentionally NOT capped (unlike the read list
+// finders): its result feeds the same screen as the badge count, which comes
+// from CountUnread's uncapped COUNT(*). Capping only the list would let the
+// list show 100 rows while the badge reads e.g. 350 — a count/list desync that
+// is worse than a large payload. Both sides stay uncapped until real pagination
+// lands (see notificationListLimit).
 func (r *NotificationRepositoryImpl) FindUnreadByClientID(clientID uint) ([]models.Notification, error) {
 	var notifications []models.Notification
 	err := r.db.Where("client_id = ? AND is_read = ?", clientID, false).
@@ -43,6 +59,7 @@ func (r *NotificationRepositoryImpl) FindByPersonnelID(personnelID uint) ([]mode
 	var notifications []models.Notification
 	err := r.db.Where("personnel_id = ?", personnelID).
 		Order("created_at DESC").
+		Limit(notificationListLimit).
 		Find(&notifications).Error
 	return notifications, err
 }
@@ -71,6 +88,7 @@ func (r *NotificationRepositoryImpl) FindByCenterID(centerID uint) ([]models.Not
 	var notifications []models.Notification
 	err := r.db.Where("beauty_center_id = ?", centerID).
 		Order("created_at DESC").
+		Limit(notificationListLimit).
 		Find(&notifications).Error
 	return notifications, err
 }
