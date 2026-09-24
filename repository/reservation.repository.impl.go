@@ -44,17 +44,24 @@ func (r *ReservationRepositoryImpl) FindById(reservationID uint) (*models.Reserv
 }
 
 func (r *ReservationRepositoryImpl) FindUpcomingByClientID(clientID uint) (*models.Reservation, error) {
-	var reservation models.Reservation
+	var out []models.Reservation
 	today := time.Now().Format("2006-01-02")
+	// Find (unlike First) does not treat an empty result as an error, so a
+	// client with no upcoming reservation is a normal empty state instead of
+	// a spurious "record not found" error line.
 	err := r.db.
 		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
 		Where("client_id = ? AND date >= ? AND status NOT IN (?)", clientID, today, []string{"COMPLETED", "CANCELLED"}).
 		Order("date ASC, start_time ASC").
-		First(&reservation).Error
+		Limit(1).
+		Find(&out).Error
 	if err != nil {
 		return nil, err
 	}
-	return &reservation, nil
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return &out[0], nil
 }
 
 func (r *ReservationRepositoryImpl) FindByClientID(clientID uint) ([]models.Reservation, error) {

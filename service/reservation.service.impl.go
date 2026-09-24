@@ -1071,13 +1071,11 @@ func (s *ReservationServiceImpl) FindUpcomingByClientID(clientID, actorClientID 
 	if actorClientID != clientID {
 		return nil, apperrors.ErrForbidden
 	}
-	reservation, err := s.ReservationRepository.FindUpcomingByClientID(clientID)
-	if err != nil {
-		// No upcoming reservation (or a lookup failure) is surfaced as NotFound
-		// to keep the endpoint's 404 contract stable.
-		return nil, apperrors.ErrNotFound
-	}
-	return reservation, nil
+	// A client with no upcoming reservation is a normal empty state: the
+	// repository returns (nil, nil) and the controller answers 200 with a
+	// null body. Genuine lookup failures now propagate as 500s instead of
+	// being masked as 404.
+	return s.ReservationRepository.FindUpcomingByClientID(clientID)
 }
 
 func (s *ReservationServiceImpl) FindByBeautyCenterID(beautyCenterID, actorCenterID uint, from, to *time.Time, clientID *uint) ([]models.Reservation, error) {

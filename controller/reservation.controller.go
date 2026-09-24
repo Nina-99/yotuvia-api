@@ -317,6 +317,8 @@ func (c *ReservationController) FindUpcomingByClient(ctx *gin.Context) {
 		return
 	}
 
+	// No upcoming reservation is a valid empty state, not a 404: respond 200
+	// with a null body so clients can tell "none" apart from a real failure.
 	ctx.JSON(http.StatusOK, reservation)
 }
 

@@ -184,7 +184,9 @@ func TestRouterAuthz_RoleGates(t *testing.T) {
 		{"reservation admin create", "POST", "/api/reservation/admin", []string{"beauty_center", "personnel"}, "client", "", 0},
 		{"reservation find all", "GET", "/api/reservation", []string{"beauty_center"}, "client", "", 200},
 		{"reservation by client", "GET", "/api/reservation/client/1", []string{"client"}, "beauty_center", "", 200},
-		{"reservation upcoming", "GET", "/api/reservation/client/1/upcoming", []string{"client"}, "beauty_center", "", 404},
+		// No upcoming reservation is an empty state, not an error: the handler
+		// answers 200 with a null body (previously 404).
+		{"reservation upcoming", "GET", "/api/reservation/client/1/upcoming", []string{"client"}, "beauty_center", "", 200},
 		{"reservation by center", "GET", "/api/reservation/center/1", []string{"beauty_center", "personnel"}, "client", "", 200},
 		{"reservation by id", "GET", "/api/reservation/1", []string{"client", "beauty_center"}, "personnel", "", 0},
 		{"reservation update", "PUT", "/api/reservation/1", []string{"client", "beauty_center"}, "personnel", "", 0},
