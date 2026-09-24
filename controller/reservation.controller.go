@@ -11,6 +11,7 @@ import (
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/service"
+	"github.com/Nina-99/yottu-api/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -149,12 +150,27 @@ func (c *ReservationController) Cancel(ctx *gin.Context) {
 		return
 	}
 
-	// Waitlist backfill (Phase 3, best-effort): a freed slot is offered to
-	// the first waiter before the client even sees the confirmation.
+	// Waitlist backfill (Phase 3, best-effort): a freed slot is offered to the
+	// first waiter. Detached from the request so the client is not blocked, and
+	// deliberately WITHOUT the request context: it is cancelled the moment the
+	// response is written, while the cascade keeps touching the DB. The service
+	// path is synchronous and safe on its own (no request-scoped state).
 	if c.waitlistService != nil {
-		if doomed, ferr := c.reservationService.FindById(reservationID, clientID, 0, "client"); ferr == nil && doomed != nil {
-			_, _ = c.waitlistService.OfferForFreedSlot(doomed.BeautyCenterID, doomed.Date, doomed.StartTime)
-		}
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					utils.Log.Errorf("[WAITLIST] cancel cascade panicked for reservation %d: %v", reservationID, r)
+				}
+			}()
+			doomed, ferr := c.reservationService.FindById(reservationID, clientID, 0, "client")
+			if ferr != nil || doomed == nil {
+				utils.Log.Errorf("[WAITLIST] cancel cascade lookup failed for reservation %d: %v", reservationID, ferr)
+				return
+			}
+			if _, err := c.waitlistService.OfferForFreedSlot(doomed.BeautyCenterID, doomed.Date, doomed.StartTime); err != nil {
+				utils.Log.Errorf("[WAITLIST] cancel cascade offer failed for reservation %d: %v", reservationID, err)
+			}
+		}()
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Reservation cancelled successfully"})
