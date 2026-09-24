@@ -1,6 +1,8 @@
 package service
 
 import (
+	"errors"
+
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/go-playground/validator/v10"
@@ -27,7 +29,8 @@ func (s *SavedVideoServiceImpl) Toggle(clientID uint, postID uint) (bool, error)
 func (s *SavedVideoServiceImpl) CheckIfSaved(clientID uint, postID uint) (bool, error) {
 	_, err := s.SavedVideoRepository.FindByPostAndClient(postID, clientID)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		// errors.Is, not ==: the sentinel may come wrapped by the driver.
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, nil
 		}
 		return false, err
