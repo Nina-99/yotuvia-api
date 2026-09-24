@@ -25,6 +25,14 @@ type FeedPostResponse struct {
 	CategoryName   string `json:"category_name,omitempty"`
 	PersonnelName  string `json:"personnel_name,omitempty"`
 
+	// Offer surfacing (shop the look): the tagged service's price and duration,
+	// so the book CTA is concrete. Both are POINTERS with omitempty so a free
+	// service (price 0) is distinguishable from "no service tagged" (nil, which
+	// omits the key entirely). Populated from the already-preloaded post.Service;
+	// nil whenever that association is not loaded — never a per-row query.
+	ServicePrice    *float64 `json:"service_price,omitempty"`
+	ServiceDuration *int     `json:"service_duration,omitempty"`
+
 	// User interaction state (populated when clientID is available)
 	IsLiked       bool `json:"is_liked"`
 	IsSaved       bool `json:"is_saved"`

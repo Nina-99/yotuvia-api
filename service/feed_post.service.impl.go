@@ -378,6 +378,13 @@ func (s *FeedPostServiceImpl) mapToResponse(post models.FeedPost) response.FeedP
 		if post.Service.Category.ID != 0 {
 			resp.CategoryName = post.Service.Category.Name
 		}
+		// Shop the look: carry the offer so the book CTA is concrete. Both
+		// pointers are set together and only from the preloaded association
+		// (post.Service.ID != 0 guarantees it was loaded), so no per-row query.
+		price := post.Service.Price
+		duration := post.Service.Duration
+		resp.ServicePrice = &price
+		resp.ServiceDuration = &duration
 	}
 	if post.Personnel.ID != 0 {
 		resp.PersonnelName = fmt.Sprintf("%s %s",
