@@ -16,10 +16,49 @@ import (
 // striking a no-show (client may be paying at the desk).
 const noShowGraceMinutes = 30
 
+// schedulerSweeps is the per-tick maintenance work, expressed as functions so
+// the tick is testable without a live scheduler or a full service graph.
+type schedulerSweeps struct {
+	sendDueReminders func(now time.Time) (int, error)
+	sweepNoShows     func(now time.Time, graceMinutes int) (int, error)
+	expireHolds      func(now time.Time) (int, error)
+	sweepOffers      func(now time.Time) (int, error)
+}
+
+// runSchedulerTick executes all four sweeps for one tick. Every sweep stays
+// best-effort: a failure is logged and the remaining sweeps still run, so one
+// broken query never starves the others. Extracted from the loop so the tick
+// can be exercised on SQLite.
+func runSchedulerTick(s schedulerSweeps, now time.Time) {
+	if n, err := s.sendDueReminders(now); err != nil {
+		utils.Log.Errorf("[SCHEDULER] reminders failed: %v", err)
+	} else if n > 0 {
+		utils.Log.Infof("[SCHEDULER] sent %d reminders", n)
+	}
+	if n, err := s.sweepNoShows(now, noShowGraceMinutes); err != nil {
+		utils.Log.Errorf("[SCHEDULER] no-show sweep failed: %v", err)
+	} else if n > 0 {
+		utils.Log.Infof("[SCHEDULER] struck %d no-shows", n)
+	}
+	if n, err := s.expireHolds(now); err != nil {
+		utils.Log.Errorf("[SCHEDULER] hold sweep failed: %v", err)
+	} else if n > 0 {
+		utils.Log.Infof("[SCHEDULER] swept %d expired holds", n)
+	}
+	if n, err := s.sweepOffers(now); err != nil {
+		utils.Log.Errorf("[SCHEDULER] offer sweep failed: %v", err)
+	} else if n > 0 {
+		utils.Log.Infof("[SCHEDULER] passed on %d expired offers", n)
+	}
+}
+
 // StartBackgroundScheduler runs the Phase 3 maintenance loop: due reminders,
-// no-show sweep, deposit-hold sweep and waitlist offer expiry. Single
-// instance only — when scaling past one API replica, guard the tick with a
-// Postgres advisory lock (TODO) so sweeps never double-fire.
+// no-show sweep, deposit-hold sweep and waitlist offer expiry.
+//
+// Multi-replica safety: each tick first takes a Postgres advisory lock
+// (schedulerAdvisoryLockKey) so exactly one replica fires a given tick — the
+// others skip it quietly. On non-Postgres dialects the lock is a documented
+// no-op.
 //
 // The loop is best-effort by design: every sweep logs and continues, and a
 // failed tick never kills the scheduler. Disabled with SCHEDULER_ENABLED=false;
@@ -68,30 +107,28 @@ func StartBackgroundScheduler(db *gorm.DB) {
 		validate,
 	)
 
+	sweeps := schedulerSweeps{
+		sendDueReminders: reservationSvc.SendDueReminders,
+		sweepNoShows:     reservationSvc.SweepNoShows,
+		expireHolds:      reservationSvc.ExpireHolds,
+		sweepOffers:      waitlistSvc.SweepExpiredOffers,
+	}
+
 	go func() {
 		ticker := time.NewTicker(time.Duration(intervalSec) * time.Second)
 		defer ticker.Stop()
 		for now := range ticker.C {
-			if n, err := reservationSvc.SendDueReminders(now); err != nil {
-				utils.Log.Errorf("[SCHEDULER] reminders failed: %v", err)
-			} else if n > 0 {
-				utils.Log.Infof("[SCHEDULER] sent %d reminders", n)
+			// Exactly one replica runs a given tick. The deferred release runs
+			// even if a sweep panics, so the lock can never be stranded.
+			release, acquired := acquireTickLock(db)
+			if !acquired {
+				utils.Log.Infof("[SCHEDULER] tick skipped: another replica holds the advisory lock")
+				continue
 			}
-			if n, err := reservationSvc.SweepNoShows(now, noShowGraceMinutes); err != nil {
-				utils.Log.Errorf("[SCHEDULER] no-show sweep failed: %v", err)
-			} else if n > 0 {
-				utils.Log.Infof("[SCHEDULER] struck %d no-shows", n)
-			}
-			if n, err := reservationSvc.ExpireHolds(now); err != nil {
-				utils.Log.Errorf("[SCHEDULER] hold sweep failed: %v", err)
-			} else if n > 0 {
-				utils.Log.Infof("[SCHEDULER] swept %d expired holds", n)
-			}
-			if n, err := waitlistSvc.SweepExpiredOffers(now); err != nil {
-				utils.Log.Errorf("[SCHEDULER] offer sweep failed: %v", err)
-			} else if n > 0 {
-				utils.Log.Infof("[SCHEDULER] passed on %d expired offers", n)
-			}
+			func() {
+				defer release()
+				runSchedulerTick(sweeps, now)
+			}()
 		}
 	}()
 	utils.Log.Infof("[SCHEDULER] Started (every %ds)", intervalSec)
