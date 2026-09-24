@@ -18,7 +18,12 @@ func FeedPostRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 	repoLike := repository.NewPostLikeRepositoryImpl(db)
 	repoSaved := repository.NewSavedVideoRepositoryImpl(db)
 	repoComment := repository.NewVideoCommentRepositoryImpl(db)
-	svc := service.NewFeedPostServiceImpl(repo, repoBC, repoPersonnel, repoService, repoLike, repoSaved, repoComment, validate)
+	followRepo := repository.NewPersonnelFollowRepositoryImpl(db)
+	notifSvc := service.NewNotificationServiceImpl(
+		repository.NewNotificationRepositoryImpl(db),
+		repository.NewPushDeviceRepositoryImpl(db),
+	)
+	svc := service.NewFeedPostServiceImpl(repo, repoBC, repoPersonnel, repoService, repoLike, repoSaved, repoComment, followRepo, notifSvc, validate)
 	ctrl := controller.NewFeedPostController(svc)
 
 	posts := rg.Group("/feed-posts")
@@ -27,6 +32,8 @@ func FeedPostRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 		posts.GET("", middleware.OptionalJWTAuthMiddleware(), ctrl.FindAll)
 		posts.POST("/:id/views", ctrl.IncrementViews)
 		posts.GET("/center/:id", ctrl.FindByBeautyCenterID)
+		// Public: one professional's active videos, newest first.
+		posts.GET("/personnel/:id", middleware.OptionalJWTAuthMiddleware(), ctrl.FindByPersonnelID)
 
 		protected := posts.Group("")
 		protected.Use(middleware.JWTAuthMiddleware())

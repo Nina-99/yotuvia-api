@@ -13,7 +13,9 @@ import (
 func PersonnelRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
 	repo := repository.NewPersonnelRepositoryImpl(db)
 	svc := service.NewPersonnelServiceImpl(repo, validate)
-	ctrl := controller.NewPersonnelController(svc)
+	followRepo := repository.NewPersonnelFollowRepositoryImpl(db)
+	followSvc := service.NewPersonnelFollowServiceImpl(followRepo, repo, validate)
+	ctrl := controller.NewPersonnelController(svc, followSvc)
 
 	personnel := rg.Group("/personnel")
 	personnel.Use(middleware.JWTAuthMiddleware())
@@ -23,5 +25,8 @@ func PersonnelRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valid
 		personnel.PUT("/:id", middleware.RequireRole("beauty_center"), ctrl.Update)
 		personnel.DELETE("/:id", middleware.RequireRole("beauty_center"), ctrl.Delete)
 		personnel.PATCH("/me", middleware.RequireRole("personnel"), ctrl.UpdateMe)
+		// Follow a professional: client-only, actor from the JWT claim.
+		personnel.POST("/:id/follow", middleware.RequireRole("client"), ctrl.Follow)
+		personnel.DELETE("/:id/follow", middleware.RequireRole("client"), ctrl.Unfollow)
 	}
 }

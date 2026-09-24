@@ -34,8 +34,21 @@ type FeedPostServiceImpl struct {
 	PostLikeRepository     repository.PostLikeRepository
 	SavedVideoRepository   repository.SavedVideoRepository
 	CommentRepository      repository.VideoCommentRepository
-	Validate               *validator.Validate
+	// PersonnelFollowRepository + NotificationService back the new-video
+	// follower fan-out on CreateFromUpload. Both are OPTIONAL: a nil here
+	// simply skips the fan-out (reads and writes still work), matching the
+	// waitlist service's optional NotificationService contract. Production
+	// wiring always provides them.
+	PersonnelFollowRepository repository.PersonnelFollowRepository
+	NotificationService       NotificationService
+	Validate                  *validator.Validate
 }
+
+// maxFollowerFanout caps how many followers one new-video publish notifies, so
+// a viral professional cannot turn a single post into an unbounded fan-out.
+// The followers are loaded in ONE query; beyond the cap, extra followers are
+// silently skipped (best-effort delivery).
+const maxFollowerFanout = 500
 
 // NewFeedPostServiceImpl builds the feed service. Every dependency below is
 // REQUIRED: FindAll dereferences FeedPost/PostLike/SavedVideo/Comment, the
@@ -50,6 +63,8 @@ func NewFeedPostServiceImpl(
 	postLikeRepo repository.PostLikeRepository,
 	savedVideoRepo repository.SavedVideoRepository,
 	commentRepo repository.VideoCommentRepository,
+	followRepo repository.PersonnelFollowRepository,
+	notificationSvc NotificationService,
 	validate *validator.Validate,
 ) FeedPostService {
 	requireDeps("NewFeedPostServiceImpl",
@@ -63,14 +78,16 @@ func NewFeedPostServiceImpl(
 		dep("Validate", validate),
 	)
 	return &FeedPostServiceImpl{
-		FeedPostRepository:     feedPostRepo,
-		BeautyCenterRepository: beautyCenterRepo,
-		PersonnelRepository:    personnelRepo,
-		ServiceRepository:      serviceRepo,
-		PostLikeRepository:     postLikeRepo,
-		SavedVideoRepository:   savedVideoRepo,
-		CommentRepository:      commentRepo,
-		Validate:               validate,
+		FeedPostRepository:        feedPostRepo,
+		BeautyCenterRepository:    beautyCenterRepo,
+		PersonnelRepository:       personnelRepo,
+		ServiceRepository:         serviceRepo,
+		PostLikeRepository:        postLikeRepo,
+		SavedVideoRepository:      savedVideoRepo,
+		CommentRepository:         commentRepo,
+		PersonnelFollowRepository: followRepo,
+		NotificationService:       notificationSvc,
+		Validate:                  validate,
 	}
 }
 
@@ -172,7 +189,43 @@ func (s *FeedPostServiceImpl) CreateFromUpload(actor FeedActor, req request.Crea
 	}
 
 	utils.Log.Infof("[FEED] post created by %s %d (center %d): %s", actor.Role, actor.UserID, centerID, post.Caption)
+	// Best-effort follower fan-out: a notification/push failure must never
+	// fail (or roll back) the post creation.
+	s.notifyFollowers(post)
 	return s.mapToResponse(post), nil
+}
+
+// notifyFollowers tells the professional's followers that a new video is live:
+// an in-app notification of type "new_video" plus a best-effort push, mirroring
+// the waitlist_offer pattern. Follower ids are loaded in ONE query (capped at
+// maxFollowerFanout), so the number of SELECTs does not scale with followers.
+// Every failure is logged and swallowed — the post is already committed.
+func (s *FeedPostServiceImpl) notifyFollowers(post models.FeedPost) {
+	if post.PersonnelID == nil || s.PersonnelFollowRepository == nil || s.NotificationService == nil {
+		return
+	}
+	personnelID := *post.PersonnelID
+	followers, err := s.PersonnelFollowRepository.FindFollowerIDsByPersonnelID(personnelID, maxFollowerFanout)
+	if err != nil {
+		utils.Log.Errorf("[FEED] follower lookup failed for personnel %d: %v", personnelID, err)
+		return
+	}
+	if len(followers) == 0 {
+		return
+	}
+
+	payload := fmt.Sprintf(`{"type":"new_video","post_id":%d,"personnel_id":%d}`, post.ID, personnelID)
+	const title = "Nuevo video"
+	const message = "El profesional que seguís publicó un video nuevo"
+
+	for _, clientID := range followers {
+		if err := s.NotificationService.Create(clientID, "new_video", title, message, payload); err != nil {
+			utils.Log.Errorf("[FEED] new_video notification failed for client %d: %v", clientID, err)
+		}
+		if err := s.NotificationService.SendPushToClient(clientID, title, message, payload); err != nil {
+			utils.Log.Errorf("[FEED] new_video push failed for client %d: %v", clientID, err)
+		}
+	}
 }
 
 // Update allows ONLY the author to edit caption/promo flags of their own post.
@@ -242,7 +295,25 @@ func (s *FeedPostServiceImpl) FindAll(page, limit int, clientID *uint) ([]respon
 	if err != nil {
 		return nil, total, err
 	}
+	return s.decorateFeed(posts, clientID), total, nil
+}
 
+// FindPersonnelFeed serves the PUBLIC professional-profile feed: one
+// professional's active posts only, newest first. It reuses the exact same
+// enrichment pipeline as FindAll (interaction flags + grouped like/comment
+// counts), so it carries the same body shape and introduces no N+1.
+func (s *FeedPostServiceImpl) FindPersonnelFeed(personnelID uint, page, limit int, clientID *uint) ([]response.FeedPostResponse, int64, error) {
+	posts, total, err := s.FeedPostRepository.FindActiveByPersonnel(personnelID, page, limit)
+	if err != nil {
+		return nil, total, err
+	}
+	return s.decorateFeed(posts, clientID), total, nil
+}
+
+// decorateFeed maps a page of posts and attaches viewer interaction state and
+// grouped counts. The like/save maps are fetched once per page (not per row)
+// and the counts use one grouped COUNT each — the whole pipeline is bounded.
+func (s *FeedPostServiceImpl) decorateFeed(posts []models.FeedPost, clientID *uint) []response.FeedPostResponse {
 	// Pre-fetch user's likes and saves for batch (avoid N+1)
 	likedPostIDs := make(map[uint]bool)
 	savedPostIDs := make(map[uint]bool)
@@ -270,7 +341,7 @@ func (s *FeedPostServiceImpl) FindAll(page, limit int, clientID *uint) ([]respon
 	// One grouped COUNT per page instead of one COUNT per post (N+1).
 	s.attachCommentCounts(res)
 	s.attachRealLikeCounts(res)
-	return res, total, nil
+	return res
 }
 
 // attachCommentCounts fills CommentsCount with one grouped query for the whole

@@ -14,10 +14,11 @@ import (
 
 type PersonnelController struct {
 	personnelService service.PersonnelService
+	followService    service.PersonnelFollowService
 }
 
-func NewPersonnelController(service service.PersonnelService) *PersonnelController {
-	return &PersonnelController{personnelService: service}
+func NewPersonnelController(personnelService service.PersonnelService, followService service.PersonnelFollowService) *PersonnelController {
+	return &PersonnelController{personnelService: personnelService, followService: followService}
 }
 
 // writeError maps any service error through apperrors.MapToHTTP so clients get
@@ -121,7 +122,57 @@ func (c *PersonnelController) FindByID(ctx *gin.Context) {
 		return
 	}
 
+	// is_following is derived from the caller's JWT claim (never the body).
+	// The route runs JWTAuthMiddleware, so a claim is present; an absent/zero
+	// claim or a lookup failure simply leaves the field false.
+	if c.followService != nil {
+		if clientID := ctx.GetUint("clientID"); clientID != 0 {
+			if following, ferr := c.followService.IsFollowing(clientID, uint(id)); ferr == nil {
+				res.IsFollowing = following
+			}
+		}
+	}
+
 	ctx.JSON(http.StatusOK, res)
+}
+
+// Follow handles POST /personnel/:id/follow (client-only). The actor is the
+// JWT clientID claim — never the body. Idempotent: a repeat stays true.
+func (c *PersonnelController) Follow(ctx *gin.Context) {
+	id, ok := c.parsePersonnelID(ctx)
+	if !ok {
+		return
+	}
+	if err := c.followService.Follow(ctx.GetUint("clientID"), id); err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusCreated, gin.H{"following": true})
+}
+
+// Unfollow handles DELETE /personnel/:id/follow (client-only). Idempotent:
+// removing an edge that does not exist still answers 200 with false.
+func (c *PersonnelController) Unfollow(ctx *gin.Context) {
+	id, ok := c.parsePersonnelID(ctx)
+	if !ok {
+		return
+	}
+	if err := c.followService.Unfollow(ctx.GetUint("clientID"), id); err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"following": false})
+}
+
+// parsePersonnelID reads and validates the :id path param, writing a 400 on a
+// malformed value. ok is false when the response has already been written.
+func (c *PersonnelController) parsePersonnelID(ctx *gin.Context) (uint, bool) {
+	id, err := strconv.Atoi(ctx.Param("id"))
+	if err != nil || id <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Format of ID invalid"})
+		return 0, false
+	}
+	return uint(id), true
 }
 
 func (c *PersonnelController) FindAll(ctx *gin.Context) {

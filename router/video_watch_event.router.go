@@ -26,7 +26,12 @@ func VideoWatchEventRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator
 	personnelRepo := repository.NewPersonnelRepositoryImpl(db)
 	serviceRepo := repository.NewServiceRepositoryImpl(db)
 	repoComment := repository.NewVideoCommentRepositoryImpl(db)
-	feedSvc := service.NewFeedPostServiceImpl(feedRepo, bcRepo, personnelRepo, serviceRepo, likeRepo, savedRepo, repoComment, validate)
+	followRepo := repository.NewPersonnelFollowRepositoryImpl(db)
+	notifSvc := service.NewNotificationServiceImpl(
+		repository.NewNotificationRepositoryImpl(db),
+		repository.NewPushDeviceRepositoryImpl(db),
+	)
+	feedSvc := service.NewFeedPostServiceImpl(feedRepo, bcRepo, personnelRepo, serviceRepo, likeRepo, savedRepo, repoComment, followRepo, notifSvc, validate)
 	ctrl := controller.NewVideoWatchEventController(watchSvc, feedSvc)
 
 	events := rg.Group("/video-watch-events")

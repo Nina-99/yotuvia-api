@@ -14,6 +14,10 @@ type FeedPostService interface {
 	SetSuspended(centerID, postID uint, suspend bool, note string) error
 	IncrementViews(id uint) error
 	FindAll(page, limit int, clientID *uint) ([]response.FeedPostResponse, int64, error)
+	// FindPersonnelFeed serves the public professional-profile feed (active
+	// posts only, newest first) with the same body shape and enrichment as
+	// FindAll.
+	FindPersonnelFeed(personnelID uint, page, limit int, clientID *uint) ([]response.FeedPostResponse, int64, error)
 	FindMine(actor FeedActor) ([]response.FeedPostResponse, error)
 	FindByBeautyCenterID(centerID uint) ([]response.FeedPostResponse, error)
 }

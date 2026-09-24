@@ -38,6 +38,7 @@ func DBConnection() {
 		&models.Client{},
 		&models.CustomerPunchCard{},
 		&models.Favorite{},
+		&models.PersonnelFollow{},
 		&models.FeedPost{},
 		&models.LoyaltyProgram{},
 		&models.LoyaltyRedemption{},

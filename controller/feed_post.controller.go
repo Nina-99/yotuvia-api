@@ -194,6 +194,44 @@ func (c *FeedPostController) FindByBeautyCenterID(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
+// FindByPersonnelID serves GET /feed-posts/personnel/:id — a professional's
+// public video feed: active posts only, newest first, same body shape as the
+// public feed. Auth is optional so a client token still personalizes
+// is_liked/is_saved.
+func (c *FeedPostController) FindByPersonnelID(ctx *gin.Context) {
+	id, err := strconv.Atoi(ctx.Param("id"))
+	if err != nil || id <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > maxFeedLimit {
+		limit = maxFeedLimit
+	}
+
+	var clientID *uint
+	if cached, exists := ctx.Get("clientID"); exists {
+		if uid, ok := cached.(uint); ok {
+			clientID = &uid
+		}
+	}
+
+	res, total, err := c.feedPostService.FindPersonnelFeed(uint(id), page, limit, clientID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"posts": res, "total": total, "page": page, "limit": limit})
+}
+
 // IncrementViews handles POST /feed-posts/:id/views (public, best-effort).
 func (c *FeedPostController) IncrementViews(ctx *gin.Context) {
 	id, err := strconv.Atoi(ctx.Param("id"))

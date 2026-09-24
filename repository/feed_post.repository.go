@@ -9,6 +9,9 @@ type FeedPostRepository interface {
 	FindByID(id uint) (*models.FeedPost, error)
 	// FindAllActive serves the PUBLIC feed: is_active = true only.
 	FindAllActive(page, limit int) ([]models.FeedPost, int64, error)
+	// FindActiveByPersonnel serves the public professional profile feed:
+	// is_active = true for one professional, newest first, paginated.
+	FindActiveByPersonnel(personnelID uint, page, limit int) ([]models.FeedPost, int64, error)
 	// FindActiveByCenter returns active posts of one center (public profile).
 	FindActiveByCenter(centerID uint) ([]models.FeedPost, error)
 	// FindByIDs returns every post matching the given ids in ONE query,

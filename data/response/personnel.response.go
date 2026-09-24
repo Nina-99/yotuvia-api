@@ -23,4 +23,8 @@ type PersonnelResponse struct {
 	Images         []PersonnelImageResponse `json:"images"`
 	CreatedAt      time.Time                `json:"created_at"`
 	UpdatedAt      time.Time                `json:"updated_at"`
+	// IsFollowing reflects whether the CALLER (JWT client claim) follows this
+	// professional. False when anonymous or not following. Populated only on
+	// GET /personnel/:id; other surfaces leave it at zero.
+	IsFollowing bool `json:"is_following"`
 }

@@ -84,6 +84,24 @@ func (r *FeedPostRepositoryImpl) FindAllActive(page, limit int) ([]models.FeedPo
 	return posts, total, err
 }
 
+// FindActiveByPersonnel implements FeedPostRepository — the public
+// professional-profile feed: one professional's ACTIVE posts, newest first,
+// with the same preloads as the main feed. A page mirror of FindAllActive.
+func (r *FeedPostRepositoryImpl) FindActiveByPersonnel(personnelID uint, page, limit int) ([]models.FeedPost, int64, error) {
+	var posts []models.FeedPost
+	var total int64
+
+	q := r.db.Model(&models.FeedPost{}).
+		Where("personnel_id = ? AND is_active = ?", personnelID, true)
+	q.Count(&total)
+
+	offset := (page - 1) * limit
+	err := applyFeedPreloads(q).
+		Order("created_at DESC").
+		Offset(offset).Limit(limit).Find(&posts).Error
+	return posts, total, err
+}
+
 // FindActiveByCenter implements FeedPostRepository — public profile variant.
 func (r *FeedPostRepositoryImpl) FindActiveByCenter(centerID uint) ([]models.FeedPost, error) {
 	var posts []models.FeedPost

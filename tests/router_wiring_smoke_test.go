@@ -151,6 +151,7 @@ func TestRouterWiring_No5xxWithValidToken(t *testing.T) {
 		// ── feed ──
 		{"feed public list", http.MethodGet, "/api/feed-posts", "client"},
 		{"feed by center", http.MethodGet, "/api/feed-posts/center/1", "client"},
+		{"feed by personnel", http.MethodGet, "/api/feed-posts/personnel/1", "client"},
 		{"feed increment views", http.MethodPost, "/api/feed-posts/1/views", "client"},
 		{"feed create", http.MethodPost, "/api/feed-posts", "personnel"},
 		{"feed update", http.MethodPut, "/api/feed-posts/1", "client"},
@@ -198,6 +199,8 @@ func TestRouterWiring_No5xxWithValidToken(t *testing.T) {
 		{"personnel update", http.MethodPut, "/api/personnel/1", "beauty_center"},
 		{"personnel delete", http.MethodDelete, "/api/personnel/1", "beauty_center"},
 		{"personnel update me", http.MethodPatch, "/api/personnel/me", "personnel"},
+		{"personnel follow", http.MethodPost, "/api/personnel/1/follow", "client"},
+		{"personnel unfollow", http.MethodDelete, "/api/personnel/1/follow", "client"},
 		// ── personnel invitations ──
 		{"invite by token", http.MethodGet, "/api/personnel/invite/abc", "client"},
 		{"invite accept", http.MethodPost, "/api/personnel/accept-invite", "client"},
