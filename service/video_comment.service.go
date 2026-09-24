@@ -107,6 +107,17 @@ func (s *VideoCommentServiceImpl) ReplyToComment(actor FeedActor, commentID uint
 		return response.CommentResponse{}, ErrForbidden
 	}
 
+	// The official reply must come from the center that OWNS the feed post.
+	// Previously any authenticated center could post an official reply on any
+	// other center's video.
+	fp, err := s.feedPostRepo.FindByID(parent.FeedPostID)
+	if err != nil || fp == nil {
+		return response.CommentResponse{}, ErrFeedPostNotFound
+	}
+	if fp.BeautyCenterID != actor.CenterID {
+		return response.CommentResponse{}, ErrUnauthorized
+	}
+
 	reply := &models.VideoComment{
 		FeedPostID: parent.FeedPostID,
 		ParentID:   &commentID,
@@ -174,6 +185,17 @@ func (s *VideoCommentServiceImpl) HideComment(actor FeedActor, commentID uint) e
 	// Only the owning center can hide comments on their feed posts.
 	if actor.CenterID == 0 {
 		return ErrForbidden
+	}
+
+	// Verify the feed post belongs to the actor's center. Previously this only
+	// checked that SOME center was acting, so any center could hide any
+	// comment anywhere.
+	fp, err := s.feedPostRepo.FindByID(comment.FeedPostID)
+	if err != nil || fp == nil {
+		return ErrFeedPostNotFound
+	}
+	if fp.BeautyCenterID != actor.CenterID {
+		return ErrUnauthorized
 	}
 
 	comment.IsHidden = true
