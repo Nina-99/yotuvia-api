@@ -316,7 +316,9 @@ func TestAdminClients_DetailHistory(t *testing.T) {
 	}
 
 	// Date scoping still works alongside the optional param (A2 behavior kept).
-	w = do(r, http.MethodGet, "/api/reservation/center/1?date=2026-08-15", centerOneToken, "")
+	// `from`/`to` replaced the removed `date` param (design D4); an unknown
+	// `date` is now silently ignored, which would return every center-1 row.
+	w = do(r, http.MethodGet, "/api/reservation/center/1?from=2026-08-15&to=2026-08-15", centerOneToken, "")
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
 	if assert.Len(t, list, 2) {

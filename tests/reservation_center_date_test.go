@@ -97,10 +97,14 @@ type centerReservationLite struct {
 }
 
 // TestReservationCenter_DateScoping — GET /reservation/center/:centerId with
-// the optional date query parameter (spec: Date-Scoped Center Reservations
-// Querying). Covers all five spec scenarios: no date (all returned, unfiltered
-// and unordered), valid date (only that day, start_time ASC), malformed date
-// (400), empty day (200 []), and no cross-center leakage.
+// the optional from/to date-range query parameters (spec: Date-Scoped Center
+// Reservations Querying). Covers all spec scenarios: no range (all returned,
+// unfiltered and unordered), valid range (only that day, start_time ASC),
+// malformed from/to (400), empty day (200 []), and no cross-center leakage.
+//
+// The former single `date` parameter was replaced by `from`/`to` (design D4);
+// an unknown `date` is silently ignored, so these cases must drive the range
+// params to keep the malformed/empty coverage real.
 func TestReservationCenter_DateScoping(t *testing.T) {
 	t.Setenv("JWT_SECRET", testJWTSecret)
 	utils.Log = zap.NewNop().Sugar()
@@ -135,14 +139,20 @@ func TestReservationCenter_DateScoping(t *testing.T) {
 			wantStartTimes: []string{"09:00", "14:00"},
 		},
 		{
-			name:       "malformed date returns 400",
-			queryPath:  "/api/reservation/center/1?date=invalid-date",
+			name:       "malformed from returns 400",
+			queryPath:  "/api/reservation/center/1?from=invalid-date",
 			wantStatus: http.StatusBadRequest,
 			wantErr:    "bad request",
 		},
 		{
-			name:       "date with no reservations returns empty array",
-			queryPath:  "/api/reservation/center/1?date=2026-12-25",
+			name:       "malformed to returns 400",
+			queryPath:  "/api/reservation/center/1?to=not-a-date",
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "bad request",
+		},
+		{
+			name:       "day with no reservations returns empty array",
+			queryPath:  "/api/reservation/center/1?from=2026-12-25&to=2026-12-25",
 			wantStatus: http.StatusOK,
 			wantLen:    0,
 		},
@@ -201,8 +211,11 @@ func TestReservationCenter_DateAuthz(t *testing.T) {
 	r, db := reservationCenterTestRouter(t)
 	seedCenterDateData(t, db)
 
-	pathDayOne := "/api/reservation/center/1?date=2026-08-16"
-	pathOtherCenter := "/api/reservation/center/2?date=2026-08-16"
+	// The range params are attached so the request exercises the real filter
+	// path; authz is evaluated before the date filter, so the outcome is
+	// unchanged (from/to replaced the removed `date` param — design D4).
+	pathDayOne := "/api/reservation/center/1?from=2026-08-16&to=2026-08-16"
+	pathOtherCenter := "/api/reservation/center/2?from=2026-08-16&to=2026-08-16"
 
 	tests := []struct {
 		name       string
