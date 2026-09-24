@@ -15,11 +15,15 @@ import (
 
 // Golden SQL fragments, captured verbatim from the pre-refactor inline SELECT
 // expressions in beauty_center.repository.impl.go (avg_rating/review_count
-// subqueries at lines 38/58/156/171/187, distance in FindNearby). The rating
-// scope refactor (task 3.3) MUST reproduce these byte-for-byte; any drift in the
-// generated SQL fails the approval assertions below.
+// subqueries, distance in FindNearby). The rating scope refactor (task 3.3)
+// MUST reproduce these byte-for-byte; any drift in the generated SQL fails the
+// approval assertions below.
+//
+// The avg_rating cast uses CAST(... AS numeric(10,2)) rather than the Postgres
+// shorthand ::numeric(10,2): the shorthand is not valid in SQLite, which the
+// repository tests run on, while CAST is standard SQL and accepted by both.
 const (
-	goldenAvgSelect      = "COALESCE((SELECT AVG(rating)::numeric(10,2) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as avg_rating"
+	goldenAvgSelect      = "COALESCE((SELECT CAST(AVG(rating) AS numeric(10,2)) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as avg_rating"
 	goldenCountSelect    = "COALESCE((SELECT COUNT(*) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as review_count"
 	goldenDistanceSelect = "(6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance"
 )
