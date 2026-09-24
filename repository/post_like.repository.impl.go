@@ -72,15 +72,24 @@ func (p *PostLikeRepositoryImpl) Toggle(postID uint, clientID uint) (bool, error
 	return true, nil
 }
 
+// FindByPostID backs the PUBLIC GET /post-likes/post/:id list. Ordering is
+// added explicitly (the previous query had none) so the cap keeps the newest
+// likes deterministically.
 func (p *PostLikeRepositoryImpl) FindByPostID(postID uint) ([]models.PostLike, error) {
 	var postLikes []models.PostLike
-	err := p.Db.Where("feed_post_id = ?", postID).Find(&postLikes).Error
+	err := p.Db.Where("feed_post_id = ?", postID).
+		Order("created_at DESC").
+		Limit(ListQueryLimit).
+		Find(&postLikes).Error
 	return postLikes, err
 }
 
 func (p *PostLikeRepositoryImpl) FindByClientID(clientID uint) ([]models.PostLike, error) {
 	var postLikes []models.PostLike
-	err := p.Db.Where("client_id = ?", clientID).Order("created_at DESC").Find(&postLikes).Error
+	err := p.Db.Where("client_id = ?", clientID).
+		Order("created_at DESC").
+		Limit(ListQueryLimit).
+		Find(&postLikes).Error
 	return postLikes, err
 }
 

@@ -13,6 +13,12 @@ type FeedPostController struct {
 	feedPostService service.FeedPostService
 }
 
+// maxFeedLimit is the server-side ceiling for the PUBLIC feed page size
+// (GET /feed-posts?limit=...). The default page is 20; anything above this is
+// clamped so a single request cannot drag the whole feed (and its preloads)
+// through the pipeline.
+const maxFeedLimit = 100
+
 func NewFeedPostController(service service.FeedPostService) *FeedPostController {
 	return &FeedPostController{feedPostService: service}
 }
@@ -136,6 +142,17 @@ func (c *FeedPostController) FindByID(ctx *gin.Context) {
 func (c *FeedPostController) FindAll(ctx *gin.Context) {
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+
+	// Cap the public page size server-side. A client could otherwise ask for
+	// limit=1000000 and force the whole feed through the preloads + COUNT
+	// pipeline. Clamp (rather than reject) so an out-of-range value still gets
+	// a useful page instead of a 400, and echo the effective value back.
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > maxFeedLimit {
+		limit = maxFeedLimit
+	}
 
 	// Optionally extract clientID if JWT is present (feed is public, auth is optional)
 	var clientID *uint

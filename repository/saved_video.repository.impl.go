@@ -72,6 +72,9 @@ func (r *SavedVideoRepositoryImpl) Toggle(postID uint, clientID uint) (bool, err
 
 func (r *SavedVideoRepositoryImpl) FindByClientID(clientID uint) ([]models.SavedVideo, error) {
 	var savedVideos []models.SavedVideo
-	err := r.Db.Where("client_id = ?", clientID).Order("created_at DESC").Find(&savedVideos).Error
+	err := r.Db.Where("client_id = ?", clientID).
+		Order("created_at DESC").
+		Limit(ListQueryLimit).
+		Find(&savedVideos).Error
 	return savedVideos, err
 }

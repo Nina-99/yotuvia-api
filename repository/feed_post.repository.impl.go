@@ -89,7 +89,9 @@ func (r *FeedPostRepositoryImpl) FindActiveByCenter(centerID uint) ([]models.Fee
 	var posts []models.FeedPost
 	err := applyFeedPreloads(r.db).
 		Where("beauty_center_id = ? AND is_active = ?", centerID, true).
-		Order("is_promo DESC, created_at DESC").Find(&posts).Error
+		Order("is_promo DESC, created_at DESC").
+		Limit(ListQueryLimit).
+		Find(&posts).Error
 	return posts, err
 }
 
@@ -99,7 +101,9 @@ func (r *FeedPostRepositoryImpl) FindByPersonnelID(personnelID uint) ([]models.F
 	err := r.db.Preload("BeautyCenter").
 		Preload("Service.Category").
 		Where("personnel_id = ?", personnelID).
-		Order("created_at desc").Find(&posts).Error
+		Order("created_at desc").
+		Limit(ListQueryLimit).
+		Find(&posts).Error
 	return posts, err
 }
 
@@ -109,7 +113,9 @@ func (r *FeedPostRepositoryImpl) FindAllByCenter(centerID uint) ([]models.FeedPo
 	var posts []models.FeedPost
 	err := applyFeedPreloads(r.db).
 		Where("beauty_center_id = ?", centerID).
-		Order("created_at desc").Find(&posts).Error
+		Order("created_at desc").
+		Limit(ListQueryLimit).
+		Find(&posts).Error
 	return posts, err
 }
 
