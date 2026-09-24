@@ -17,6 +17,11 @@ var (
 	ErrForbidden           = errors.New("forbidden")
 )
 
+// asClient reports whether the actor is an end client. Clients authenticate
+// with role "client" (see middleware/authorize.middleware.go); staff are
+// "personnel" and centers are "beauty_center".
+func (a FeedActor) asClient() bool { return a.Role == "client" }
+
 type VideoCommentService interface {
 	CreateComment(actor FeedActor, feedPostID uint, req request.CreateCommentRequest) (response.CommentResponse, error)
 	ReplyToComment(actor FeedActor, commentID uint, req request.ReplyRequest) (response.CommentResponse, error)
@@ -72,8 +77,11 @@ func (s *VideoCommentServiceImpl) CreateComment(actor FeedActor, feedPostID uint
 		Body:       req.Body,
 		IsOfficial: false,
 	}
-	// Set ClientID only for authenticated client comments (not staff/center).
-	if actor.Role == "" {
+	// Attribute the comment to the authoring client. Clients authenticate with
+	// role "client" (never ""), so the old `actor.Role == ""` check never fired
+	// and every client comment was persisted with client_id NULL. Staff/center
+	// comments carry no client_id by design.
+	if actor.asClient() {
 		cid := actor.UserID
 		comment.ClientID = &cid
 	}
