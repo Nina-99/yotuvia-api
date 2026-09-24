@@ -16,8 +16,17 @@ func VideoWatchEventRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator
 	likeRepo := repository.NewPostLikeRepositoryImpl(db)
 	savedRepo := repository.NewSavedVideoRepositoryImpl(db)
 	watchSvc := service.NewVideoWatchEventServiceImpl(watchRepo, feedRepo, likeRepo, savedRepo, validate)
+
+	// FeedPostServiceImpl must be wired with the same real repositories as
+	// FeedPostRoutes. FindAll dereferences PostLikeRepository and
+	// SavedVideoRepository whenever a client id is present, and the
+	// personalized endpoint is JWT-protected, so those paths are always
+	// reached. Passing nil here caused a runtime nil-pointer 500.
+	bcRepo := repository.NewBeautyCenterRepositoryImpl(db)
+	personnelRepo := repository.NewPersonnelRepositoryImpl(db)
+	serviceRepo := repository.NewServiceRepositoryImpl(db)
 	repoComment := repository.NewVideoCommentRepositoryImpl(db)
-	feedSvc := service.NewFeedPostServiceImpl(feedRepo, nil, nil, nil, nil, nil, repoComment, validate)
+	feedSvc := service.NewFeedPostServiceImpl(feedRepo, bcRepo, personnelRepo, serviceRepo, likeRepo, savedRepo, repoComment, validate)
 	ctrl := controller.NewVideoWatchEventController(watchSvc, feedSvc)
 
 	events := rg.Group("/video-watch-events")
