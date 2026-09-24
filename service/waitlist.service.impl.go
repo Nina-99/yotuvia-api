@@ -14,6 +14,23 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
+// WaitlistServiceImpl dependency contract.
+//
+// WaitlistRepository is REQUIRED by every method and is enforced by
+// requireDeps in the constructor.
+//
+// The others are needed only by SPECIFIC methods, so a nil is a legitimate
+// configuration and must never be enforced at construction:
+//
+//	Validate              — Join
+//	ReservationRepository — clientHoldsSlot (Join), Claim
+//	ReservationService    — Claim
+//	ServiceRepository     — Join
+//	ClientRepository      — Join
+//	NotificationService   — notifyOffer (OfferForFreedSlot, SweepExpiredOffers)
+//
+// The Phase 3 ticker calls only SweepExpiredOffers, which needs
+// WaitlistRepository + NotificationService; scheduler.go wires both.
 type WaitlistServiceImpl struct {
 	WaitlistRepository    repository.WaitlistRepository
 	ReservationRepository repository.ReservationRepository
@@ -33,6 +50,9 @@ func NewWaitlistServiceImpl(
 	notificationSvc NotificationService,
 	validate *validator.Validate,
 ) WaitlistService {
+	requireDeps("NewWaitlistServiceImpl",
+		dep("WaitlistRepository", waitlistRepo),
+	)
 	return &WaitlistServiceImpl{
 		WaitlistRepository:    waitlistRepo,
 		ReservationRepository: reservationRepo,

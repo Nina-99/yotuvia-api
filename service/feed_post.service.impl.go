@@ -37,6 +37,11 @@ type FeedPostServiceImpl struct {
 	Validate               *validator.Validate
 }
 
+// NewFeedPostServiceImpl builds the feed service. Every dependency below is
+// REQUIRED: FindAll dereferences FeedPost/PostLike/SavedVideo/Comment, the
+// write paths dereference Personnel/Service, and the feed is public, so there
+// is no reachable configuration in which any of them may be nil. requireDeps
+// fails bootstrap instead of letting a nil surface as a request-time 500.
 func NewFeedPostServiceImpl(
 	feedPostRepo repository.FeedPostRepository,
 	beautyCenterRepo repository.BeautyCenterRepository,
@@ -47,6 +52,16 @@ func NewFeedPostServiceImpl(
 	commentRepo repository.VideoCommentRepository,
 	validate *validator.Validate,
 ) FeedPostService {
+	requireDeps("NewFeedPostServiceImpl",
+		dep("FeedPostRepository", feedPostRepo),
+		dep("BeautyCenterRepository", beautyCenterRepo),
+		dep("PersonnelRepository", personnelRepo),
+		dep("ServiceRepository", serviceRepo),
+		dep("PostLikeRepository", postLikeRepo),
+		dep("SavedVideoRepository", savedVideoRepo),
+		dep("CommentRepository", commentRepo),
+		dep("Validate", validate),
+	)
 	return &FeedPostServiceImpl{
 		FeedPostRepository:     feedPostRepo,
 		BeautyCenterRepository: beautyCenterRepo,

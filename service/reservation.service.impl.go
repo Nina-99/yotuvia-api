@@ -17,6 +17,34 @@ import (
 	"gorm.io/gorm"
 )
 
+// ReservationServiceImpl dependency contract.
+//
+// ReservationRepository is REQUIRED by every method and is enforced by
+// requireDeps in the constructor.
+//
+// The remaining dependencies are needed only by SPECIFIC methods, so a nil is
+// a legitimate configuration (configs/scheduler.go wires several as nil) and
+// must never be enforced at construction:
+//
+//	Validate             — Create, CreateAdminReservation, Update
+//	ServiceRepository    — Create/CreateAdminReservation (createReservationCore), Update
+//	PersonnelRepository  — CreateAdminReservation, AssignPersonnel
+//	ClientRepository     — Create (trust), CreateAdminReservation, Cancel (late-cancel),
+//	                       RecordNoShow, RequiresDeposit, VerifyQR (attendance reward)
+//	NotificationService  — CreateAdminReservation, AssignPersonnel, UploadProof,
+//	                       ReviewProof, SendDueReminders, NotifyPersonnel* helpers
+//	CenterRepository     — Cancel + applyDepositDecision (both nil-guarded)
+//	TokenAccountRepo     — VerifyQR (unguarded)
+//	TokenAccountService  — VerifyQR (unguarded)
+//	LoyaltyService       — Create (nil-guarded), VerifyQR (unguarded)
+//	PromotionService     — Create (nil-guarded)
+//	MissionService       — VerifyQR (nil-guarded)
+//	MarketConfigService  — VerifyQR (nil-guarded)
+//
+// The Phase 3 ticker calls only SendDueReminders, SweepNoShows and
+// ExpireHolds, which need ReservationRepository + NotificationService +
+// ClientRepository — all of which scheduler.go wires. The nil deps above are
+// never reachable from those three methods.
 type ReservationServiceImpl struct {
 	PersonnelRepository   repository.PersonnelRepository
 	ReservationRepository repository.ReservationRepository
@@ -48,6 +76,9 @@ func NewReservationServiceImpl(
 	validate *validator.Validate,
 	centerRepository repository.BeautyCenterRepository,
 ) ReservationService {
+	requireDeps("NewReservationServiceImpl",
+		dep("ReservationRepository", reservationRepository),
+	)
 	return &ReservationServiceImpl{
 		ReservationRepository: reservationRepository,
 		PersonnelRepository:   personnelRepository,
@@ -1149,6 +1180,13 @@ func (s *ReservationServiceImpl) GenerateVerificationToken(reservationID uint, c
 }
 
 func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint) (*models.Reservation, bool, error) {
+	// VerifyQR closes the token-economy loop, so it needs the services the
+	// Phase 3 scheduler deliberately omits (see the struct contract). Return a
+	// clear error instead of dereferencing a nil dependency.
+	if s.TokenAccountService == nil || s.TokenAccountRepo == nil || s.LoyaltyService == nil {
+		return nil, false, fmt.Errorf("reservation: VerifyQR requires TokenAccountService, TokenAccountRepo and LoyaltyService to be wired")
+	}
+
 	reservation, err := s.ReservationRepository.FindByToken(token)
 	if err != nil || reservation == nil {
 		return nil, false, apperrors.ErrNotFound
