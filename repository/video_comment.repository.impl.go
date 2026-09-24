@@ -28,7 +28,17 @@ func (r *VideoCommentRepositoryImpl) FindByID(id uint) (*models.VideoComment, er
 
 func (r *VideoCommentRepositoryImpl) FindByFeedPost(feedPostID uint, cursor *uint, limit int) ([]models.VideoComment, error) {
 	var comments []models.VideoComment
-	query := r.db.Where("feed_post_id = ? AND parent_id IS NULL", feedPostID).
+	// Preload the direct replies so the list response carries them in the SAME
+	// payload the client expects. GORM issues one extra SELECT for the whole
+	// page (WHERE parent_id IN (...)), never one per parent. Replies are ordered
+	// created_at ASC, matching FindReplies exactly. Hidden rows are NOT filtered
+	// here: the response exposes is_hidden and the client decides, which is the
+	// existing moderation contract (GetCommentReplies behaves the same way).
+	query := r.db.
+		Preload("Replies", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at ASC")
+		}).
+		Where("feed_post_id = ? AND parent_id IS NULL", feedPostID).
 		Order("created_at DESC")
 
 	if cursor != nil {

@@ -90,7 +90,8 @@ func (s *VideoCommentServiceImpl) CreateComment(actor FeedActor, feedPostID uint
 		return response.CommentResponse{}, err
 	}
 
-	return s.mapToResponse(comment), nil
+	m := s.newCommentMapper([]models.VideoComment{*comment})
+	return m.mapComment(comment), nil
 }
 
 func (s *VideoCommentServiceImpl) ReplyToComment(actor FeedActor, commentID uint, req request.ReplyRequest) (response.CommentResponse, error) {
@@ -129,7 +130,8 @@ func (s *VideoCommentServiceImpl) ReplyToComment(actor FeedActor, commentID uint
 		return response.CommentResponse{}, err
 	}
 
-	return s.mapToResponse(reply), nil
+	m := s.newCommentMapper([]models.VideoComment{*reply})
+	return m.mapComment(reply), nil
 }
 
 func (s *VideoCommentServiceImpl) UpdateComment(actor FeedActor, commentID uint, req request.UpdateCommentRequest) (response.CommentResponse, error) {
@@ -151,7 +153,8 @@ func (s *VideoCommentServiceImpl) UpdateComment(actor FeedActor, commentID uint,
 		return response.CommentResponse{}, err
 	}
 
-	return s.mapToResponse(comment), nil
+	m := s.newCommentMapper([]models.VideoComment{*comment})
+	return m.mapComment(comment), nil
 }
 
 func (s *VideoCommentServiceImpl) DeleteComment(actor FeedActor, commentID uint) error {
@@ -220,8 +223,9 @@ func (s *VideoCommentServiceImpl) ListComments(feedPostID uint, cursor *uint, li
 	}
 
 	result := make([]response.CommentResponse, 0, len(comments))
+	m := s.newCommentMapper(comments)
 	for i := range comments {
-		result = append(result, s.mapToResponse(&comments[i]))
+		result = append(result, m.mapComment(&comments[i]))
 	}
 	return result, nextCursor, nil
 }
@@ -233,27 +237,96 @@ func (s *VideoCommentServiceImpl) GetCommentReplies(commentID uint) ([]response.
 	}
 
 	result := make([]response.CommentResponse, 0, len(replies))
+	m := s.newCommentMapper(replies)
 	for i := range replies {
-		result = append(result, s.mapToResponse(&replies[i]))
+		result = append(result, m.mapComment(&replies[i]))
 	}
 	return result, nil
 }
 
-// mapToResponse transforms a domain model into a response DTO.
-func (s *VideoCommentServiceImpl) mapToResponse(c *models.VideoComment) response.CommentResponse {
+// commentResponseMapper holds the author/feed-post lookups shared by a batch of
+// comments, resolved in one query each. It replaces the old per-comment
+// FindById/FindByID N+1 in mapToResponse.
+type commentResponseMapper struct {
+	clients map[uint]*models.Client
+	posts   map[uint]*models.FeedPost
+}
+
+// newCommentMapper inspects a page (top-level comments and their direct
+// replies), collects the distinct client and feed-post ids, and resolves each
+// set with a single FindByIDs. Lookups stay best-effort, matching the old
+// per-row behaviour: on error the entry is simply absent and the author renders
+// without the unresolved fields.
+func (s *VideoCommentServiceImpl) newCommentMapper(comments []models.VideoComment) *commentResponseMapper {
+	m := &commentResponseMapper{
+		clients: make(map[uint]*models.Client),
+		posts:   make(map[uint]*models.FeedPost),
+	}
+
+	clientIDs := make(map[uint]struct{})
+	postIDs := make(map[uint]struct{})
+
+	var collect func(cs []models.VideoComment)
+	collect = func(cs []models.VideoComment) {
+		for i := range cs {
+			c := &cs[i]
+			if c.ClientID != nil {
+				clientIDs[*c.ClientID] = struct{}{}
+			}
+			if c.IsOfficial {
+				postIDs[c.FeedPostID] = struct{}{}
+			}
+			if len(c.Replies) > 0 {
+				collect(c.Replies)
+			}
+		}
+	}
+	collect(comments)
+
+	if len(clientIDs) > 0 {
+		ids := make([]uint, 0, len(clientIDs))
+		for id := range clientIDs {
+			ids = append(ids, id)
+		}
+		if clients, err := s.clientRepo.FindByIDs(ids); err == nil {
+			for i := range clients {
+				m.clients[clients[i].ID] = &clients[i]
+			}
+		}
+	}
+
+	if len(postIDs) > 0 {
+		ids := make([]uint, 0, len(postIDs))
+		for id := range postIDs {
+			ids = append(ids, id)
+		}
+		if posts, err := s.feedPostRepo.FindByIDs(ids); err == nil {
+			for i := range posts {
+				m.posts[posts[i].ID] = &posts[i]
+			}
+		}
+	}
+
+	return m
+}
+
+// mapComment transforms a domain model (and, recursively, its direct replies)
+// into a response DTO using the pre-resolved lookups. It performs no database
+// access. Reply nesting stays one level deep: only the top-level comment's
+// Replies slice is walked.
+func (m *commentResponseMapper) mapComment(c *models.VideoComment) response.CommentResponse {
 	author := response.AuthorInfo{}
 
 	if c.ClientID != nil {
 		author.ID = *c.ClientID
-		if cl, err := s.clientRepo.FindById(*c.ClientID); err == nil && cl != nil {
+		if cl, ok := m.clients[*c.ClientID]; ok && cl != nil {
 			author.Name = cl.FirstName + " " + cl.LastName
 			author.Avatar = cl.AvatarURL
 		}
 	} else if c.IsOfficial {
 		// Official reply: author is the center that owns the feed post.
 		author.IsCenter = true
-		fp, err := s.feedPostRepo.FindByID(c.FeedPostID)
-		if err == nil && fp != nil {
+		if fp, ok := m.posts[c.FeedPostID]; ok && fp != nil {
 			author.CenterID = fp.BeautyCenterID
 			// The center name will be filled by the controller layer if needed.
 			author.Name = "Centro"
@@ -263,7 +336,7 @@ func (s *VideoCommentServiceImpl) mapToResponse(c *models.VideoComment) response
 	// Recursively map replies.
 	replies := make([]response.CommentResponse, 0, len(c.Replies))
 	for i := range c.Replies {
-		replies = append(replies, s.mapToResponse(&c.Replies[i]))
+		replies = append(replies, m.mapComment(&c.Replies[i]))
 	}
 
 	return response.CommentResponse{

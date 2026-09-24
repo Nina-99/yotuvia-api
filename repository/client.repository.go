@@ -21,6 +21,10 @@ type ClientRepository interface {
 	Update(user *models.Client) error
 	Delete(user *models.Client) error
 	FindById(userID uint) (*models.Client, error)
+	// FindByIDs resolves a set of client ids in ONE query. It keeps FindById's
+	// semantics (GORM's default scope excludes soft-deleted rows) and is the
+	// batch counterpart used to render comment pages without an N+1.
+	FindByIDs(ids []uint) ([]models.Client, error)
 	// FindAllAdmin returns the clients that have at least one reservation (of
 	// any status) at centerID — the authz scoping for GET /client (spec:
 	// Client Endpoint Ownership) — with COMPLETED-only summary metrics and a

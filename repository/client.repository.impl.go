@@ -152,6 +152,18 @@ func (r *ClientRepositoryImpl) FindById(clienId uint) (*models.Client, error) {
 	return &user, nil
 }
 
+// FindByIDs implements ClientRepository — resolves a set of client ids in one
+// round trip. Like FindById it relies on GORM's default scope, so soft-deleted
+// clients are excluded.
+func (r *ClientRepositoryImpl) FindByIDs(ids []uint) ([]models.Client, error) {
+	clients := make([]models.Client, 0, len(ids))
+	if len(ids) == 0 {
+		return clients, nil
+	}
+	err := r.db.Where("id IN ?", ids).Find(&clients).Error
+	return clients, err
+}
+
 // FindByEmail implements ClientRepository
 func (r *ClientRepositoryImpl) FindByEmail(email string) (*models.Client, error) {
 	var client models.Client
