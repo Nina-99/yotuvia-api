@@ -11,6 +11,10 @@ type FeedPostRepository interface {
 	FindAllActive(page, limit int) ([]models.FeedPost, int64, error)
 	// FindActiveByCenter returns active posts of one center (public profile).
 	FindActiveByCenter(centerID uint) ([]models.FeedPost, error)
+	// FindByIDs returns every post matching the given ids in ONE query,
+	// including inactive rows (used to resolve affinity signals without an
+	// N+1 of FindByID calls).
+	FindByIDs(ids []uint) ([]models.FeedPost, error)
 	// FindByPersonnelID / FindAllByCenter return ALL states for management
 	// surfaces (staff own list; center moderation list incl. staff videos).
 	FindByPersonnelID(personnelID uint) ([]models.FeedPost, error)

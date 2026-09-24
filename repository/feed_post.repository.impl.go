@@ -39,10 +39,11 @@ func (r *FeedPostRepositoryImpl) FindByID(id uint) (*models.FeedPost, error) {
 }
 
 // feedPreloads lists every association the feed surfaces require, including
-// the category chain for filter inheritance.
+// the category chain for filter inheritance. PostLike rows are deliberately
+// NOT preloaded: the like count is computed live with a grouped COUNT, and
+// nothing reads post.Likes.
 var feedPreloads = []string{
 	"BeautyCenter",
-	"Likes",
 	"Service",
 	"Service.Category",
 	"Personnel",
@@ -53,6 +54,19 @@ func applyFeedPreloads(q *gorm.DB) *gorm.DB {
 		q = q.Preload(p)
 	}
 	return q
+}
+
+// FindByIDs implements FeedPostRepository — resolves a set of post ids in a
+// single round trip. It applies the same preloads as FindByID and, like
+// FindByID, does NOT filter is_active so affinity signals keep referencing the
+// exact rows the previous per-id lookups returned.
+func (r *FeedPostRepositoryImpl) FindByIDs(ids []uint) ([]models.FeedPost, error) {
+	posts := make([]models.FeedPost, 0, len(ids))
+	if len(ids) == 0 {
+		return posts, nil
+	}
+	err := applyFeedPreloads(r.db).Where("id IN ?", ids).Find(&posts).Error
+	return posts, err
 }
 
 // FindAllActive implements FeedPostRepository — public feed filters suspended.
@@ -82,7 +96,7 @@ func (r *FeedPostRepositoryImpl) FindActiveByCenter(centerID uint) ([]models.Fee
 // FindByPersonnelID implements FeedPostRepository — management list: all states.
 func (r *FeedPostRepositoryImpl) FindByPersonnelID(personnelID uint) ([]models.FeedPost, error) {
 	var posts []models.FeedPost
-	err := r.db.Preload("BeautyCenter").Preload("Likes").
+	err := r.db.Preload("BeautyCenter").
 		Preload("Service.Category").
 		Where("personnel_id = ?", personnelID).
 		Order("created_at desc").Find(&posts).Error

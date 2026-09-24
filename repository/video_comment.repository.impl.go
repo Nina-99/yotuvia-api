@@ -62,3 +62,30 @@ func (r *VideoCommentRepositoryImpl) CountByFeedPostID(feedPostID uint) (int64, 
 		Count(&count).Error
 	return count, err
 }
+
+// CountByFeedPostIDs runs one grouped COUNT for a page of posts. It preserves
+// CountByFeedPostID's semantics exactly: top-level comments only (parent_id IS
+// NULL) and soft-deleted rows excluded by GORM's default scope.
+func (r *VideoCommentRepositoryImpl) CountByFeedPostIDs(ids []uint) (map[uint]int64, error) {
+	counts := make(map[uint]int64, len(ids))
+	if len(ids) == 0 {
+		return counts, nil
+	}
+
+	var rows []struct {
+		FeedPostID uint
+		Count      int64
+	}
+	err := r.db.Model(&models.VideoComment{}).
+		Select("feed_post_id, COUNT(*) AS count").
+		Where("feed_post_id IN ? AND parent_id IS NULL", ids).
+		Group("feed_post_id").
+		Scan(&rows).Error
+	if err != nil {
+		return counts, err
+	}
+	for _, row := range rows {
+		counts[row.FeedPostID] = row.Count
+	}
+	return counts, nil
+}

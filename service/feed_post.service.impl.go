@@ -264,12 +264,32 @@ func (s *FeedPostServiceImpl) FindAll(page, limit int, clientID *uint) ([]respon
 		resp := s.mapToResponse(post)
 		resp.IsLiked = likedPostIDs[post.ID]
 		resp.IsSaved = savedPostIDs[post.ID]
-		if cnt, err := s.CommentRepository.CountByFeedPostID(post.ID); err == nil {
-			resp.CommentsCount = int(cnt)
-		}
 		res = append(res, resp)
 	}
+
+	// One grouped COUNT per page instead of one COUNT per post (N+1).
+	s.attachCommentCounts(res)
 	return res, total, nil
+}
+
+// attachCommentCounts fills CommentsCount with one grouped query for the whole
+// page. Missing ids (no comments) stay at zero; a query error leaves the mapped
+// values untouched rather than blanking the whole page.
+func (s *FeedPostServiceImpl) attachCommentCounts(res []response.FeedPostResponse) {
+	if len(res) == 0 {
+		return
+	}
+	ids := make([]uint, 0, len(res))
+	for i := range res {
+		ids = append(ids, res[i].ID)
+	}
+	counts, err := s.CommentRepository.CountByFeedPostIDs(ids)
+	if err != nil {
+		return
+	}
+	for i := range res {
+		res[i].CommentsCount = int(counts[res[i].ID])
+	}
 }
 
 // FindMine returns every post authored by the actor (staff id or center),

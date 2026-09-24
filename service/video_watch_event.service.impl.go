@@ -63,6 +63,33 @@ func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit in
 	likes, _ := s.PostLikeRepo.FindByClientID(clientID)
 	savedVideos, _ := s.SavedVideoRepo.FindByClientID(clientID)
 
+	// Resolve every referenced post in ONE query. The previous code called
+	// FindByID once per watch event, per like and per save (each running 5
+	// preloads), then looked the same post up repeatedly. Fetch the union of
+	// ids once and index it. FindByIDs keeps FindByID's semantics: it does NOT
+	// filter is_active, so inactive posts still contribute to affinity exactly
+	// as they did before.
+	idSet := make(map[uint]struct{}, len(watchEvents)+len(likes)+len(savedVideos))
+	for _, w := range watchEvents {
+		idSet[w.FeedPostID] = struct{}{}
+	}
+	for _, l := range likes {
+		idSet[l.FeedPostID] = struct{}{}
+	}
+	for _, sv := range savedVideos {
+		idSet[sv.FeedPostID] = struct{}{}
+	}
+	ids := make([]uint, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	postByID := make(map[uint]models.FeedPost, len(ids))
+	if posts, err := s.FeedPostRepo.FindByIDs(ids); err == nil {
+		for _, p := range posts {
+			postByID[p.ID] = p
+		}
+	}
+
 	// 2. Build preference scores
 	categoryScore := make(map[uint]float64)
 	centerScore := make(map[uint]float64)
@@ -70,8 +97,8 @@ func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit in
 
 	// From watch events
 	for _, w := range watchEvents {
-		post, err := s.FeedPostRepo.FindByID(w.FeedPostID)
-		if err != nil || post == nil {
+		post, ok := postByID[w.FeedPostID]
+		if !ok {
 			continue
 		}
 		var weight float64
@@ -93,8 +120,8 @@ func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit in
 
 	// From likes
 	for _, like := range likes {
-		post, err := s.FeedPostRepo.FindByID(like.FeedPostID)
-		if err != nil || post == nil {
+		post, ok := postByID[like.FeedPostID]
+		if !ok {
 			continue
 		}
 		if post.ServiceID != nil && post.Service.CategoryID != 0 {
@@ -108,8 +135,8 @@ func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit in
 
 	// From saved videos
 	for _, sv := range savedVideos {
-		post, err := s.FeedPostRepo.FindByID(sv.FeedPostID)
-		if err != nil || post == nil {
+		post, ok := postByID[sv.FeedPostID]
+		if !ok {
 			continue
 		}
 		if post.ServiceID != nil && post.Service.CategoryID != 0 {
