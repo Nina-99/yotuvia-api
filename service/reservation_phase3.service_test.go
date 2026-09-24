@@ -253,7 +253,7 @@ func TestWaitlistFlow(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, n)
 		// Bob may hold older entries from previous subtests: scope by slot.
-		entries, err := waitSvc.ListMine(bob)
+		entries, err := waitSvc.ListMine(bob, false)
 		require.NoError(t, err)
 		var second *models.WaitlistEntry
 		for i := range entries {
@@ -267,13 +267,13 @@ func TestWaitlistFlow(t *testing.T) {
 	})
 
 	t.Run("leave cancels own entries", func(t *testing.T) {
-		entries, err := waitSvc.ListMine(bob)
+		entries, err := waitSvc.ListMine(bob, false)
 		require.NoError(t, err)
 		require.NotEmpty(t, entries)
 		for _, e := range entries {
 			require.NoError(t, waitSvc.Leave(e.ID, bob))
 		}
-		after, err := waitSvc.ListMine(bob)
+		after, err := waitSvc.ListMine(bob, false)
 		require.NoError(t, err)
 		assert.Empty(t, after)
 	})

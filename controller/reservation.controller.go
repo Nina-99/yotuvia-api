@@ -600,8 +600,10 @@ func (c *ReservationController) LeaveWaitlist(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Waitlist entry cancelled"})
 }
 
-// ListMyWaitlist returns the caller's live entries:
+// ListMyWaitlist returns the caller's waitlist entries:
 // GET /reservation/waitlist/mine (client). Static path wins over /:id.
+// The optional history=true query switches to the full, any-status history
+// (newest first); absent/false keeps the backward-compatible live listing.
 func (c *ReservationController) ListMyWaitlist(ctx *gin.Context) {
 	if c.waitlistService == nil {
 		ctx.JSON(http.StatusNotImplemented, gin.H{"error": "waitlist unavailable"})
@@ -609,7 +611,9 @@ func (c *ReservationController) ListMyWaitlist(ctx *gin.Context) {
 	}
 	clientID := ctx.GetUint("clientID")
 
-	entries, err := c.waitlistService.ListMine(clientID)
+	history, _ := strconv.ParseBool(ctx.DefaultQuery("history", "false"))
+
+	entries, err := c.waitlistService.ListMine(clientID, history)
 	if err != nil {
 		c.writeError(ctx, err)
 		return

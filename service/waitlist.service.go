@@ -12,8 +12,11 @@ type WaitlistService interface {
 	Join(req request.JoinWaitlistRequest, clientID uint) (*models.WaitlistEntry, error)
 	// Leave cancels the caller's own WAITING/OFFERED entry.
 	Leave(entryID, clientID uint) error
-	// ListMine returns the caller's live (WAITING/OFFERED) entries.
-	ListMine(clientID uint) ([]models.WaitlistEntry, error)
+	// ListMine returns the caller's entries. With history=false it returns
+	// only live (WAITING/OFFERED) entries; with history=true it returns the
+	// full history, any status, newest first. Both populate Position for live
+	// entries (0 for closed ones) and expire lapsed offers at read time.
+	ListMine(clientID uint, history bool) ([]models.WaitlistEntry, error)
 	// OfferForFreedSlot offers a freed slot to the first waiter (FIFO).
 	// Returns nil when the queue is empty. Called after a cancellation and
 	// by the expiry sweep for the next waiter.

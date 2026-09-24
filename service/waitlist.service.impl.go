@@ -168,47 +168,140 @@ func (s *WaitlistServiceImpl) Leave(entryID, clientID uint) error {
 	return s.WaitlistRepository.Update(entry)
 }
 
-// ListMine implements WaitlistService.
-func (s *WaitlistServiceImpl) ListMine(clientID uint) ([]models.WaitlistEntry, error) {
-	return s.WaitlistRepository.FindLive(clientID)
+// ListMine implements WaitlistService. Live listing runs read-time expiry
+// first so a lapsed offer never reaches the client as claimable; both modes
+// then attach the queue Position.
+func (s *WaitlistServiceImpl) ListMine(clientID uint, history bool) ([]models.WaitlistEntry, error) {
+	if history {
+		entries, err := s.WaitlistRepository.FindAllByClient(clientID)
+		if err != nil {
+			return nil, err
+		}
+		s.attachPositions(entries)
+		return entries, nil
+	}
+	entries, err := s.WaitlistRepository.FindLive(clientID)
+	if err != nil {
+		return nil, err
+	}
+	entries = s.expireLapsedOffers(entries)
+	s.attachPositions(entries)
+	return entries, nil
 }
 
-// offerRow moves one WAITING row to OFFERED with a fresh claim window and
-// notifies the client. In-app is the record, push the nudge (best-effort).
-func (s *WaitlistServiceImpl) offerRow(entry *models.WaitlistEntry, now time.Time) error {
-	expires := now.Add(models.WaitlistOfferMinutes * time.Minute)
-	entry.Status = models.WaitlistOffered
-	entry.OfferedAt = &now
-	entry.OfferExpiresAt = &expires
-	if err := s.WaitlistRepository.Update(entry); err != nil {
-		return err
+// expireLapsedOffers implements read-time expiry (A3). It walks only the
+// caller's live page and touches just the OFFERED rows whose window already
+// lapsed: each is flipped to EXPIRED and its slot is passed to the next
+// waiter. Every failure is logged and swallowed so a stale-offer problem can
+// never break the listing. Expired rows are dropped from the returned page.
+func (s *WaitlistServiceImpl) expireLapsedOffers(entries []models.WaitlistEntry) []models.WaitlistEntry {
+	now := time.Now()
+	out := make([]models.WaitlistEntry, 0, len(entries))
+	for i := range entries {
+		e := entries[i]
+		if e.Status == models.WaitlistOffered && e.OfferExpiresAt != nil && e.OfferExpiresAt.Before(now) {
+			e.Status = models.WaitlistExpired
+			if err := s.WaitlistRepository.Update(&e); err != nil {
+				utils.Log.Errorf("[WAITLIST] read-time expiry failed for entry %d: %v", e.ID, err)
+			}
+			if _, err := s.OfferForFreedSlot(e.BeautyCenterID, e.Date, e.StartTime); err != nil {
+				utils.Log.Errorf("[WAITLIST] read-time cascade failed after expiring entry %d: %v", e.ID, err)
+			}
+			continue // no longer live: never ship it as claimable
+		}
+		out = append(out, e)
 	}
-	dataStr := fmt.Sprintf(`{"waitlist_id":%d,"reservation_date":%q}`, entry.ID, entry.Date.Format("2006-01-02"))
+	return out
+}
+
+// attachPositions fills Position for the page: a 1-based FIFO rank among the
+// live entries of the same slot, ordered by created_at ASC (OFFERED holds 1).
+// Closed entries keep 0. The rank comes from one batched query over the
+// distinct slots of the page — no COUNT per row. A lookup failure logs and
+// leaves positions at 0 rather than failing the listing.
+func (s *WaitlistServiceImpl) attachPositions(entries []models.WaitlistEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	seen := make(map[string]struct{}, len(entries))
+	slots := make([]repository.WaitlistSlot, 0, len(entries))
+	for i := range entries {
+		if entries[i].Status != models.WaitlistWaiting && entries[i].Status != models.WaitlistOffered {
+			continue
+		}
+		key := waitlistSlotKey(entries[i].BeautyCenterID, entries[i].Date, entries[i].StartTime)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		slots = append(slots, repository.WaitlistSlot{
+			BeautyCenterID: entries[i].BeautyCenterID,
+			Date:           entries[i].Date,
+			StartTime:      entries[i].StartTime,
+		})
+	}
+	if len(slots) == 0 {
+		return
+	}
+	live, err := s.WaitlistRepository.FindLiveForSlots(slots)
+	if err != nil {
+		utils.Log.Errorf("[WAITLIST] position lookup failed: %v", err)
+		return
+	}
+	counts := make(map[string]int, len(slots))
+	positions := make(map[uint]int, len(live))
+	for i := range live {
+		key := waitlistSlotKey(live[i].BeautyCenterID, live[i].Date, live[i].StartTime)
+		counts[key]++
+		p := counts[key]
+		if live[i].Status == models.WaitlistOffered {
+			p = 1 // the offer holder is always at the front
+		}
+		positions[live[i].ID] = p
+	}
+	for i := range entries {
+		if p, ok := positions[entries[i].ID]; ok {
+			entries[i].Position = p
+		}
+	}
+}
+
+// waitlistSlotKey identifies a queue slot for in-memory grouping.
+func waitlistSlotKey(centerID uint, date time.Time, startTime string) string {
+	return fmt.Sprintf("%d|%s|%s", centerID, date.Format("2006-01-02"), startTime)
+}
+
+// notifyOffer tells the client a slot is theirs: an in-app record plus a push
+// nudge (best-effort). Both carry the SAME flat JSON payload so the app can
+// deep-link from either surface:
+// {"type":"waitlist_offer","waitlist_id":N,"reservation_date":"YYYY-MM-DD","start_time":"HH:MM"}.
+func (s *WaitlistServiceImpl) notifyOffer(entry *models.WaitlistEntry) {
+	payload := fmt.Sprintf(`{"type":"waitlist_offer","waitlist_id":%d,"reservation_date":%q,"start_time":%q}`,
+		entry.ID, entry.Date.Format("2006-01-02"), entry.StartTime)
 	_ = s.NotificationService.Create(entry.ClientID, "waitlist_offer",
 		"Se liberó un turno",
 		fmt.Sprintf("Tenés %d minutos para reclamar el turno del %s a las %s",
 			models.WaitlistOfferMinutes, entry.Date.Format("02/01"), entry.StartTime),
-		dataStr)
-	pushData := fmt.Sprintf(`{"type":"waitlist_offer","data":%q}`, dataStr)
+		payload)
 	_ = s.NotificationService.SendPushToClient(entry.ClientID, "Se liberó un turno",
-		fmt.Sprintf("Turno del %s a las %s disponible", entry.Date.Format("02/01"), entry.StartTime), pushData)
-	return nil
+		fmt.Sprintf("Turno del %s a las %s disponible", entry.Date.Format("02/01"), entry.StartTime), payload)
 }
 
-// OfferForFreedSlot implements WaitlistService.
+// OfferForFreedSlot implements WaitlistService. The select-and-mark is atomic
+// (repository row lock), so concurrent cancellations cannot double-offer; the
+// notification stays best-effort after the row is committed.
 func (s *WaitlistServiceImpl) OfferForFreedSlot(centerID uint, date time.Time, startTime string) (*models.WaitlistEntry, error) {
-	waiters, err := s.WaitlistRepository.FindWaiting(centerID, date, startTime)
+	now := time.Now()
+	expires := now.Add(models.WaitlistOfferMinutes * time.Minute)
+	entry, err := s.WaitlistRepository.OfferNextWaiting(centerID, date, startTime, now, expires)
 	if err != nil {
 		return nil, err
 	}
-	if len(waiters) == 0 {
+	if entry == nil {
 		return nil, nil
 	}
-	first := waiters[0]
-	if err := s.offerRow(&first, time.Now()); err != nil {
-		return nil, err
-	}
-	return &first, nil
+	s.notifyOffer(entry)
+	return entry, nil
 }
 
 // Claim implements WaitlistService.

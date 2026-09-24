@@ -37,6 +37,12 @@ type WaitlistEntry struct {
 	// OfferExpiresAt bounds the 15-minute claim window while OFFERED.
 	OfferedAt      *time.Time `json:"offered_at,omitempty"`
 	OfferExpiresAt *time.Time `json:"offer_expires_at,omitempty"`
+
+	// Position is the 1-based FIFO rank among the live entries of the same
+	// slot, computed per request. It is never persisted (gorm:"-"): OFFERED
+	// holds rank 1, WAITING entries follow by created_at ASC, and closed
+	// entries report 0.
+	Position int `gorm:"-" json:"position"`
 }
 
 // Waitlist statuses.
