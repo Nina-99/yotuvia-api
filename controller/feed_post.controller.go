@@ -245,3 +245,20 @@ func (c *FeedPostController) IncrementViews(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "view counted"})
 }
+
+// IncrementBookTaps handles POST /feed-posts/:id/book-taps (public,
+// best-effort). It mirrors IncrementViews exactly in naming, status code
+// (200), auth posture (public) and error handling: an unknown post is a
+// silent no-op like the views counter, while a malformed id is a 400.
+func (c *FeedPostController) IncrementBookTaps(ctx *gin.Context) {
+	id, err := strconv.Atoi(ctx.Param("id"))
+	if err != nil || id <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+	if err := c.feedPostService.IncrementBookTaps(uint(id)); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"message": "book tap counted"})
+}

@@ -14,7 +14,9 @@ type FeedPostResponse struct {
 	Duration       int                  `json:"duration"`
 	ViewsCount     int                  `json:"views_count"`
 	LikesCount     int                  `json:"likes_count"`
-	CreatedAt      time.Time            `json:"created_at"`
+	// BookTaps is the CTA tap counter (additive; mirrors views_count).
+	BookTaps  int       `json:"book_taps"`
+	CreatedAt time.Time `json:"created_at"`
 
 	// feat-video-feed-unification
 	IsPromo        bool   `json:"is_promo"`

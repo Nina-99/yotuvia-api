@@ -24,4 +24,11 @@ type FeedPostRepository interface {
 	FindAllByCenter(centerID uint) ([]models.FeedPost, error)
 	// IncrementViews bumps the views counter for an active post.
 	IncrementViews(id uint) error
+	// IncrementBookTaps bumps the book-CTA tap counter for an active post.
+	// Mirrors IncrementViews: public, best-effort, one increment per call.
+	IncrementBookTaps(id uint) error
+	// Exists reports whether a post with the given id exists, using a single
+	// COUNT query. Booking attribution uses it to decide whether a client
+	// tracking id resolves, without paying for the feed preloads.
+	Exists(id uint) (bool, error)
 }

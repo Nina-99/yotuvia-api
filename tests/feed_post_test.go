@@ -58,6 +58,9 @@ func setupFeedHTTPRouter(t *testing.T, db *gorm.DB, role string, userID, centerI
 		posts.PUT("/:id", ctrl.Update)
 		posts.DELETE("/:id", ctrl.Delete)
 		posts.PUT("/:id/suspend", middleware.RequireRole("beauty_center"), ctrl.Suspend)
+		// Public counters, mirroring the mounted router.
+		posts.POST("/:id/views", ctrl.IncrementViews)
+		posts.POST("/:id/book-taps", ctrl.IncrementBookTaps)
 	}
 	_ = zapLogger
 	return r

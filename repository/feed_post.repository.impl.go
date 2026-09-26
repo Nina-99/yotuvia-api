@@ -143,3 +143,20 @@ func (r *FeedPostRepositoryImpl) IncrementViews(id uint) error {
 		Where("id = ? AND is_active = ?", id, true).
 		UpdateColumn("views_count", gorm.Expr("views_count + 1")).Error
 }
+
+// IncrementBookTaps bumps book-CTA taps for an active post, mirroring
+// IncrementViews exactly (public, best-effort, one increment per call).
+func (r *FeedPostRepositoryImpl) IncrementBookTaps(id uint) error {
+	return r.db.Model(&models.FeedPost{}).
+		Where("id = ? AND is_active = ?", id, true).
+		UpdateColumn("book_taps", gorm.Expr("book_taps + 1")).Error
+}
+
+// Exists reports whether a post id resolves, in one COUNT query. It is the
+// existence probe behind booking attribution and deliberately avoids the feed
+// preloads (no association is read).
+func (r *FeedPostRepositoryImpl) Exists(id uint) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.FeedPost{}).Where("id = ?", id).Count(&count).Error
+	return count > 0, err
+}

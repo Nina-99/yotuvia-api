@@ -153,6 +153,7 @@ func TestRouterWiring_No5xxWithValidToken(t *testing.T) {
 		{"feed by center", http.MethodGet, "/api/feed-posts/center/1", "client"},
 		{"feed by personnel", http.MethodGet, "/api/feed-posts/personnel/1", "client"},
 		{"feed increment views", http.MethodPost, "/api/feed-posts/1/views", "client"},
+		{"feed increment book taps", http.MethodPost, "/api/feed-posts/1/book-taps", "client"},
 		{"feed create", http.MethodPost, "/api/feed-posts", "personnel"},
 		{"feed update", http.MethodPut, "/api/feed-posts/1", "client"},
 		{"feed delete", http.MethodDelete, "/api/feed-posts/1", "client"},

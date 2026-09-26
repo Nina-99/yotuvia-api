@@ -14,6 +14,9 @@ type FeedPost struct {
 	Duration     int    `json:"duration"`
 	ViewsCount   int    `gorm:"default:0" json:"views_count"`
 	LikesCount   int    `gorm:"default:0" json:"likes_count"`
+	// BookTaps counts CTA taps on this feed post (video → booking funnel).
+	// It is the middle signal between a view and an attributed booking.
+	BookTaps int `gorm:"default:0" json:"book_taps"`
 	IsActive     bool   `gorm:"default:true" json:"is_active"`
 	IsPromo        bool   `gorm:"default:false" json:"is_promo"`
 	ModerationNote string `gorm:"size:255" json:"moderation_note,omitempty"`

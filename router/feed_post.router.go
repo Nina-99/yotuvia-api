@@ -31,6 +31,8 @@ func FeedPostRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 		// Public: unified feed (active posts only) — optional auth for personalization.
 		posts.GET("", middleware.OptionalJWTAuthMiddleware(), ctrl.FindAll)
 		posts.POST("/:id/views", ctrl.IncrementViews)
+		// Public: book-CTA tap counter, mirrors /views.
+		posts.POST("/:id/book-taps", ctrl.IncrementBookTaps)
 		posts.GET("/center/:id", ctrl.FindByBeautyCenterID)
 		// Public: one professional's active videos, newest first.
 		posts.GET("/personnel/:id", middleware.OptionalJWTAuthMiddleware(), ctrl.FindByPersonnelID)

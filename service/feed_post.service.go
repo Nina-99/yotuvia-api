@@ -13,6 +13,8 @@ type FeedPostService interface {
 	Delete(actor FeedActor, id uint) error
 	SetSuspended(centerID, postID uint, suspend bool, note string) error
 	IncrementViews(id uint) error
+	// IncrementBookTaps records one book-CTA tap; mirrors IncrementViews.
+	IncrementBookTaps(id uint) error
 	FindAll(page, limit int, clientID *uint) ([]response.FeedPostResponse, int64, error)
 	// FindPersonnelFeed serves the public professional-profile feed (active
 	// posts only, newest first) with the same body shape and enrichment as

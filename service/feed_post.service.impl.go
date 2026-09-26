@@ -289,6 +289,12 @@ func (s *FeedPostServiceImpl) IncrementViews(id uint) error {
 	return s.FeedPostRepository.IncrementViews(id)
 }
 
+// IncrementBookTaps bumps the book-CTA tap counter; mirrors IncrementViews
+// (public, best-effort — failures are swallowed upstream).
+func (s *FeedPostServiceImpl) IncrementBookTaps(id uint) error {
+	return s.FeedPostRepository.IncrementBookTaps(id)
+}
+
 // FindAll serves the PUBLIC feed: active posts only, newest first.
 func (s *FeedPostServiceImpl) FindAll(page, limit int, clientID *uint) ([]response.FeedPostResponse, int64, error) {
 	posts, total, err := s.FeedPostRepository.FindAllActive(page, limit)
@@ -441,6 +447,7 @@ func (s *FeedPostServiceImpl) mapToResponse(post models.FeedPost) response.FeedP
 		Duration:       post.Duration,
 		ViewsCount:     post.ViewsCount,
 		LikesCount:     post.LikesCount,
+		BookTaps:       post.BookTaps,
 		CreatedAt:      post.CreatedAt,
 	}
 	if post.Service.ID != 0 {
