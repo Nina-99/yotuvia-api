@@ -98,7 +98,13 @@ func (s *ServiceServiceImpl) Update(serviceID uint, req request.UpdateServiceReq
 		service.IsActive = *req.IsActive
 	}
 	if req.TreatmentID != nil {
-		service.TreatmentID = req.TreatmentID
+		if *req.TreatmentID == 0 {
+			// 0 means "unlink": clear the catalog link. The repository uses
+			// Save, which writes every column, so a nil pointer persists NULL.
+			service.TreatmentID = nil
+		} else {
+			service.TreatmentID = req.TreatmentID
+		}
 	}
 
 	return s.ServiceRepository.Update(service)
