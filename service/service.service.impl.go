@@ -48,6 +48,7 @@ func (s *ServiceServiceImpl) Create(req request.CreateServiceRequest) (uint, err
 		Price:          req.Price,
 		ImageURL:       req.ImageURL,
 		IsActive:       req.IsActive,
+		TreatmentID:    req.TreatmentID,
 	}
 
 	if err := s.ServiceRepository.Create(&service); err != nil {
@@ -95,6 +96,9 @@ func (s *ServiceServiceImpl) Update(serviceID uint, req request.UpdateServiceReq
 	}
 	if req.IsActive != nil {
 		service.IsActive = *req.IsActive
+	}
+	if req.TreatmentID != nil {
+		service.TreatmentID = req.TreatmentID
 	}
 
 	return s.ServiceRepository.Update(service)

@@ -39,6 +39,7 @@ func fullWiringRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 		router.VideoCommentRoutes(api, db, validate)
 		router.LoyaltyRoutes(api, db, validate)
 		router.TokenRoutes(api, db, validate)
+		router.TreatmentRoutes(api, db, validate)
 		router.PaymentConfigRoutes(api, db, validate)
 		router.PersonnelRoutes(api, db, validate)
 		router.PersonnelInvitationRoutes(api, db, validate)
@@ -192,6 +193,8 @@ func TestRouterWiring_No5xxWithValidToken(t *testing.T) {
 		{"tokens create referral", http.MethodPost, "/api/tokens/referrals", "beauty_center"},
 		{"admin topups list", http.MethodGet, "/api/admin/tokens/topups", "beauty_center"},
 		{"admin topup process", http.MethodPut, "/api/admin/tokens/topups/1", "beauty_center"},
+		// ── treatments (public vocabulary) ──
+		{"treatment catalog", http.MethodGet, "/api/treatments", "client"},
 		// ── payment config ──
 		{"payment config get", http.MethodGet, "/api/config/payment", "client"},
 		{"tier config get", http.MethodGet, "/api/config/tiers", "client"},

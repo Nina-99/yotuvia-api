@@ -40,6 +40,7 @@ func setupRouterAuthzDB(t *testing.T) *gorm.DB {
 	modelsToMigrate := []interface{}{
 		&models.AuthAccount{}, &models.BeautyCenter{}, &models.BeautyCenterImage{},
 		&models.Category{}, &models.TokenAccount{}, &models.TokenTopUp{},
+		&models.TreatmentCategory{}, &models.Treatment{},
 		&models.TokenTransaction{}, &models.TokenMission{}, &models.TokenMissionProgress{},
 		&models.Referral{}, &models.Client{}, &models.CustomerPunchCard{},
 		&models.Favorite{}, &models.PersonnelFollow{}, &models.FeedPost{}, &models.LoyaltyProgram{},		&models.Personnel{}, &models.PersonnelImage{}, &models.PersonnelService{},

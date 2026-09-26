@@ -22,4 +22,11 @@ type Service struct {
 	Price       float64 `json:"price"`
 	ImageURL    string  `json:"image_url"`
 	IsActive    bool    `gorm:"default:true" json:"is_active"`
+
+	// TreatmentID links this per-center offering to the GLOBAL treatment
+	// vocabulary. It is NULLABLE on purpose: existing rows keep working and a
+	// center may offer an uncatalogued custom service. Price and Duration stay
+	// per-center — the global part is only the vocabulary.
+	TreatmentID *uint      `gorm:"index" json:"treatment_id,omitempty"`
+	Treatment   *Treatment `gorm:"foreignKey:TreatmentID" json:"treatment,omitempty"`
 }

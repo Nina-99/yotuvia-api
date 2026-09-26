@@ -178,6 +178,7 @@ func (c *ServiceController) FindAll(ctx *gin.Context) {
 			Price:          s.Price,
 			ImageURL:       s.ImageURL,
 			IsActive:       s.IsActive,
+			TreatmentID:    s.TreatmentID,
 			Category: response.CategoryResponse{
 				ID:             s.Category.ID,
 				BeautyCenterID: s.Category.BeautyCenterID,
@@ -229,6 +230,7 @@ func (c *ServiceController) FindById(ctx *gin.Context) {
 		Price:          s.Price,
 		ImageURL:       s.ImageURL,
 		IsActive:       s.IsActive,
+		TreatmentID:    s.TreatmentID,
 		Category: response.CategoryResponse{
 			ID:             s.Category.ID,
 			BeautyCenterID: s.Category.BeautyCenterID,

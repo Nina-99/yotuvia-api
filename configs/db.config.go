@@ -29,6 +29,8 @@ func DBConnection() {
 		&models.BeautyCenter{},
 		&models.BeautyCenterImage{},
 		&models.Category{},
+		&models.TreatmentCategory{},
+		&models.Treatment{},
 		&models.TokenAccount{},
 		&models.TokenTopUp{},
 		&models.TokenTransaction{},
@@ -77,6 +79,11 @@ func DBConnection() {
 
 	SeedDefaultMissions()
 	SeedMarketConfigs()
+	SeedTreatmentTaxonomy()
 	BackfillLegacyVideos()
 	SeedDemoCenters()
+	// Runs after demo centers so their freshly created services get linked in
+	// the same boot. Idempotent and non-destructive: never overwrites a row
+	// that already carries a TreatmentID.
+	BackfillServiceTreatments()
 }

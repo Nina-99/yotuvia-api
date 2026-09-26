@@ -33,6 +33,7 @@ func SetupRouter() *gin.Engine {
 		VideoCommentRoutes(api, db, validate)
 		LoyaltyRoutes(api, db, validate)
 		TokenRoutes(api, db, validate)
+		TreatmentRoutes(api, db, validate)
 		PaymentConfigRoutes(api, db, validate)
 		PersonnelRoutes(api, db, validate)
 		PersonnelInvitationRoutes(api, db, validate)
