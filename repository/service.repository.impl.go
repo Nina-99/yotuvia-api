@@ -45,6 +45,24 @@ func (r *ServiceRepositoryImpl) FindByIDs(ids []uint) ([]models.Service, error) 
 	return services, err
 }
 
+// FindActiveByTreatmentIDs implements ServiceRepository. One SELECT for the
+// active services of the candidate centers that carry one of the requested
+// treatments. Only the columns the search needs are loaded.
+func (r *ServiceRepositoryImpl) FindActiveByTreatmentIDs(treatmentIDs []uint, centerIDs []uint) ([]models.Service, error) {
+	var services []models.Service
+	if len(treatmentIDs) == 0 || len(centerIDs) == 0 {
+		return []models.Service{}, nil
+	}
+	err := r.db.
+		Select("id, beauty_center_id, treatment_id, duration").
+		Where("is_active = ? AND treatment_id IN ? AND beauty_center_id IN ?", true, treatmentIDs, centerIDs).
+		Find(&services).Error
+	if err != nil {
+		return nil, err
+	}
+	return services, nil
+}
+
 func (r *ServiceRepositoryImpl) FindAll(beautyCenterID uint, categoryID uint, isActive *bool, page, limit int) ([]models.Service, int64, error) {
 	var services []models.Service
 	var total int64

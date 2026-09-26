@@ -21,35 +21,58 @@ const (
 )
 
 type AvailabilityServiceImpl struct {
-	centerRepo  repository.BeautyCenterRepository
-	serviceRepo repository.ServiceRepository
+	centerRepo    repository.BeautyCenterRepository
+	serviceRepo   repository.ServiceRepository
+	treatmentRepo repository.TreatmentRepository
 }
 
-func NewAvailabilityServiceImpl(centerRepo repository.BeautyCenterRepository, serviceRepo repository.ServiceRepository) AvailabilityService {
-	return &AvailabilityServiceImpl{centerRepo: centerRepo, serviceRepo: serviceRepo}
+func NewAvailabilityServiceImpl(
+	centerRepo repository.BeautyCenterRepository,
+	serviceRepo repository.ServiceRepository,
+	treatmentRepo repository.TreatmentRepository,
+) AvailabilityService {
+	return &AvailabilityServiceImpl{centerRepo: centerRepo, serviceRepo: serviceRepo, treatmentRepo: treatmentRepo}
 }
 
 // Search loads candidate centers, their working hours and the whole range's
 // reservations in a BOUNDED number of queries (one per concern, never one per
 // center or per day), then runs the shared slot kernel for each
 // (center, date) pair.
+//
+// Two sizing strategies exist:
+//
+//   - service_ids (legacy): the caller-supplied services are summed into one
+//     duration used for every candidate center. Behavior is unchanged.
+//   - treatment_ids: candidate centers are restricted to those offering EVERY
+//     requested treatment, and each center's window is sized from ITS OWN
+//     matching service duration. This is what makes a cross-center "find me a
+//     haircut" search honest.
+//
+// PRECEDENCE: when both are supplied, treatment_ids wins and service_ids is
+// ignored. The treatment path cannot honor a caller-supplied duration without
+// breaking the per-center guarantee, so the two cannot be mixed.
 func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) (response.AvailabilitySearchResponse, error) {
 	empty := response.AvailabilitySearchResponse{Results: []response.AvailabilitySlotResult{}}
 
-	// ── Services → total duration (same aggregation as the booking flow) ──
-	if len(req.ServiceIDs) == 0 {
-		return empty, apperrors.ErrBadRequest
-	}
-	services, err := s.serviceRepo.FindByIDs(req.ServiceIDs)
-	if err != nil {
-		return empty, err
-	}
-	if len(services) != len(req.ServiceIDs) {
-		return empty, apperrors.ErrBadRequest // unknown service
-	}
-	duration := TotalServicesDuration(services)
-	if duration <= 0 {
-		return empty, apperrors.ErrBadRequest
+	treatmentDriven := len(req.TreatmentIDs) > 0
+
+	// ── Services → total duration (legacy path; same aggregation as booking) ──
+	legacyDuration := 0
+	if !treatmentDriven {
+		if len(req.ServiceIDs) == 0 {
+			return empty, apperrors.ErrBadRequest
+		}
+		services, err := s.serviceRepo.FindByIDs(req.ServiceIDs)
+		if err != nil {
+			return empty, err
+		}
+		if len(services) != len(req.ServiceIDs) {
+			return empty, apperrors.ErrBadRequest // unknown service
+		}
+		legacyDuration = TotalServicesDuration(services)
+		if legacyDuration <= 0 {
+			return empty, apperrors.ErrBadRequest
+		}
 	}
 
 	// ── Date range validation ──
@@ -89,6 +112,22 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 	}
 	if len(centers) == 0 {
 		return empty, nil
+	}
+
+	// ── Duration plan: one duration per candidate center ──
+	durationByCenter := make(map[uint]int, len(centers))
+	if treatmentDriven {
+		centers, durationByCenter, err = s.resolveTreatmentDurations(req.TreatmentIDs, centers)
+		if err != nil {
+			return empty, err
+		}
+		if len(centers) == 0 {
+			return empty, nil // no center offers the requested treatment(s)
+		}
+	} else {
+		for _, c := range centers {
+			durationByCenter[c.ID] = legacyDuration
+		}
 	}
 
 	centerIDs := make([]uint, 0, len(centers))
@@ -136,6 +175,7 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 	now := time.Now()
 	all := make([]response.AvailabilitySlotResult, 0)
 	for _, center := range centers {
+		duration := durationByCenter[center.ID]
 		centerHours := hoursByCenter[center.ID]
 		centerRes := resByCenter[center.ID]
 		for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
@@ -187,4 +227,101 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 		all = all[:limit]
 	}
 	return response.AvailabilitySearchResponse{Results: all, Total: total}, nil
+}
+
+// resolveTreatmentDurations restricts centers to those offering EVERY requested
+// treatment and computes the per-center window duration.
+//
+// DOCUMENTED RULES:
+//
+//   - MULTIPLE SERVICES FOR ONE TREATMENT IN A CENTER: the MINIMUM active
+//     service duration wins. The search answers "can this center perform this
+//     treatment?", so the shortest matching variant is the most inclusive; the
+//     customer picks the exact service when they book.
+//   - MULTIPLE TREATMENTS REQUESTED: durations are SUMMED across treatments
+//     (each treatment contributing that center's minimum matching duration),
+//     mirroring the booking flow, which sums the durations of all selected
+//     services. A center must offer ALL requested treatments to be a candidate.
+//
+// It stays batched: one query to validate the treatments and one to load the
+// matching services for every candidate center.
+func (s *AvailabilityServiceImpl) resolveTreatmentDurations(
+	treatmentIDs []uint,
+	centers []models.BeautyCenter,
+) ([]models.BeautyCenter, map[uint]int, error) {
+	unique := dedupeIDs(treatmentIDs)
+
+	treatments, err := s.treatmentRepo.FindByIDs(unique)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(treatments) != len(unique) {
+		return nil, nil, apperrors.ErrBadRequest // unknown or inactive treatment
+	}
+
+	centerIDs := make([]uint, 0, len(centers))
+	for _, c := range centers {
+		centerIDs = append(centerIDs, c.ID)
+	}
+	services, err := s.serviceRepo.FindActiveByTreatmentIDs(unique, centerIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// center → treatment → minimum duration
+	minByCenterTreatment := map[uint]map[uint]int{}
+	for _, svc := range services {
+		if svc.TreatmentID == nil {
+			continue
+		}
+		tid := *svc.TreatmentID
+		if minByCenterTreatment[svc.BeautyCenterID] == nil {
+			minByCenterTreatment[svc.BeautyCenterID] = map[uint]int{}
+		}
+		byTreatment := minByCenterTreatment[svc.BeautyCenterID]
+		if current, ok := byTreatment[tid]; !ok || svc.Duration < current {
+			byTreatment[tid] = svc.Duration
+		}
+	}
+
+	filtered := make([]models.BeautyCenter, 0, len(centers))
+	durations := make(map[uint]int, len(centers))
+	for _, c := range centers {
+		byTreatment := minByCenterTreatment[c.ID]
+		if byTreatment == nil {
+			continue
+		}
+		total := 0
+		complete := true
+		for _, tid := range unique {
+			d, ok := byTreatment[tid]
+			if !ok {
+				complete = false
+				break
+			}
+			total += d
+		}
+		if !complete || total <= 0 {
+			continue
+		}
+		filtered = append(filtered, c)
+		durations[c.ID] = total
+	}
+	return filtered, durations, nil
+}
+
+// dedupeIDs preserves first-seen order while removing duplicates. Duplicate
+// treatment filters are treated as one (a repeated treatment must not double
+// the summed duration).
+func dedupeIDs(ids []uint) []uint {
+	seen := make(map[uint]struct{}, len(ids))
+	out := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }

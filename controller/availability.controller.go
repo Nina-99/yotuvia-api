@@ -25,8 +25,19 @@ func NewAvailabilityController(svc service.AvailabilityService) *AvailabilityCon
 // rule (dates, range, period, unknown service) lives in the service.
 func (c *AvailabilityController) Search(ctx *gin.Context) {
 	serviceIDs, ok := parseIDList(ctx.Query("service_ids"))
-	if !ok || len(serviceIDs) == 0 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "service_ids query param is required (comma-separated)"})
+	// Absent service_ids is fine when treatment_ids is supplied: the two are
+	// alternative sizing strategies. Malformed service_ids is always 400.
+	if !ok && ctx.Query("service_ids") != "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "service_ids must be a comma-separated list of positive integers"})
+		return
+	}
+	treatmentIDs, ok := parseIDList(ctx.Query("treatment_ids"))
+	if !ok && ctx.Query("treatment_ids") != "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "treatment_ids must be a comma-separated list of positive integers"})
+		return
+	}
+	if len(serviceIDs) == 0 && len(treatmentIDs) == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "service_ids or treatment_ids query param is required (comma-separated)"})
 		return
 	}
 
@@ -63,13 +74,14 @@ func (c *AvailabilityController) Search(ctx *gin.Context) {
 	}
 
 	req := request.AvailabilitySearchRequest{
-		ServiceIDs:  serviceIDs,
-		From:        from,
-		To:          to,
-		CenterID:    centerID,
-		PersonnelID: personnelID,
-		Period:      ctx.Query("period"),
-		Limit:       limit,
+		ServiceIDs:   serviceIDs,
+		TreatmentIDs: treatmentIDs,
+		From:         from,
+		To:           to,
+		CenterID:     centerID,
+		PersonnelID:  personnelID,
+		Period:       ctx.Query("period"),
+		Limit:        limit,
 	}
 
 	res, err := c.availabilityService.Search(req)
