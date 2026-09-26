@@ -90,6 +90,41 @@ func TotalServicesDuration(services []models.Service) int {
 	return total
 }
 
+// WindowFitsSchedule reports whether the [startMinutes, endMinutes) window is
+// fully contained in a SINGLE working block. A center with no blocks for the
+// requested weekday is closed, so the window never fits. This is the one
+// definition of "inside the working hours" used by BOTH the slot kernel below
+// and the client booking validation, so the read and write paths cannot drift.
+func WindowFitsSchedule(startMinutes, endMinutes int, schedules []models.WorkingHour) bool {
+	for _, schedule := range schedules {
+		blockStart := ParseScheduleMinutes(schedule.StartTime)
+		blockEnd := ParseScheduleMinutes(schedule.EndTime)
+		if startMinutes >= blockStart && endMinutes <= blockEnd {
+			return true
+		}
+	}
+	return false
+}
+
+// IsPastSlot reports whether a slot starting at startMinutes on date is already
+// in the past. Only "today" is time-filtered: past dates are historical and
+// future dates are entirely ahead of now.
+func IsPastSlot(date time.Time, startMinutes int, now time.Time) bool {
+	nowMinutes := now.Hour()*60 + now.Minute()
+	isToday := date.Year() == now.Year() && date.YearDay() == now.YearDay()
+	return isToday && startMinutes < nowMinutes
+}
+
+// BookingWindowAllowed reports whether a client may book the
+// [startMinutes, endMinutes) window on date: the center must have a working
+// block that fully contains the window, and for today the window must not start
+// in the past. It combines the same two predicates the slot kernel applies when
+// it marks a slot available, so an offered slot and an accepted booking can
+// never disagree.
+func BookingWindowAllowed(date time.Time, startMinutes, endMinutes int, schedules []models.WorkingHour, now time.Time) bool {
+	return WindowFitsSchedule(startMinutes, endMinutes, schedules) && !IsPastSlot(date, startMinutes, now)
+}
+
 // ComputeAvailabilitySlots is the extracted availability kernel. Given a date,
 // the total booking duration, a center's working blocks for that weekday and
 // that date's reservations, it returns the FULL slot list (available and
@@ -128,9 +163,6 @@ func ComputeAvailabilitySlots(
 		return false
 	}
 
-	nowMinutes := now.Hour()*60 + now.Minute()
-	isToday := date.Year() == now.Year() && date.YearDay() == now.YearDay()
-
 	var slots []response.AvailableSlot
 	for _, schedule := range blocks {
 		startMinutes := ParseScheduleMinutes(schedule.StartTime)
@@ -139,9 +171,10 @@ func ComputeAvailabilitySlots(
 		for m := startMinutes; m+SlotStepMinutes <= endMinutes; m += SlotStepMinutes {
 			timeStr := fmt.Sprintf("%02d:%02d", m/60, m%60)
 
-			// Slot is only feasible if the full duration fits within this block.
+			// Slot is only feasible if the full duration fits within one block;
+			// the same predicate guards the client write path.
 			slotEnd := m + durationMinutes
-			if slotEnd > endMinutes {
+			if !WindowFitsSchedule(m, slotEnd, blocks) {
 				slots = append(slots, response.AvailableSlot{
 					Time:      timeStr,
 					Available: false,
@@ -150,14 +183,15 @@ func ComputeAvailabilitySlots(
 				continue
 			}
 
+			past := IsPastSlot(date, m, now)
 			available := !isBooked(m, slotEnd)
-			if isToday && m < nowMinutes {
+			if past {
 				available = false
 			}
 			reason := ""
-			if !available && isBooked(m, m+durationMinutes) {
+			if !available && isBooked(m, slotEnd) {
 				reason = "booked"
-			} else if !available && isToday && m < nowMinutes {
+			} else if !available && past {
 				reason = "past"
 			}
 			slots = append(slots, response.AvailableSlot{

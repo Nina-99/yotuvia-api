@@ -41,6 +41,9 @@ func setupPhase3TestDB(t *testing.T) (*gorm.DB, *ReservationServiceImpl, Waitlis
 
 	center := models.BeautyCenter{Name: "Phase3 Center", Email: "p3@test.com", Phone: "123", Password: "x", IsActive: true}
 	require.NoError(t, db.Create(&center).Error)
+	// The client create path now enforces posted hours; publish a full week so
+	// the waitlist claim (which books through Create) keeps succeeding.
+	seedFullWeekWorkingHours(t, db, center.ID)
 	staff := models.Personnel{BeautyCenterID: center.ID, FirstName: "Ana", Phone: "456", IsActive: true}
 	require.NoError(t, db.Create(&staff).Error)
 	cat := models.Category{BeautyCenterID: center.ID, Name: "Peluquería"}

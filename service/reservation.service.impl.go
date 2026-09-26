@@ -33,7 +33,8 @@ import (
 //	                       RecordNoShow, RequiresDeposit, VerifyQR (attendance reward)
 //	NotificationService  — CreateAdminReservation, AssignPersonnel, UploadProof,
 //	                       ReviewProof, SendDueReminders, NotifyPersonnel* helpers
-//	CenterRepository     — Cancel + applyDepositDecision (both nil-guarded)
+//	CenterRepository     — Create (working-hours validation), Cancel + applyDepositDecision
+//	                       (both nil-guarded)
 //	TokenAccountRepo     — VerifyQR (unguarded)
 //	TokenAccountService  — VerifyQR (unguarded)
 //	LoyaltyService       — Create (nil-guarded), VerifyQR (unguarded)
@@ -352,6 +353,24 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 	if err := s.Validate.Struct(req); err != nil {
 		return err
 	}
+	// Client self-booking must obey the same working-hours rules the read path
+	// applies when it builds the availability list (see service/availability):
+	// the booking window must fit inside a single working block, must not start
+	// in the past today, and a weekday with no configured hours is CLOSED. The
+	// check lives HERE, in the client entry point, and deliberately NOT in
+	// createReservationCore: a center booking its own walk-in
+	// (CreateAdminReservation) is responsible for its manual bookings and may
+	// legitimately book outside posted hours, so the admin and reassignment
+	// paths stay literally untouched. The waitlist claim path calls this Create,
+	// which is correct — claiming an offer books a real slot and must satisfy
+	// the same client rules.
+	//
+	// An out-of-hours / closed-day / past request is invalid INPUT, so it maps
+	// to 400 (apperrors.ErrBadRequest). ErrConflict (409) stays reserved for an
+	// overlap on a slot the availability list actually offered.
+	if err := s.validateClientBookingWindow(req.BeautyCenterID, req.Date, req.StartTime, req.ServiceIDs); err != nil {
+		return err
+	}
 	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime, s.resolveSourcePostID(req.SourcePostID))
 	if err != nil {
 		return err
@@ -363,6 +382,46 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 		return err
 	}
 	return s.applyDepositDecision(reservation)
+}
+
+// validateClientBookingWindow rejects a client booking whose [start, end)
+// window is not fully inside one of the center's working blocks for that
+// weekday, or that starts in the past today. A center with no blocks for the
+// weekday is CLOSED and cannot receive client bookings — consistent with its
+// availability list already coming back empty. The window rules come from the
+// shared kernel predicates, so this path and the read path can never drift.
+//
+// It reads the services only to derive the same end time the creation core will
+// persist. That extra SELECT is acceptable on this low-frequency write and is
+// what lets the admin path avoid changing at all.
+func (s *ReservationServiceImpl) validateClientBookingWindow(centerID uint, dateStr, startTimeStr string, serviceIDs []uint) error {
+	parsedDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return apperrors.ErrBadRequest
+	}
+	startParsed, err := time.Parse("15:04", startTimeStr)
+	if err != nil {
+		return apperrors.ErrBadRequest
+	}
+	services, err := s.ServiceRepository.FindByIDs(serviceIDs)
+	if err != nil || len(services) != len(serviceIDs) {
+		return apperrors.ErrBadRequest
+	}
+	if s.CenterRepository == nil {
+		// Fail closed: without the schedule the client window cannot be proven,
+		// so the booking is refused rather than silently allowed out of hours.
+		return fmt.Errorf("reservation: client booking requires CenterRepository to validate working hours")
+	}
+	schedules, err := s.CenterRepository.FindWorkingHours(centerID, int(parsedDate.Weekday()))
+	if err != nil {
+		return err
+	}
+	startMinutes := startParsed.Hour()*60 + startParsed.Minute()
+	endMinutes := startMinutes + TotalServicesDuration(services)
+	if !BookingWindowAllowed(parsedDate, startMinutes, endMinutes, schedules, time.Now()) {
+		return apperrors.ErrBadRequest
+	}
+	return nil
 }
 
 // ──────────────────────────────────────────────
@@ -622,10 +681,11 @@ func (s *ReservationServiceImpl) UpdateStatusByPersonnel(reservationID uint, sta
 }
 
 // updateStatus applies the shared state machine:
-//   PENDING   → CONFIRMED, CANCELLED
-//   CONFIRMED → COMPLETED, CANCELLED
-//   COMPLETED → (terminal)
-//   CANCELLED → (terminal)
+//
+//	PENDING   → CONFIRMED, CANCELLED
+//	CONFIRMED → COMPLETED, CANCELLED
+//	COMPLETED → (terminal)
+//	CANCELLED → (terminal)
 func (s *ReservationServiceImpl) updateStatus(reservation *models.Reservation, status string) error {
 	validTransitions := map[string]map[string]bool{
 		"PENDING":   {"CONFIRMED": true, "CANCELLED": true},

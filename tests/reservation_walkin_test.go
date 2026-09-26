@@ -59,6 +59,11 @@ func seedWalkinData(t *testing.T, db *gorm.DB) walkinSeed {
 	seed.svcTwo = seedDashboardService(t, db, 2, 2, "Color", true)
 	seed.svcThree = seedDashboardService(t, db, 3, 1, "Peinado", true)
 
+	// The client self-booking path enforces the center's posted schedule, so
+	// publish Sunday hours covering the windows the client scenarios book
+	// (walkinDay is a Sunday). Admin/walk-in scenarios ignore these hours.
+	seedWorkingHour(t, db, 1, int(walkinDay.Weekday()), "08:00", "20:00")
+
 	seed.overlapSlot = seedReservationWithServices(t, db, 1, seedReservationPlan{
 		date: walkinDay, startTime: "09:00", endTime: "10:00",
 		status: "PENDING", totalPrice: 50, clientID: 2, personnelID: 1, serviceIDs: []uint{1},

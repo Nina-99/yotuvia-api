@@ -47,6 +47,9 @@ func setupDepositTestDB(t *testing.T) (*gorm.DB, *ReservationServiceImpl, uint, 
 		DepositRequired: true, DepositPercent: 30, DepositTrustThreshold: 70, DepositHoldMinutes: 30,
 	}
 	require.NoError(t, db.Create(&center).Error)
+	// The client create path now enforces posted hours; publish a full week so
+	// the deposit scenarios keep booking real slots.
+	seedFullWeekWorkingHours(t, db, center.ID)
 	staff := models.Personnel{BeautyCenterID: center.ID, FirstName: "Ana", Phone: "456", IsActive: true}
 	require.NoError(t, db.Create(&staff).Error)
 	cat := models.Category{BeautyCenterID: center.ID, Name: "Peluquería"}
@@ -69,6 +72,21 @@ func setupDepositTestDB(t *testing.T) (*gorm.DB, *ReservationServiceImpl, uint, 
 		Validate:              validator.New(),
 	}
 	return db, s, center.ID, trusted.ID, risky.ID, svc.ID
+}
+
+// seedFullWeekWorkingHours publishes an 08:00–20:00 block for every weekday so
+// the client create path (which now enforces posted hours) keeps accepting the
+// bookings these service-level scenarios make.
+func seedFullWeekWorkingHours(t *testing.T, db *gorm.DB, centerID uint) {
+	t.Helper()
+	for day := 0; day < 7; day++ {
+		require.NoError(t, db.Create(&models.WorkingHour{
+			BeautyCenterID: centerID,
+			DayOfWeek:      day,
+			StartTime:      "08:00",
+			EndTime:        "20:00",
+		}).Error)
+	}
 }
 
 func depositCreateReq(centerID, clientID, staffID, serviceID uint, start string) request.CreateReservationRequest {
