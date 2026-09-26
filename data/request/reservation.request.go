@@ -8,6 +8,13 @@ type CreateReservationRequest struct {
 
 	Date      string `json:"date" validate:"required"`
 	StartTime string `json:"start_time" validate:"required"`
+
+	// SourcePostID is an OPTIONAL attribution hint from the client app: the
+	// feed post whose book CTA produced this booking. It is a tracking field,
+	// so it must NEVER fail a real booking — absent, zero, or a value that does
+	// not resolve to an existing post is ignored and the booking still lands
+	// with a nil attribution.
+	SourcePostID *uint `json:"source_post_id"`
 }
 
 // CreateAdminReservationRequest is the walk-in booking DTO (design D3): the

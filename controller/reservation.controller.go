@@ -695,6 +695,7 @@ func mapToReservationResponse(r *models.Reservation) response.ReservationRespons
 		ProofImageURL:    r.ProofImageURL,
 		HoldExpiresAt:    r.HoldExpiresAt,
 		CancelReason:     r.CancelReason,
+		SourcePostID:     r.SourcePostID,
 	}
 
 	for _, svc := range r.ReservationServices {

@@ -34,7 +34,7 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	marketCfgSvc := service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db))
 	promoRepo := repository.NewPromotionRepositoryImpl(db)
 	promoSvc := service.NewPromotionService(promoRepo, validate)
-	svc := service.NewReservationServiceImpl(repo, serviceRepo, personnelRepo, repository.NewClientRepositoryImpl(db), accountRepo, notifSvc, loyaltySvc, promoSvc, accountSvc, missionSvc, marketCfgSvc, validate, repository.NewBeautyCenterRepositoryImpl(db))
+	svc := service.NewReservationServiceImpl(repo, serviceRepo, personnelRepo, repository.NewClientRepositoryImpl(db), accountRepo, notifSvc, loyaltySvc, promoSvc, accountSvc, missionSvc, marketCfgSvc, validate, repository.NewBeautyCenterRepositoryImpl(db), repository.NewFeedPostRepositoryImpl(db))
 	waitlistSvc := service.NewWaitlistServiceImpl(
 		repository.NewWaitlistRepositoryImpl(db),
 		repo,

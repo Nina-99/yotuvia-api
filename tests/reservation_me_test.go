@@ -132,5 +132,6 @@ func newReservationServiceForMeTests(t *testing.T, db *gorm.DB) interface {
 		nil, // MarketConfigService not needed for reads
 		validator.New(),
 		repository.NewBeautyCenterRepositoryImpl(db),
+		nil, // FeedPostRepository: attribution not exercised here
 	)
 }

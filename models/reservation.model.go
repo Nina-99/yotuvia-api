@@ -50,6 +50,13 @@ type Reservation struct {
 
 	CancelReason *string `gorm:"type:text" json:"cancel_reason,omitempty"`
 
+	// SourcePostID attributes the booking to the feed post that produced it
+	// (video → booking funnel). It is nullable on purpose: admin walk-ins,
+	// waitlist claims and any untracked booking leave it nil, and an
+	// unresolved/absent/zero tracking value is ignored rather than failing the
+	// booking. A tracking field must never fail a real booking.
+	SourcePostID *uint `gorm:"index" json:"source_post_id,omitempty"`
+
 	VerificationToken *string    `gorm:"size:255;uniqueIndex" json:"verification_token,omitempty"`
 	TokenExpiresAt    *time.Time `json:"token_expires_at,omitempty"`
 

@@ -40,6 +40,8 @@ import (
 //	PromotionService     — Create (nil-guarded)
 //	MissionService       — VerifyQR (nil-guarded)
 //	MarketConfigService  — VerifyQR (nil-guarded)
+//	FeedPostRepository   — Create attribution only (nil-guarded): when nil, a
+//	                       source_post_id hint is simply ignored.
 //
 // The Phase 3 ticker calls only SendDueReminders, SweepNoShows and
 // ExpireHolds, which need ReservationRepository + NotificationService +
@@ -58,7 +60,10 @@ type ReservationServiceImpl struct {
 	TokenAccountService   TokenAccountService
 	MissionService        TokenMissionService
 	MarketConfigService   MarketConfigService
-	Validate              *validator.Validate
+	// FeedPostRepository resolves an optional source_post_id hint from the
+	// client booking flow. It is OPTIONAL: nil simply disables attribution.
+	FeedPostRepository repository.FeedPostRepository
+	Validate           *validator.Validate
 }
 
 func NewReservationServiceImpl(
@@ -75,6 +80,7 @@ func NewReservationServiceImpl(
 	marketConfigService MarketConfigService,
 	validate *validator.Validate,
 	centerRepository repository.BeautyCenterRepository,
+	feedPostRepository repository.FeedPostRepository,
 ) ReservationService {
 	requireDeps("NewReservationServiceImpl",
 		dep("ReservationRepository", reservationRepository),
@@ -92,6 +98,7 @@ func NewReservationServiceImpl(
 		TokenAccountService:   tokenAccountService,
 		MissionService:        missionService,
 		MarketConfigService:   marketConfigService,
+		FeedPostRepository:    feedPostRepository,
 		Validate:              validate,
 	}
 }
@@ -122,6 +129,34 @@ func normalizeStatus(status string) string {
 //  CREATE — Multi-servicio
 // ──────────────────────────────────────────────
 
+// resolveSourcePostID turns an optional client attribution hint into a value
+// that is safe to persist. A tracking field must NEVER fail a real booking, so
+// every non-resolving case collapses to nil and the booking proceeds:
+//
+//   - absent (nil) or zero id → nil, no query;
+//   - the feed repository is not wired → nil, no query;
+//   - the id does not match an existing post → nil;
+//   - the existence probe itself errors → nil (the booking wins).
+func (s *ReservationServiceImpl) resolveSourcePostID(sourcePostID *uint) *uint {
+	if sourcePostID == nil || *sourcePostID == 0 {
+		return nil
+	}
+	if s.FeedPostRepository == nil {
+		return nil
+	}
+	exists, err := s.FeedPostRepository.Exists(*sourcePostID)
+	if err != nil {
+		utils.Log.Errorf("[ATTRIBUTION] post %d lookup failed, booking proceeds un-attributed: %v", *sourcePostID, err)
+		return nil
+	}
+	if !exists {
+		utils.Log.Warnf("[ATTRIBUTION] source_post_id %d does not resolve, booking proceeds un-attributed", *sourcePostID)
+		return nil
+	}
+	id := *sourcePostID
+	return &id
+}
+
 // createReservationCore is the single DRY creation path shared by the client
 // flow (Create) and the admin walk-in flow (CreateAdminReservation, design
 // D1). It is parameterized by fields — never by a request DTO — so both flows
@@ -130,8 +165,9 @@ func normalizeStatus(status string) string {
 // created reservation ID so callers can re-fetch the preloaded row for DTO
 // responses. Errors are canonical apperrors sentinels so controllers map them
 // to the spec contract: 400 for malformed input / unknown or cross-center
-// services, 409 for a conflicting slot.
-func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID, personnelID uint, serviceIDs []uint, dateStr, startTimeStr string) (uint, error) {
+// services, 409 for a conflicting slot. sourcePostID is the ALREADY-RESOLVED
+// attribution (nil when untracked); walk-ins always pass nil.
+func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID, personnelID uint, serviceIDs []uint, dateStr, startTimeStr string, sourcePostID *uint) (uint, error) {
 	// Parse date string into time.Time
 	parsedDate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
@@ -273,6 +309,7 @@ func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID,
 		PromotionDiscount: promotionDiscount,
 		Status:            "PENDING",
 		PaymentStatus:     PaymentNone,
+		SourcePostID:      sourcePostID,
 	}
 
 	for _, svc := range services {
@@ -314,7 +351,7 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 	if err := s.Validate.Struct(req); err != nil {
 		return err
 	}
-	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime)
+	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime, s.resolveSourcePostID(req.SourcePostID))
 	if err != nil {
 		return err
 	}
@@ -369,7 +406,7 @@ func (s *ReservationServiceImpl) CreateAdminReservation(req request.CreateAdminR
 		return nil, apperrors.ErrBadRequest
 	}
 
-	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime)
+	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime, nil)
 	if err != nil {
 		return nil, err
 	}

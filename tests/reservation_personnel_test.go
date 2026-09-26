@@ -32,6 +32,7 @@ func newReservationTriggerTestService(t *testing.T, db *gorm.DB) service.Reserva
 		nil, // MarketConfigService not needed for cancel/assign
 		validate,
 		repository.NewBeautyCenterRepositoryImpl(db),
+		nil, // FeedPostRepository: attribution not exercised here
 	)
 }
 

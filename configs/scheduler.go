@@ -96,6 +96,7 @@ func StartBackgroundScheduler(db *gorm.DB) {
 		nil, // MarketConfigService: sweeps never price
 		validate,
 		repository.NewBeautyCenterRepositoryImpl(db),
+		nil, // FeedPostRepository: sweeps never attribute bookings
 	)
 	waitlistSvc := service.NewWaitlistServiceImpl(
 		repository.NewWaitlistRepositoryImpl(db),

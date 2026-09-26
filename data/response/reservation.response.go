@@ -39,6 +39,9 @@ type ReservationResponse struct {
 	ProofImageURL    *string                      `json:"proof_image_url,omitempty"`
 	HoldExpiresAt    *time.Time                   `json:"hold_expires_at,omitempty"`
 	CancelReason     *string                      `json:"cancel_reason,omitempty"`
+	// SourcePostID is the feed post credited with this booking, when known.
+	// Additive and omitted when nil, so existing consumers are unaffected.
+	SourcePostID *uint `json:"source_post_id,omitempty"`
 	Services         []ReservationServiceResponse `json:"services,omitempty"`
 	Client           *ClientLite                  `json:"client,omitempty"`
 	Personnel        *PersonnelLite               `json:"personnel,omitempty"`
