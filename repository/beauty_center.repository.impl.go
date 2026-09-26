@@ -159,6 +159,62 @@ func (r *BeautyCenterRepositoryImpl) FindReservationsForDate(centerID uint, date
 	return reservations, err
 }
 
+// FindCentersForAvailability implements BeautyCenterRepository. One SELECT for
+// every candidate center of the availability search.
+func (r *BeautyCenterRepositoryImpl) FindCentersForAvailability(centerID uint) ([]models.BeautyCenter, error) {
+	var centers []models.BeautyCenter
+	q := r.db.Model(&models.BeautyCenter{}).
+		Select("id, name, currency, is_active").
+		Where("is_active = ?", true)
+	if centerID > 0 {
+		q = q.Where("id = ?", centerID)
+	}
+	err := q.Order("id ASC").Limit(ListQueryLimit).Find(&centers).Error
+	if err != nil {
+		return nil, err
+	}
+	return centers, nil
+}
+
+// FindWorkingHoursForCenters implements BeautyCenterRepository. One SELECT for
+// the working blocks of every candidate center across the given weekdays.
+func (r *BeautyCenterRepositoryImpl) FindWorkingHoursForCenters(centerIDs []uint, days []int) ([]models.WorkingHour, error) {
+	if len(centerIDs) == 0 || len(days) == 0 {
+		return []models.WorkingHour{}, nil
+	}
+	var whs []models.WorkingHour
+	err := r.db.
+		Where("beauty_center_id IN ? AND day_of_week IN ?", centerIDs, days).
+		Order("beauty_center_id ASC, day_of_week ASC, start_time ASC").
+		Find(&whs).Error
+	if err != nil {
+		return nil, err
+	}
+	return whs, nil
+}
+
+// FindReservationsForRange implements BeautyCenterRepository. One SELECT for
+// every candidate center's reservations over the inclusive [from, to] range,
+// excluding CANCELLED — the batch twin of FindReservationsForDate.
+func (r *BeautyCenterRepositoryImpl) FindReservationsForRange(centerIDs []uint, from, to time.Time, personnelID uint) ([]models.Reservation, error) {
+	if len(centerIDs) == 0 {
+		return []models.Reservation{}, nil
+	}
+	var reservations []models.Reservation
+	q := r.db.Where(
+		"beauty_center_id IN ? AND DATE(date) BETWEEN DATE(?) AND DATE(?) AND status != ?",
+		centerIDs, from, to, "CANCELLED",
+	)
+	if personnelID > 0 {
+		q = q.Where("personnel_id = ?", personnelID)
+	}
+	err := q.Find(&reservations).Error
+	if err != nil {
+		return nil, err
+	}
+	return reservations, nil
+}
+
 // Search implements BeautyCenterRepository
 func (r *BeautyCenterRepositoryImpl) Search(query string, page, limit int) ([]models.BeautyCenter, int64, error) {
 	var centers []models.BeautyCenter

@@ -35,6 +35,20 @@ type BeautyCenterRepository interface {
 	ReplaceImages(centerID uint, images []models.BeautyCenterImage) error
 	FindWorkingHours(centerID uint, dayOfWeek int) ([]models.WorkingHour, error)
 	FindReservationsForDate(centerID uint, date time.Time, personnelID uint) ([]models.Reservation, error)
+	// FindCentersForAvailability loads the candidate centers for the
+	// cross-center availability search in ONE query. centerID == 0 means "all
+	// active centers" (capped at ListQueryLimit); a positive centerID narrows
+	// to that active center. Respects is_active and soft-deletes.
+	FindCentersForAvailability(centerID uint) ([]models.BeautyCenter, error)
+	// FindWorkingHoursForCenters batch-loads the working blocks for every
+	// candidate center across the requested weekdays in ONE query, so a
+	// 14-day range never fans out into a per-center/per-day query storm.
+	FindWorkingHoursForCenters(centerIDs []uint, days []int) ([]models.WorkingHour, error)
+	// FindReservationsForRange batch-loads the reservations of every candidate
+	// center across an inclusive date range in ONE query (excluding CANCELLED,
+	// optionally scoped to one personnel), mirroring FindReservationsForDate's
+	// semantics for the whole range at once.
+	FindReservationsForRange(centerIDs []uint, from, to time.Time, personnelID uint) ([]models.Reservation, error)
 	Search(query string, page, limit int) ([]models.BeautyCenter, int64, error)
 	FindTopRated(limit int) ([]models.BeautyCenter, error)
 	FindNearby(latitude, longitude float64, limit int) ([]models.BeautyCenter, error)

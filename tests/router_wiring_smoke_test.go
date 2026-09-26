@@ -28,6 +28,7 @@ func fullWiringRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 	api := r.Group("/api")
 	{
 		router.AuthAccountRoutes(api, db, validate)
+		router.AvailabilityRoutes(api, db, validate)
 		router.BeautyCenterRoutes(api, db, validate)
 		router.BeautyCenterImageRoutes(api, db, validate)
 		router.CategoryRoutes(api, db, validate)
@@ -107,6 +108,8 @@ func TestRouterWiring_No5xxWithValidToken(t *testing.T) {
 		{"auth refresh", http.MethodPost, "/api/auth-accounts/refresh", "client"},
 		{"auth logout", http.MethodPost, "/api/auth-accounts/logout", "client"},
 		{"auth register personnel", http.MethodPost, "/api/auth/register-personnel", "client"},
+		// ── availability search ──
+		{"availability search", http.MethodGet, "/api/availability/search", "client"},
 		// ── beauty centers ──
 		{"beauty center list", http.MethodGet, "/api/beauty-centers", "client"},
 		{"beauty center by id", http.MethodGet, "/api/beauty-centers/1", "client"},

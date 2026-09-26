@@ -22,6 +22,7 @@ func SetupRouter() *gin.Engine {
 	api := r.Group("/api")
 	{
 		AuthAccountRoutes(api, db, validate)
+		AvailabilityRoutes(api, db, validate)
 		BeautyCenterRoutes(api, db, validate)
 		BeautyCenterImageRoutes(api, db, validate)
 		CategoryRoutes(api, db, validate)
