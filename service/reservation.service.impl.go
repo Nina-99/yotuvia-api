@@ -182,14 +182,15 @@ func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID,
 
 	// All services must belong to the same beauty center
 	var totalPrice float64
-	var totalDuration int
 	for _, svc := range services {
 		if svc.BeautyCenterID != beautyCenterID {
 			return 0, apperrors.ErrBadRequest
 		}
 		totalPrice += svc.Price
-		totalDuration += svc.Duration
 	}
+	// One shared duration definition (service/availability) so the booking
+	// flow and the availability search can never compute different totals.
+	totalDuration := TotalServicesDuration(services)
 
 	// Calculate end time from start time + total duration
 	startParsed, err := time.Parse("15:04", startTimeStr)
@@ -455,14 +456,13 @@ func (s *ReservationServiceImpl) Update(reservationID uint, req request.CreateRe
 	}
 
 	var totalPrice float64
-	var totalDuration int
 	for _, svc := range services {
 		if svc.BeautyCenterID != req.BeautyCenterID {
 			return apperrors.ErrBadRequest
 		}
 		totalPrice += svc.Price
-		totalDuration += svc.Duration
 	}
+	totalDuration := TotalServicesDuration(services)
 
 	startParsed, _ := time.Parse("15:04", req.StartTime)
 	endTimeStr := startParsed.Add(time.Duration(totalDuration) * time.Minute).Format("15:04")

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Nina-99/yottu-api/data/request"
@@ -270,64 +268,9 @@ func (s *BeautyCenterServiceImpl) GetAvailableSlots(centerID uint, date string, 
 		return response.AvailableSlotsResponse{}, err
 	}
 
-	// Helper to check if a time range overlaps with any reservation
-	isBooked := func(slotStart, slotEnd int) bool {
-		for _, r := range reservations {
-			rStart := parseMinutes(r.StartTime)
-			rEnd := parseMinutes(r.EndTime)
-			if slotStart < rEnd && slotEnd > rStart {
-				return true
-			}
-		}
-		return false
-	}
-
-	// Get current time to filter past slots on today's date
-	now := time.Now()
-	nowMinutes := now.Hour()*60 + now.Minute()
-	isToday := parsedDate.Year() == now.Year() && parsedDate.YearDay() == now.YearDay()
-
-	stepMinutes := 30
-	slotStep := stepMinutes
-
-	// Generate slots: each candidate start time must have `duration` free minutes ahead
-	var slots []response.AvailableSlot
-	for _, schedule := range schedules {
-		startMinutes := parseMinutes(schedule.StartTime)
-		endMinutes := parseMinutes(schedule.EndTime)
-
-		for m := startMinutes; m+slotStep <= endMinutes; m += slotStep {
-			timeStr := fmt.Sprintf("%02d:%02d", m/60, m%60)
-
-			// Slot is only feasible if the full duration fits within this block
-			slotEnd := m + duration
-			if slotEnd > endMinutes {
-				// Duration doesn't fully fit → mark as unavailable
-				slots = append(slots, response.AvailableSlot{
-					Time:      timeStr,
-					Available: false,
-					Reason:    "closing",
-				})
-				continue
-			}
-
-			available := !isBooked(m, slotEnd)
-			if isToday && m < nowMinutes {
-				available = false
-			}
-			reason := ""
-			if !available && isBooked(m, m+duration) {
-				reason = "booked"
-			} else if !available && isToday && m < nowMinutes {
-				reason = "past"
-			}
-			slots = append(slots, response.AvailableSlot{
-				Time:      timeStr,
-				Available: available,
-				Reason:    reason,
-			})
-		}
-	}
+	// The slot kernel is shared with the cross-center search so the two can
+	// never disagree (see service/availability).
+	slots := ComputeAvailabilitySlots(parsedDate, duration, schedules, reservations, time.Now())
 
 	return response.AvailableSlotsResponse{Date: date, Currency: center.Currency, Slots: slots}, nil
 }
@@ -344,7 +287,7 @@ func validateSchedules(schedules []request.WorkingHourRequest) error {
 		if !timeRE.MatchString(s.EndTime) {
 			return fmt.Errorf("invalid end_time format %q: expected HH:MM (00:00-23:59)", s.EndTime)
 		}
-		if parseMinutes(s.StartTime) >= parseMinutes(s.EndTime) {
+		if ParseScheduleMinutes(s.StartTime) >= ParseScheduleMinutes(s.EndTime) {
 			return fmt.Errorf("start_time %s must be before end_time %s", s.StartTime, s.EndTime)
 		}
 		byDay[s.DayOfWeek] = append(byDay[s.DayOfWeek], s)
@@ -353,11 +296,11 @@ func validateSchedules(schedules []request.WorkingHourRequest) error {
 	// Check for overlapping blocks per day
 	for day, blocks := range byDay {
 		sort.Slice(blocks, func(i, j int) bool {
-			return parseMinutes(blocks[i].StartTime) < parseMinutes(blocks[j].StartTime)
+			return ParseScheduleMinutes(blocks[i].StartTime) < ParseScheduleMinutes(blocks[j].StartTime)
 		})
 		for i := 1; i < len(blocks); i++ {
-			prevEnd := parseMinutes(blocks[i-1].EndTime)
-			currStart := parseMinutes(blocks[i].StartTime)
+			prevEnd := ParseScheduleMinutes(blocks[i-1].EndTime)
+			currStart := ParseScheduleMinutes(blocks[i].StartTime)
 			if currStart < prevEnd {
 				return fmt.Errorf(
 					"overlapping schedules on day %d: %s-%s and %s-%s",
@@ -370,14 +313,6 @@ func validateSchedules(schedules []request.WorkingHourRequest) error {
 	}
 
 	return nil
-}
-
-// parseMinutes convierte "HH:MM" a minutos desde medianoche.
-func parseMinutes(timeStr string) int {
-	parts := strings.Split(timeStr, ":")
-	h, _ := strconv.Atoi(parts[0])
-	m, _ := strconv.Atoi(parts[1])
-	return h*60 + m
 }
 
 // Internal mapper
