@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync/atomic"
@@ -219,6 +220,104 @@ func TestAvailabilitySearch_TreatmentDriven_UnknownTreatment(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// TestAvailabilitySearch_TreatmentDriven_ReportsOwnServiceIDs proves a
+// treatment-driven result names the CENTER'S OWN matching active service — the
+// one whose duration sized the window — not anything the caller supplied.
+func TestAvailabilitySearch_TreatmentDriven_ReportsOwnServiceIDs(t *testing.T) {
+	r, db := availabilityTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Has Treatment", "c1@test.com", true)
+	seedTreatmentCategoryRow(t, db, 1)
+	seedTreatmentRow(t, db, 100, 1, "Corte de cabello")
+	seedTreatmentService(t, db, 10, 1, 100, 30, true)
+
+	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC) // Monday
+	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
+
+	env := getSearch(t, r, "treatment_ids=100&from=2026-10-05&to=2026-10-05&limit=50")
+	require.NotEmpty(t, env.Results)
+	for _, res := range env.Results {
+		assert.Equal(t, uint(1), res.CenterID)
+		assert.Equal(t, []uint{10}, res.ServiceIDs,
+			"result must carry the center's own matching active service id")
+		assert.Equal(t, 30, res.Duration)
+	}
+}
+
+// TestAvailabilitySearch_TreatmentDriven_MultipleMatchesReportsSizingService
+// documents the chosen honesty rule for several matching services: the window
+// duration is the MIN, so only the SERVICE WHOSE DURATION WAS USED is reported
+// (the lowest id on a tie). Reporting every variant would misstate the duration
+// and break the booking-flow sum.
+func TestAvailabilitySearch_TreatmentDriven_MultipleMatchesReportsSizingService(t *testing.T) {
+	r, db := availabilityTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Variants", "c1@test.com", true)
+	seedTreatmentCategoryRow(t, db, 1)
+	seedTreatmentRow(t, db, 100, 1, "Corte de cabello")
+	seedTreatmentService(t, db, 10, 1, 100, 45, true)
+	seedTreatmentService(t, db, 11, 1, 100, 20, true) // shorter → sizes the window
+
+	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
+
+	env := getSearch(t, r, "treatment_ids=100&from=2026-10-05&to=2026-10-05&limit=50")
+	require.NotEmpty(t, env.Results)
+	assert.Equal(t, 20, env.Results[0].Duration, "minimum matching duration wins")
+	assert.Equal(t, []uint{11}, env.Results[0].ServiceIDs,
+		"only the sizing service (min duration) is reported, not every variant")
+}
+
+// TestAvailabilitySearch_TreatmentDriven_ServiceIDsUnionAndSum proves that with
+// several requested treatments the result reports the union (in request order)
+// of the per-center sizing services, and their durations sum to the window — so
+// the booking flow reproducing that sum lands on the searched duration.
+func TestAvailabilitySearch_TreatmentDriven_ServiceIDsUnionAndSum(t *testing.T) {
+	r, db := availabilityTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Both", "c1@test.com", true)
+	seedTreatmentCategoryRow(t, db, 1)
+	seedTreatmentRow(t, db, 100, 1, "Corte de cabello")
+	seedTreatmentRow(t, db, 200, 1, "Manicuría semipermanente")
+	seedTreatmentService(t, db, 10, 1, 100, 30, true)
+	seedTreatmentService(t, db, 11, 1, 200, 45, true)
+
+	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
+
+	env := getSearch(t, r, "treatment_ids=100,200&from=2026-10-05&to=2026-10-05&limit=50")
+	require.NotEmpty(t, env.Results)
+	for _, res := range env.Results {
+		assert.Equal(t, []uint{10, 11}, res.ServiceIDs,
+			"union of the sizing services, in request order")
+		assert.Equal(t, 75, res.Duration, "sum of the reported services' durations")
+	}
+}
+
+// TestAvailabilitySearch_LegacyPathOmitsServiceIDs guards the additive
+// contract: the legacy service_ids path must OMIT the field entirely, because
+// the caller already knows the ids and there is no center filter.
+func TestAvailabilitySearch_LegacyPathOmitsServiceIDs(t *testing.T) {
+	r, db := availabilityTestRouter(t)
+
+	seedDashboardCenter(t, db, 1, "Salon X", "salonx@test.com", true)
+	seedServiceRow(t, db, 10, 1, 30)
+
+	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
+
+	w := do(r, http.MethodGet,
+		"/api/availability/search?service_ids=10&from=2026-10-05&to=2026-10-05&limit=50", "", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotContains(t, w.Body.String(), "service_ids",
+		"legacy path must omit service_ids from the JSON")
+
+	var env searchEnvelope
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	require.NotEmpty(t, env.Results)
+	assert.Nil(t, env.Results[0].ServiceIDs)
+}
+
 // TestAvailabilitySearch_TreatmentDriven_QueryCountIsBounded proves the
 // treatment path stays batched: a 5-center x 7-day search uses a small constant
 // number of SELECTs, never one per center or per day.
@@ -254,4 +353,15 @@ func TestAvailabilitySearch_TreatmentDriven_QueryCountIsBounded(t *testing.T) {
 
 	assert.Lessf(t, queries, int64(10),
 		"treatment-driven search must use a bounded number of SELECTs, got %d", queries)
+
+	// Surfacing service_ids must NOT grow the budget: the ids are derived from
+	// the services already loaded to size the windows. The treatment path is a
+	// fixed 5 SELECTs (treatments, candidate centers, active services, working
+	// hours, reservations); pin it so a per-row regression fails loudly.
+	var env searchEnvelope
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	require.NotEmpty(t, env.Results)
+	assert.NotEmpty(t, env.Results[0].ServiceIDs, "service_ids must be surfaced")
+	assert.LessOrEqualf(t, queries, int64(5),
+		"treatment search SELECTs must not grow beyond the 5-query baseline, got %d", queries)
 }

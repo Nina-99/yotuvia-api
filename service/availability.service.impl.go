@@ -115,9 +115,12 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 	}
 
 	// ── Duration plan: one duration per candidate center ──
+	// serviceIDsByCenter is filled only on the treatment path and reuses the
+	// services already loaded to size the window — no extra query is issued.
 	durationByCenter := make(map[uint]int, len(centers))
+	serviceIDsByCenter := map[uint][]uint{}
 	if treatmentDriven {
-		centers, durationByCenter, err = s.resolveTreatmentDurations(req.TreatmentIDs, centers)
+		centers, durationByCenter, serviceIDsByCenter, err = s.resolveTreatmentDurations(req.TreatmentIDs, centers)
 		if err != nil {
 			return empty, err
 		}
@@ -197,6 +200,12 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 					p := req.PersonnelID
 					personPtr = &p
 				}
+				// Only the treatment path names the center's own services; the
+				// legacy path leaves the slice nil so omitempty drops the field.
+				var resultServiceIDs []uint
+				if treatmentDriven {
+					resultServiceIDs = serviceIDsByCenter[center.ID]
+				}
 				all = append(all, response.AvailabilitySlotResult{
 					CenterID:    center.ID,
 					CenterName:  center.Name,
@@ -204,6 +213,7 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 					StartTime:   slot.Time,
 					PersonnelID: personPtr,
 					Duration:    duration,
+					ServiceIDs:  resultServiceIDs,
 				})
 			}
 		}
@@ -235,28 +245,36 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 // DOCUMENTED RULES:
 //
 //   - MULTIPLE SERVICES FOR ONE TREATMENT IN A CENTER: the MINIMUM active
-//     service duration wins. The search answers "can this center perform this
-//     treatment?", so the shortest matching variant is the most inclusive; the
-//     customer picks the exact service when they book.
+//     service duration wins (lowest id on a tie, for determinism). The search
+//     answers "can this center perform this treatment?", so the shortest
+//     matching variant is the most inclusive; the customer picks the exact
+//     service when they book.
 //   - MULTIPLE TREATMENTS REQUESTED: durations are SUMMED across treatments
 //     (each treatment contributing that center's minimum matching duration),
 //     mirroring the booking flow, which sums the durations of all selected
 //     services. A center must offer ALL requested treatments to be a candidate.
 //
 // It stays batched: one query to validate the treatments and one to load the
-// matching services for every candidate center.
+// matching services for every candidate center. The returned serviceIDs map is
+// derived from those same already-loaded rows, so surfacing which services
+// produced the window adds ZERO queries.
+//
+// The returned serviceIDs[c] is, per center, the id of the service whose
+// duration was used for each requested treatment, in request order. Because the
+// duration rule is MIN, this is the SINGLE sizing service per treatment — the
+// booking flow can sum exactly these durations and reproduce the window.
 func (s *AvailabilityServiceImpl) resolveTreatmentDurations(
 	treatmentIDs []uint,
 	centers []models.BeautyCenter,
-) ([]models.BeautyCenter, map[uint]int, error) {
+) ([]models.BeautyCenter, map[uint]int, map[uint][]uint, error) {
 	unique := dedupeIDs(treatmentIDs)
 
 	treatments, err := s.treatmentRepo.FindByIDs(unique)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if len(treatments) != len(unique) {
-		return nil, nil, apperrors.ErrBadRequest // unknown or inactive treatment
+		return nil, nil, nil, apperrors.ErrBadRequest // unknown or inactive treatment
 	}
 
 	centerIDs := make([]uint, 0, len(centers))
@@ -265,27 +283,32 @@ func (s *AvailabilityServiceImpl) resolveTreatmentDurations(
 	}
 	services, err := s.serviceRepo.FindActiveByTreatmentIDs(unique, centerIDs)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	// center → treatment → minimum duration
-	minByCenterTreatment := map[uint]map[uint]int{}
+	// center → treatment → the active service whose MIN duration sizes the window.
+	minByCenterTreatment := map[uint]map[uint]sizingService{}
 	for _, svc := range services {
 		if svc.TreatmentID == nil {
 			continue
 		}
 		tid := *svc.TreatmentID
 		if minByCenterTreatment[svc.BeautyCenterID] == nil {
-			minByCenterTreatment[svc.BeautyCenterID] = map[uint]int{}
+			minByCenterTreatment[svc.BeautyCenterID] = map[uint]sizingService{}
 		}
 		byTreatment := minByCenterTreatment[svc.BeautyCenterID]
-		if current, ok := byTreatment[tid]; !ok || svc.Duration < current {
-			byTreatment[tid] = svc.Duration
+		current, ok := byTreatment[tid]
+		// Strictly shorter wins; equal duration keeps the lowest id so the
+		// reported service is deterministic.
+		if !ok || svc.Duration < current.duration ||
+			(svc.Duration == current.duration && svc.ID < current.id) {
+			byTreatment[tid] = sizingService{id: svc.ID, duration: svc.Duration}
 		}
 	}
 
 	filtered := make([]models.BeautyCenter, 0, len(centers))
 	durations := make(map[uint]int, len(centers))
+	serviceIDs := make(map[uint][]uint, len(centers))
 	for _, c := range centers {
 		byTreatment := minByCenterTreatment[c.ID]
 		if byTreatment == nil {
@@ -293,21 +316,31 @@ func (s *AvailabilityServiceImpl) resolveTreatmentDurations(
 		}
 		total := 0
 		complete := true
+		ids := make([]uint, 0, len(unique))
 		for _, tid := range unique {
-			d, ok := byTreatment[tid]
+			chosen, ok := byTreatment[tid]
 			if !ok {
 				complete = false
 				break
 			}
-			total += d
+			total += chosen.duration
+			ids = append(ids, chosen.id)
 		}
 		if !complete || total <= 0 {
 			continue
 		}
 		filtered = append(filtered, c)
 		durations[c.ID] = total
+		serviceIDs[c.ID] = ids
 	}
-	return filtered, durations, nil
+	return filtered, durations, serviceIDs, nil
+}
+
+// sizingService is the service actually used to size a center's window for one
+// treatment: its id (surfaced in the search result) and its duration.
+type sizingService struct {
+	id       uint
+	duration int
 }
 
 // dedupeIDs preserves first-seen order while removing duplicates. Duplicate
