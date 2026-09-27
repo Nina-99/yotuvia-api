@@ -1,10 +1,36 @@
 package request
 
+// ServiceAssignment binds ONE requested service to the professional who will
+// perform it. It is the element of the OPTIONAL multi-professional plan.
+//
+// The SAME shape is used by the client booking body (assignments[]) and by the
+// availability chain query (assignments=serviceId:personnelId,...), so the read
+// and write paths validate one plan with one definition.
+type ServiceAssignment struct {
+	ServiceID   uint `json:"service_id"`
+	PersonnelID uint `json:"personnel_id"`
+}
+
 type CreateReservationRequest struct {
 	BeautyCenterID uint   `json:"beauty_center_id" validate:"required"`
 	ClientID       uint   `json:"client_id"`
 	PersonnelID    uint   `json:"personnel_id"`
 	ServiceIDs     []uint `json:"service_ids" validate:"required,min=1"`
+
+	// Assignments is the OPTIONAL multi-professional plan: one
+	// {service_id, personnel_id} pair per requested service, covering
+	// service_ids EXACTLY once.
+	//
+	//   - ABSENT: unchanged single-professional behaviour — every line takes
+	//     the top-level PersonnelID and that value is the derived lead.
+	//   - PRESENT: each line's professional is authoritative; the reservation's
+	//     DERIVED LEAD is the professional of the FIRST service in service_ids
+	//     order, and the lines are persisted in that same order so the derived
+	//     segments line up with what the client was shown.
+	//
+	// A plan that does not cover service_ids exactly once (missing, duplicate,
+	// unknown service, or a zero professional) is invalid INPUT → 400.
+	Assignments []ServiceAssignment `json:"assignments"`
 
 	Date      string `json:"date" validate:"required"`
 	StartTime string `json:"start_time" validate:"required"`

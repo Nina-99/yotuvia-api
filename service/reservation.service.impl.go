@@ -178,7 +178,14 @@ func (s *ReservationServiceImpl) resolveSourcePostID(sourcePostID *uint) *uint {
 // to the spec contract: 400 for malformed input / unknown or cross-center
 // services, 409 for a conflicting slot. sourcePostID is the ALREADY-RESOLVED
 // attribution (nil when untracked); walk-ins always pass nil.
-func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID, personnelID uint, serviceIDs []uint, dateStr, startTimeStr string, sourcePostID *uint) (uint, error) {
+//
+// linePersonnel is the OPTIONAL multi-professional plan (serviceID→personnelID)
+// when the caller supplied assignments. nil keeps the single-professional
+// behaviour byte for byte: every line takes personnelID. When non-nil, lines are
+// persisted in serviceIDs order with their own professional, and the overlap
+// check validates the reservation's DERIVED SEGMENTS per professional (a bundle
+// may not double-book any of its professionals).
+func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID, personnelID uint, serviceIDs []uint, dateStr, startTimeStr string, sourcePostID *uint, linePersonnel map[uint]uint) (uint, error) {
 	// Parse date string into time.Time
 	parsedDate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
@@ -210,13 +217,27 @@ func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID,
 	}
 	endTimeStr := startParsed.Add(time.Duration(totalDuration) * time.Minute).Format("15:04")
 
-	// Check for overlaps
-	overlap, err := s.ReservationRepository.CheckOverlap(beautyCenterID, parsedDate, startTimeStr, endTimeStr, personnelID, 0)
-	if err != nil {
-		return 0, err
-	}
-	if overlap {
-		return 0, apperrors.ErrConflict
+	// Check for overlaps. A single-professional booking keeps the historical
+	// one-professional check; a multi-professional plan validates its DERIVED
+	// SEGMENTS per professional (one query, superset SQL + Go refinement), so a
+	// bundle may not double-book ANY of its professionals.
+	if len(linePersonnel) > 0 {
+		segments := prospectiveSegments(personnelID, startTimeStr, endTimeStr, serviceIDs, linePersonnel, services)
+		overlap, err := s.ReservationRepository.CheckOverlapSegments(beautyCenterID, parsedDate, startTimeStr, endTimeStr, segments, 0)
+		if err != nil {
+			return 0, err
+		}
+		if overlap {
+			return 0, apperrors.ErrConflict
+		}
+	} else {
+		overlap, err := s.ReservationRepository.CheckOverlap(beautyCenterID, parsedDate, startTimeStr, endTimeStr, personnelID, 0)
+		if err != nil {
+			return 0, err
+		}
+		if overlap {
+			return 0, apperrors.ErrConflict
+		}
 	}
 
 	// ── Loyalty reward redemption (only if center has loyalty enabled) ──
@@ -324,16 +345,38 @@ func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID,
 		SourcePostID:      sourcePostID,
 	}
 
-	for _, svc := range services {
-		reservation.ReservationServices = append(reservation.ReservationServices, models.ReservationService{
-			ServiceID:   svc.ID,
-			ServiceName: svc.Name,
-			Price:       svc.Price,
-			Duration:    svc.Duration,
-			// Phase 1: the line's professional is the reservation's lead by
-			// construction.
-			PersonnelID: &personnelID,
-		})
+	if len(linePersonnel) > 0 {
+		// Multi-professional plan: lines are persisted in service_ids order (the
+		// order the client was shown) with their own professional, so the derived
+		// segments line up with the plan. serviceNames/prices/durations still
+		// come from the already-loaded service rows.
+		svcByID := make(map[uint]models.Service, len(services))
+		for _, svc := range services {
+			svcByID[svc.ID] = svc
+		}
+		for _, sid := range serviceIDs {
+			svc := svcByID[sid]
+			pid := linePersonnel[sid]
+			reservation.ReservationServices = append(reservation.ReservationServices, models.ReservationService{
+				ServiceID:   svc.ID,
+				ServiceName: svc.Name,
+				Price:       svc.Price,
+				Duration:    svc.Duration,
+				PersonnelID: &pid,
+			})
+		}
+	} else {
+		for _, svc := range services {
+			reservation.ReservationServices = append(reservation.ReservationServices, models.ReservationService{
+				ServiceID:   svc.ID,
+				ServiceName: svc.Name,
+				Price:       svc.Price,
+				Duration:    svc.Duration,
+				// Phase 1: the line's professional is the reservation's lead by
+				// construction.
+				PersonnelID: &personnelID,
+			})
+		}
 	}
 
 	if err := s.ReservationRepository.Create(&reservation); err != nil {
@@ -360,6 +403,29 @@ func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID,
 	}
 
 	return reservation.ID, nil
+}
+
+// prospectiveSegments derives the segments a multi-professional plan will
+// occupy, using the SAME kernel (models.DeriveReservationSegments) the read
+// path uses, so the overlap check and the availability search can never
+// disagree on a boundary. The prospective reservation carries the ordered lines
+// (service_ids order) and the derived lead; line ids are zero, so the stable
+// sort keeps insertion order.
+func prospectiveSegments(lead uint, startTimeStr, endTimeStr string, serviceIDs []uint, linePersonnel map[uint]uint, services []models.Service) []models.Segment {
+	durationByID := make(map[uint]int, len(services))
+	for _, svc := range services {
+		durationByID[svc.ID] = svc.Duration
+	}
+	prospective := models.Reservation{PersonnelID: lead, StartTime: startTimeStr, EndTime: endTimeStr}
+	for _, sid := range serviceIDs {
+		pid := linePersonnel[sid]
+		prospective.ReservationServices = append(prospective.ReservationServices, models.ReservationService{
+			ServiceID:   sid,
+			Duration:    durationByID[sid],
+			PersonnelID: &pid,
+		})
+	}
+	return models.DeriveReservationSegments(&prospective)
 }
 
 func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) error {
@@ -391,10 +457,27 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 	// filter (GET /api/personnel?service_ids=) is a client surface, so the
 	// read/write agreement that matters is client-side. An unbookable pairing is
 	// invalid INPUT, so it maps to 400 (apperrors.ErrBadRequest).
-	if err := s.validateClientServiceCapability(req.PersonnelID, req.ServiceIDs); err != nil {
+	//
+	// With an OPTIONAL multi-professional plan the rule is applied PER LINE (not
+	// just to the lead): each line's professional must cover their own service.
+	// The DERIVED LEAD becomes the professional of the FIRST service in
+	// service_ids order, and the lines are then persisted in that same order.
+	personnelID := req.PersonnelID
+	var linePersonnel map[uint]uint
+	if len(req.Assignments) > 0 {
+		plan, err := BuildAssignmentPlan(req.ServiceIDs, req.Assignments)
+		if err != nil {
+			return err
+		}
+		if err := s.validateAssignmentCapability(plan, req.ServiceIDs); err != nil {
+			return err
+		}
+		linePersonnel = plan
+		personnelID = plan[req.ServiceIDs[0]]
+	} else if err := s.validateClientServiceCapability(req.PersonnelID, req.ServiceIDs); err != nil {
 		return err
 	}
-	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime, s.resolveSourcePostID(req.SourcePostID))
+	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, personnelID, req.ServiceIDs, req.Date, req.StartTime, s.resolveSourcePostID(req.SourcePostID), linePersonnel)
 	if err != nil {
 		return err
 	}
@@ -471,6 +554,36 @@ func (s *ReservationServiceImpl) validateClientServiceCapability(personnelID uin
 	return nil
 }
 
+// validateAssignmentCapability applies the Phase 0 capability rule to an
+// OPTIONAL multi-professional plan PER LINE: each service's assigned
+// professional must cover that service. Capability ids are resolved ONCE per
+// distinct professional (never once per line/query), and a nil repository
+// disables the rule exactly like validateClientServiceCapability (only the
+// sweeps wiring leaves it nil, where Create is unreachable). A violation is
+// invalid INPUT → 400.
+func (s *ReservationServiceImpl) validateAssignmentCapability(plan map[uint]uint, serviceIDs []uint) error {
+	if s.PersonnelServiceRepository == nil {
+		return nil
+	}
+	capsByPersonnel := map[uint][]uint{}
+	for _, sid := range serviceIDs {
+		pid := plan[sid]
+		caps, ok := capsByPersonnel[pid]
+		if !ok {
+			var err error
+			caps, err = s.PersonnelServiceRepository.FindServiceIDsByPersonnel(pid)
+			if err != nil {
+				return err
+			}
+			capsByPersonnel[pid] = caps
+		}
+		if !PersonnelCoversServices(caps, []uint{sid}) {
+			return apperrors.ErrBadRequest
+		}
+	}
+	return nil
+}
+
 // ──────────────────────────────────────────────
 //  CREATE ADMIN — Walk-in (beauty_center | personnel)
 // ──────────────────────────────────────────────
@@ -513,7 +626,7 @@ func (s *ReservationServiceImpl) CreateAdminReservation(req request.CreateAdminR
 		return nil, apperrors.ErrBadRequest
 	}
 
-	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime, nil)
+	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime, nil, nil)
 	if err != nil {
 		return nil, err
 	}

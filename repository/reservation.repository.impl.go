@@ -204,6 +204,56 @@ func (r *ReservationRepositoryImpl) CheckOverlap(centerID uint, date time.Time, 
 	return false, nil
 }
 
+// CheckOverlapSegments is the multi-professional twin of CheckOverlap: it
+// reports whether ANY existing non-cancelled reservation has, for the SAME
+// professional, a segment overlapping one of the prospective segments.
+//
+// It mirrors CheckOverlap's two-step strategy so the write path stays one
+// definition of "a professional is busy when":
+//
+//  1. ONE SQL pass narrows to envelope-overlapping, non-cancelled reservations
+//     at the center (the [startTime, endTime) envelope of the NEW reservation
+//     is the union of its segments, so it is a SUPERSET of every true
+//     conflict — no real conflict is filtered out).
+//  2. Go derives each candidate's segments and tests the professional's own
+//     segments with models.ReservationBusyForPersonnel.
+//
+// Unlike CheckOverlap it is NOT scoped to one professional: the caller passes
+// the whole segment list (bundle), so a plan may not double-book ANY of its
+// professionals. Candidates are loaded with their service lines in one preload
+// — no query per professional or per segment.
+func (r *ReservationRepositoryImpl) CheckOverlapSegments(centerID uint, date time.Time, startTime, endTime string, segments []models.Segment, excludeID uint) (bool, error) {
+	if len(segments) == 0 {
+		return false, nil
+	}
+
+	query := r.db.Model(&models.Reservation{}).
+		Where("beauty_center_id = ? AND date = ? AND status != 'CANCELLED'", centerID, date).
+		Where("((start_time < ? AND end_time > ?) OR (start_time >= ? AND start_time < ?) OR (end_time > ? AND end_time <= ?))",
+			endTime, startTime, startTime, endTime, startTime, endTime)
+
+	if excludeID > 0 {
+		query = query.Where("id != ?", excludeID)
+	}
+
+	var candidates []models.Reservation
+	err := query.
+		Preload("ReservationServices", func(db *gorm.DB) *gorm.DB { return db.Order("id ASC") }).
+		Find(&candidates).Error
+	if err != nil {
+		return false, err
+	}
+
+	for i := range candidates {
+		for _, seg := range segments {
+			if models.ReservationBusyForPersonnel(&candidates[i], seg.PersonnelID, seg.StartMinutes, seg.EndMinutes) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // UpdatePersonnelID sets the reservation's professional: the DERIVED LEAD and
 // every one of its service lines, in one transaction, so the two can never
 // diverge. Until per-line assignment exists, reassigning a reservation means

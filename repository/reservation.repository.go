@@ -29,6 +29,13 @@ FindByBeautyCenterId(beautyCenterID uint, from, to *time.Time, clientID *uint) (
 	// FindAll is scoped to a single beauty center (the caller's centerID claim).
 	FindAll(page, limit int, centerID uint) ([]models.Reservation, int64, error)
 	CheckOverlap(centerID uint, date time.Time, startTime, endTime string, personnelID, excludeID uint) (bool, error)
+	// CheckOverlapSegments is the multi-professional twin of CheckOverlap: it
+	// reports whether ANY existing non-cancelled reservation at the center has,
+	// for the SAME professional, a segment overlapping one of the given
+	// prospective segments. One SQL pass (envelope superset) plus the same Go
+	// per-segment refinement, so a bundle can never double-book any of its
+	// professionals and no query is issued per professional or per segment.
+	CheckOverlapSegments(centerID uint, date time.Time, startTime, endTime string, segments []models.Segment, excludeID uint) (bool, error)
 	FindByToken(token string) (*models.Reservation, error)
 	// CompleteVerification atomically marks a reservation COMPLETED only while
 	// it is still PENDING/CONFIRMED (exactly-once under concurrent scans).
