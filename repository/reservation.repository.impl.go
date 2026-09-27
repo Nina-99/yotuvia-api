@@ -40,6 +40,7 @@ func (r *ReservationRepositoryImpl) FindById(reservationID uint) (*models.Reserv
 		}
 		return nil, err
 	}
+	projectCategoryName(&reservation)
 	return &reservation, nil
 }
 
@@ -50,7 +51,7 @@ func (r *ReservationRepositoryImpl) FindUpcomingByClientID(clientID uint) (*mode
 	// client with no upcoming reservation is a normal empty state instead of
 	// a spurious "record not found" error line.
 	err := r.db.
-		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
+		Preload("ReservationServices.Service.Category").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
 		Where("client_id = ? AND date >= ? AND status NOT IN (?)", clientID, today, []string{"COMPLETED", "CANCELLED"}).
 		Order("date ASC, start_time ASC").
 		Limit(1).
@@ -61,6 +62,7 @@ func (r *ReservationRepositoryImpl) FindUpcomingByClientID(clientID uint) (*mode
 	if len(out) == 0 {
 		return nil, nil
 	}
+	projectCategoryNames(out)
 	return &out[0], nil
 }
 
@@ -71,7 +73,31 @@ func (r *ReservationRepositoryImpl) FindByClientID(clientID uint) ([]models.Rese
 		Where("client_id = ?", clientID).
 		Order("date DESC, start_time DESC").
 		Find(&reservations).Error
-	return reservations, err
+	if err != nil {
+		return reservations, err
+	}
+	projectCategoryNames(reservations)
+	return reservations, nil
+}
+
+// projectCategoryName fills every service line's transient CategoryName from the
+// preloaded Service.Category chain, so the model's own wire shape carries the
+// flat `category_name` the client reservation list reads. It performs NO query:
+// when the chain was not preloaded, Category.Name is empty and the key stays
+// omitted (omitempty). Keeping the projection here — instead of a per-line
+// lookup — is what avoids reintroducing an N+1 for a category label.
+func projectCategoryName(reservation *models.Reservation) {
+	for i := range reservation.ReservationServices {
+		line := &reservation.ReservationServices[i]
+		line.CategoryName = line.Service.Category.Name
+	}
+}
+
+// projectCategoryNames is the slice form of projectCategoryName.
+func projectCategoryNames(reservations []models.Reservation) {
+	for i := range reservations {
+		projectCategoryName(&reservations[i])
+	}
 }
 
 func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint, from, to *time.Time, clientID *uint) ([]models.Reservation, error) {

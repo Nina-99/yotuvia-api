@@ -94,9 +94,6 @@ func dtoBindings() []dtoBinding {
 			TSFile:        "src/data/dtos/Reservation.dto.ts",
 			TSInterface:   "ReservationResponse",
 			TSNestedField: "services",
-			TSOnly: map[string]string{
-				"service": "KNOWN GAP: the client service line declares a nested `service` object (name/category.name) the Go ReservationServiceResponse never emits; the mapper reads it for categoryName, which is therefore always undefined.",
-			},
 		},
 		{
 			Label:       "NotificationResponse -> NotificationResponse",

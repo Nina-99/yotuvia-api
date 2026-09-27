@@ -700,11 +700,12 @@ func mapToReservationResponse(r *models.Reservation) response.ReservationRespons
 
 	for _, svc := range r.ReservationServices {
 		resp.Services = append(resp.Services, response.ReservationServiceResponse{
-			ServiceID:   svc.ServiceID,
-			ServiceName: svc.ServiceName,
-			Price:       svc.Price,
-			Duration:    svc.Duration,
-			PersonnelID: svc.PersonnelID,
+			ServiceID:    svc.ServiceID,
+			ServiceName:  svc.ServiceName,
+			Price:        svc.Price,
+			Duration:     svc.Duration,
+			PersonnelID:  svc.PersonnelID,
+			CategoryName: svc.Service.Category.Name,
 		})
 	}
 

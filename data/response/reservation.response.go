@@ -12,6 +12,13 @@ type ReservationServiceResponse struct {
 	// existing consumers are unaffected. No personnel NAME is exposed here to
 	// avoid a per-line preload and the N+1 it would cause.
 	PersonnelID *uint `json:"personnel_id,omitempty"`
+	// CategoryName is the line's service category label, flattened onto the
+	// line the way the mobile client reads it: `services[].category_name`. It is
+	// omitted when the category is unavailable (no preloaded chain, or a service
+	// whose category row is missing). No new query is introduced — the value is
+	// projected from the already-preloaded Service.Category chain wherever that
+	// chain is loaded; paths that do not preload it simply leave the key out.
+	CategoryName string `json:"category_name,omitempty"`
 }
 
 type PersonnelLite struct {

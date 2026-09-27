@@ -27,4 +27,12 @@ type ReservationService struct {
 	// equals the reservation's derived lead by construction; Phase 2 will make
 	// it authoritative for line-level invariants (overlap, agenda, availability).
 	PersonnelID *uint `gorm:"index" json:"personnel_id,omitempty"`
+
+	// CategoryName is a read-only, non-persisted projection of the line's
+	// Service.Category.Name. The client reservation list serialises the model
+	// directly, so this field is what carries `services[].category_name` on the
+	// wire. The repository fills it from the already-preloaded
+	// Service.Category chain (no extra query); paths that do not preload the
+	// chain leave it empty and the key is omitted.
+	CategoryName string `gorm:"-" json:"category_name,omitempty"`
 }
