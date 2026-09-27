@@ -9,7 +9,10 @@ type Client struct {
 	Username  string `gorm:"size:50;not null;unique_index" json:"username"`
 	Phone     string `gorm:"size:20;not null" json:"phone"`
 	Email     string `gorm:"size:70;not null;unique_index" json:"email"`
-	Password  string `gorm:"size:255" json:"password"`
+	// Never serialised: the hash must not reach the wire. Endpoints that
+	// return the raw model (e.g. the client's reservation list) preload Client,
+	// so a JSON tag here leaked the bcrypt hash in the response body.
+	Password  string `gorm:"size:255" json:"-"`
 	AvatarURL string `json:"avatar_url"`
 	IsActive  bool   `gorm:"default:true" json:"is_active"`
 	// TrustScore is the client's reliability reputation (0-100, starts 100).
