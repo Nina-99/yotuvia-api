@@ -606,12 +606,14 @@ func (s *DashboardServiceImpl) GetStatsWithRange(centerID uint, from, to time.Ti
 	return resp, nil
 }
 
-// buildOccupancy computes per-staff booked minutes (parsed from HH:MM slots)
-// over the center-level schedule availability in [fromUTC, toUTC). Staff with
-// no non-CANCELLED bookings in range are omitted; staff whose availability is
-// zero would divide by zero and are likewise skipped.
+// buildOccupancy computes per-staff booked minutes over the center-level
+// schedule availability in [fromUTC, toUTC). Each reservation is split into
+// per-professional segments via the shared Phase 2a kernel (see
+// reservationBookedMinutes); the lead's envelope is never credited wholesale.
+// Staff with no non-CANCELLED bookings in range are omitted; staff whose
+// availability is zero would divide by zero and are likewise skipped.
 func (s *DashboardServiceImpl) buildOccupancy(centerID uint, fromUTC, toUTC time.Time) ([]response.PersonnelOccupancyDTO, error) {
-	slots, err := s.repo.BookedSlots(centerID, fromUTC, toUTC)
+	reservations, err := s.repo.BookedSlots(centerID, fromUTC, toUTC)
 	if err != nil {
 		return nil, err
 	}
@@ -640,15 +642,13 @@ func (s *DashboardServiceImpl) buildOccupancy(centerID uint, fromUTC, toUTC time
 	bookedByName := make(map[uint]int)
 	nameByID := make(map[uint]string)
 	var order []uint
-	for _, slot := range slots {
-		minutes, ok := slotMinutes(slot.StartTime, slot.EndTime)
-		if !ok {
-			continue
+	for i := range reservations {
+		for _, booking := range reservationBookedMinutes(&reservations[i]) {
+			if _, seen := bookedByName[booking.personnelID]; !seen {
+				order = append(order, booking.personnelID)
+			}
+			bookedByName[booking.personnelID] += booking.minutes
 		}
-		if _, seen := bookedByName[slot.PersonnelID]; !seen {
-			order = append(order, slot.PersonnelID)
-		}
-		bookedByName[slot.PersonnelID] += minutes
 	}
 	if len(order) == 0 {
 		return []response.PersonnelOccupancyDTO{}, nil
@@ -677,6 +677,69 @@ func (s *DashboardServiceImpl) buildOccupancy(centerID uint, fromUTC, toUTC time
 		})
 	}
 	return result, nil
+}
+
+// personnelBooking is one professional's booked minutes inside a single
+// reservation, derived from that professional's Phase 2a segments.
+type personnelBooking struct {
+	personnelID uint
+	minutes     int
+}
+
+// reservationBookedMinutes splits a reservation's stored envelope across the
+// professionals who actually work it, using the shared segment kernel
+// (models.DeriveReservationSegments) rather than the lead's whole envelope.
+//
+// The stored [StartTime, EndTime) envelope stays the source of truth for HOW
+// MUCH time is booked — for the rows the write path produces, the derived
+// segments tile that envelope exactly and the split is the identity, so every
+// single-professional booking reports precisely the minutes it did before.
+// Each professional's share of the envelope is proportional to their derived
+// segment minutes, which keeps the total faithful even for out-of-band rows
+// whose line durations do not add up to the stored envelope.
+//
+// A reservation with no lines (or only zero-length ones) falls back to the
+// envelope for its lead, mirroring the kernel's own no-line fallback so legacy
+// rows keep blocking exactly as before.
+func reservationBookedMinutes(r *models.Reservation) []personnelBooking {
+	envelope, ok := slotMinutes(r.StartTime, r.EndTime)
+	if !ok {
+		return nil
+	}
+
+	segments := models.DeriveReservationSegments(r)
+	totalWork := 0
+	for _, seg := range segments {
+		totalWork += seg.EndMinutes - seg.StartMinutes
+	}
+	if totalWork <= 0 {
+		if r.PersonnelID == 0 {
+			return nil
+		}
+		return []personnelBooking{{personnelID: r.PersonnelID, minutes: envelope}}
+	}
+
+	index := make(map[uint]int, len(segments))
+	bookings := make([]personnelBooking, 0, len(segments))
+	for _, seg := range segments {
+		mins := seg.EndMinutes - seg.StartMinutes
+		if mins <= 0 {
+			continue
+		}
+		if i, seen := index[seg.PersonnelID]; seen {
+			bookings[i].minutes += mins
+			continue
+		}
+		index[seg.PersonnelID] = len(bookings)
+		bookings = append(bookings, personnelBooking{personnelID: seg.PersonnelID, minutes: mins})
+	}
+	// Scale each professional's raw work minutes to their share of the stored
+	// envelope. Single-professional: raw == totalWork, so this is exactly the
+	// envelope (the no-op guarantee).
+	for i := range bookings {
+		bookings[i].minutes = bookings[i].minutes * envelope / totalWork
+	}
+	return bookings
 }
 
 // mapUpcomingReservation flattens a Reservation (with preloaded Client) into

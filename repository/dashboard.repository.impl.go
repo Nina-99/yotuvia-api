@@ -205,20 +205,38 @@ func (r *DashboardRepositoryImpl) TopServicesByRevenue(centerID uint, from, to t
 	return rows, err
 }
 
-// PersonnelRevenue ranks staff by COMPLETED revenue in [from, to). The join
-// excludes soft-deleted personnel explicitly (GORM never adds deleted_at to
-// raw join conditions — same precedent as TopServices).
+// PersonnelRevenue ranks staff by COMPLETED revenue in [from, to), attributed
+// PER SERVICE LINE instead of per whole booking.
+//
+// Attribution rule: each reservation's stored total_price is split across its
+// lines in proportion to the lines' own prices, and each line's share is
+// credited to the line's professional (a NULL line professional inherits the
+// reservation's derived lead — the Phase 2a kernel rule). For the data the
+// write path produces, total_price == SUM(line.price) exactly, so a line's
+// share is byte-for-byte its own price and the whole computation is a no-op
+// for every single-professional booking. A reservation with no service lines
+// keeps the legacy behaviour: its whole total_price goes to its lead.
+//
+// appointment_count is COUNT(DISTINCT reservations.id), NOT COUNT(*): grouping
+// by line would otherwise count a two-service booking performed by ONE
+// professional as two appointments and silently inflate today's dashboard. The
+// count must keep meaning "how many bookings".
+//
+// The join excludes soft-deleted personnel and lines explicitly (GORM never
+// adds deleted_at to raw join conditions — same precedent as TopServices).
 func (r *DashboardRepositoryImpl) PersonnelRevenue(centerID uint, from, to time.Time, limit int) ([]PersonnelRevenueRow, error) {
 	var rows []PersonnelRevenueRow
 	err := r.db.Model(&models.Reservation{}).
-		Select(`reservations.personnel_id,
+		Select(`COALESCE(reservation_services.personnel_id, reservations.personnel_id) AS personnel_id,
 			       COALESCE(personnels.first_name || ' ' || personnels.last_name, '') AS personnel_name,
-			       COALESCE(SUM(reservations.total_price), 0) AS revenue,
-			       COUNT(*) AS appointment_count`).
-		Joins("JOIN personnels ON personnels.id = reservations.personnel_id AND personnels.deleted_at IS NULL").
+			       COALESCE(SUM(reservations.total_price * COALESCE(reservation_services.price, reservations.total_price) / NULLIF(COALESCE(line_totals.line_total, reservations.total_price), 0)), 0) AS revenue,
+			       COUNT(DISTINCT reservations.id) AS appointment_count`).
+		Joins("LEFT JOIN reservation_services ON reservation_services.reservation_id = reservations.id AND reservation_services.deleted_at IS NULL").
+		Joins("LEFT JOIN (SELECT reservation_id, SUM(price) AS line_total FROM reservation_services WHERE deleted_at IS NULL GROUP BY reservation_id) AS line_totals ON line_totals.reservation_id = reservations.id").
+		Joins("JOIN personnels ON personnels.id = COALESCE(reservation_services.personnel_id, reservations.personnel_id) AND personnels.deleted_at IS NULL").
 		Where("reservations.beauty_center_id = ? AND reservations.status = ? AND reservations.date >= ? AND reservations.date < ?", centerID, "COMPLETED", from, to).
-		Group("reservations.personnel_id, personnels.first_name, personnels.last_name").
-		Order("revenue DESC, reservations.personnel_id ASC").
+		Group("COALESCE(reservation_services.personnel_id, reservations.personnel_id), personnels.first_name, personnels.last_name").
+		Order("revenue DESC, personnel_id ASC").
 		Limit(limit).
 		Scan(&rows).Error
 	return rows, err
@@ -294,14 +312,18 @@ func (r *DashboardRepositoryImpl) AtRiskClients(centerID uint, cutoff time.Time,
 	return rows, err
 }
 
-// BookedSlots returns raw non-CANCELLED slots in [from, to); the service
-// parses HH:MM durations in Go (D4 portability).
-func (r *DashboardRepositoryImpl) BookedSlots(centerID uint, from, to time.Time) ([]BookedSlotRow, error) {
-	var rows []BookedSlotRow
-	err := r.db.Model(&models.Reservation{}).
+// BookedSlots returns raw non-CANCELLED reservations in [from, to) with their
+// service lines preloaded, so the service can derive each professional's busy
+// segments (Phase 2a kernel) without a query per reservation. Durations are
+// still parsed in Go (D4 portability); the preload is a single bounded query
+// for the whole result set, keeping the occupancy budget constant in the
+// number of staff and bookings.
+func (r *DashboardRepositoryImpl) BookedSlots(centerID uint, from, to time.Time) ([]models.Reservation, error) {
+	var rows []models.Reservation
+	err := r.db.
+		Preload("ReservationServices").
 		Where("beauty_center_id = ? AND status <> ? AND date >= ? AND date < ?", centerID, "CANCELLED", from, to).
-		Select("personnel_id, start_time, end_time").
-		Scan(&rows).Error
+		Find(&rows).Error
 	return rows, err
 }
 

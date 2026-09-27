@@ -75,9 +75,11 @@ type AtRiskClientRow struct {
 	LastVisit  string `gorm:"column:last_visit"`
 }
 
-// BookedSlotRow is one raw non-CANCELLED reservation slot feeding the
-// occupancy computation; durations are parsed from HH:MM strings in Go
-// (design decision D4 — driver-portable, no dialect SQL).
+// BookedSlotRow is one busy interval of ONE professional feeding the occupancy
+// computation; durations are parsed from HH:MM strings in Go (design decision
+// D4 — driver-portable, no dialect SQL). The service builds these rows from
+// the Phase 2a segment kernel, so a split booking yields one row per
+// professional instead of the lead's whole envelope.
 type BookedSlotRow struct {
 	PersonnelID uint
 	StartTime   string
@@ -155,9 +157,12 @@ type DashboardRepository interface {
 	// AtRiskClients returns clients whose last COMPLETED visit is strictly
 	// before cutoff, oldest first, limited to `limit` entries.
 	AtRiskClients(centerID uint, cutoff time.Time, limit int) ([]AtRiskClientRow, error)
-	// BookedSlots returns the raw non-CANCELLED reservation slots in
-	// [from, to); durations are parsed in Go by the service.
-	BookedSlots(centerID uint, from, to time.Time) ([]BookedSlotRow, error)
+	// BookedSlots returns the raw non-CANCELLED reservations in [from, to)
+	// with their service lines preloaded (one bounded preload, never a query
+	// per reservation). The service derives each professional's busy intervals
+	// from the Phase 2a segment kernel — the lead's envelope alone is no longer
+	// enough once a booking can be split across professionals.
+	BookedSlots(centerID uint, from, to time.Time) ([]models.Reservation, error)
 	// PersonnelNames resolves display names for the given personnel ids,
 	// scoped to the center; missing/soft-deleted ids are absent from the map.
 	PersonnelNames(centerID uint, ids []uint) (map[uint]string, error)
