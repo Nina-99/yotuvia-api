@@ -159,10 +159,22 @@ func (r *ReservationRepositoryImpl) CheckOverlap(centerID uint, date time.Time, 
 	return count > 0, err
 }
 
+// UpdatePersonnelID sets the reservation's professional: the DERIVED LEAD and
+// every one of its service lines, in one transaction, so the two can never
+// diverge. Until per-line assignment exists, reassigning a reservation means
+// reassigning all of it - and the line-level attribution we now expose would
+// otherwise keep naming the previous professional.
 func (r *ReservationRepositoryImpl) UpdatePersonnelID(reservationID uint, personnelID uint) error {
-	return r.db.Model(&models.Reservation{}).
-		Where("id = ?", reservationID).
-		Update("personnel_id", personnelID).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Reservation{}).
+			Where("id = ?", reservationID).
+			Update("personnel_id", personnelID).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.ReservationService{}).
+			Where("reservation_id = ?", reservationID).
+			Update("personnel_id", personnelID).Error
+	})
 }
 
 func (r *ReservationRepositoryImpl) DeleteReservationServices(reservationID uint) error {
