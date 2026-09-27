@@ -148,12 +148,21 @@ func (r *BeautyCenterRepositoryImpl) FindWorkingHours(centerID uint, dayOfWeek i
 	return whs, nil
 }
 
-// FindReservationsForDate implements BeautyCenterRepository
+// FindReservationsForDate implements BeautyCenterRepository. When scoped to a
+// professional, the filter is a SUPERSET: a reservation qualifies if the
+// professional is its derived lead OR has a service line attributed to them,
+// and the service lines are preloaded so the caller can refine to that
+// professional's own segments (service.PersonnelBusyReservations). A
+// professional-scoped read must never miss a reservation where they are a
+// non-lead line.
 func (r *BeautyCenterRepositoryImpl) FindReservationsForDate(centerID uint, date time.Time, personnelID uint) ([]models.Reservation, error) {
 	var reservations []models.Reservation
 	q := r.db.Where("beauty_center_id = ? AND DATE(date) = DATE(?) AND status != ?", centerID, date, "CANCELLED")
 	if personnelID > 0 {
-		q = q.Where("personnel_id = ?", personnelID)
+		q = q.
+			Where("(personnel_id = ? OR id IN (SELECT reservation_id FROM reservation_services WHERE personnel_id = ? AND deleted_at IS NULL))",
+				personnelID, personnelID).
+			Preload("ReservationServices", func(db *gorm.DB) *gorm.DB { return db.Order("id ASC") })
 	}
 	err := q.Find(&reservations).Error
 	return reservations, err
@@ -195,7 +204,8 @@ func (r *BeautyCenterRepositoryImpl) FindWorkingHoursForCenters(centerIDs []uint
 
 // FindReservationsForRange implements BeautyCenterRepository. One SELECT for
 // every candidate center's reservations over the inclusive [from, to] range,
-// excluding CANCELLED — the batch twin of FindReservationsForDate.
+// excluding CANCELLED — the batch twin of FindReservationsForDate, with the
+// same professional superset filter and line preload.
 func (r *BeautyCenterRepositoryImpl) FindReservationsForRange(centerIDs []uint, from, to time.Time, personnelID uint) ([]models.Reservation, error) {
 	if len(centerIDs) == 0 {
 		return []models.Reservation{}, nil
@@ -206,7 +216,10 @@ func (r *BeautyCenterRepositoryImpl) FindReservationsForRange(centerIDs []uint, 
 		centerIDs, from, to, "CANCELLED",
 	)
 	if personnelID > 0 {
-		q = q.Where("personnel_id = ?", personnelID)
+		q = q.
+			Where("(personnel_id = ? OR id IN (SELECT reservation_id FROM reservation_services WHERE personnel_id = ? AND deleted_at IS NULL))",
+				personnelID, personnelID).
+			Preload("ReservationServices", func(db *gorm.DB) *gorm.DB { return db.Order("id ASC") })
 	}
 	err := q.Find(&reservations).Error
 	if err != nil {

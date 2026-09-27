@@ -165,6 +165,10 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 	if err != nil {
 		return empty, err
 	}
+	// Professional-scoped searches must block only that professional's own
+	// segments, not the envelope of every shared reservation. Center-wide
+	// searches (personnelID == 0) are returned untouched.
+	reservations = PersonnelBusyReservations(reservations, req.PersonnelID)
 	// center → date (YYYY-MM-DD) → reservations
 	resByCenter := map[uint]map[string][]models.Reservation{}
 	for _, r := range reservations {

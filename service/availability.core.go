@@ -16,8 +16,6 @@ package service
 import (
 	"fmt"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Nina-99/yottu-api/data/response"
@@ -70,13 +68,11 @@ func AvailabilityPeriodForMinutes(minutes int) string {
 }
 
 // ParseScheduleMinutes converts "HH:MM" to minutes since midnight. Malformed
-// input yields the zero value, matching the historical behaviour of the service
-// helper it replaces.
+// input yields the zero value. The parse itself lives in the shared models
+// kernel so the availability read path and the overlap write path share ONE
+// definition of a clock boundary.
 func ParseScheduleMinutes(timeStr string) int {
-	parts := strings.Split(timeStr, ":")
-	h, _ := strconv.Atoi(parts[0])
-	m, _ := strconv.Atoi(parts[1])
-	return h*60 + m
+	return models.ParseClockMinutes(timeStr)
 }
 
 // TotalServicesDuration sums service durations exactly the way the booking flow
@@ -203,4 +199,67 @@ func ComputeAvailabilitySlots(
 	}
 
 	return slots
+}
+
+// PersonnelBusyReservations projects reservations down to the busy intervals of
+// ONE professional, so the shared slot kernel blocks only that professional's
+// own segments.
+//
+//   - personnelID == 0 (no professional preference) returns the input untouched:
+//     the center-wide busy set is the union of every reservation's envelope,
+//     and because each reservation's segments tile its envelope contiguously
+//     (sequential derivation), that union is already the correct center-wide
+//     busy set. No refinement is needed and the historical behaviour is kept.
+//   - personnelID > 0 replaces each reservation with one synthetic reservation
+//     per contiguous run of that professional's segments. The synthetic rows
+//     carry only the interval fields ComputeAvailabilitySlots reads, so the
+//     kernel stays untouched and BOTH availability entry points (cross-center
+//     search and per-center) keep using one code path and therefore cannot
+//     disagree.
+//
+// Reservations without a segment for the professional contribute nothing —
+// which is exactly the fix: a professional is busy only while working on their
+// own line, never for the whole envelope of a shared reservation.
+func PersonnelBusyReservations(reservations []models.Reservation, personnelID uint) []models.Reservation {
+	if personnelID == 0 || len(reservations) == 0 {
+		return reservations
+	}
+
+	out := make([]models.Reservation, 0, len(reservations))
+	for i := range reservations {
+		r := reservations[i]
+		for _, interval := range personnelIntervals(&r, personnelID) {
+			out = append(out, models.Reservation{
+				BeautyCenterID: r.BeautyCenterID,
+				Date:           r.Date,
+				StartTime:      formatClockMinutes(interval[0]),
+				EndTime:        formatClockMinutes(interval[1]),
+			})
+		}
+	}
+	return out
+}
+
+// personnelIntervals filters a reservation's derived segments to one
+// professional and merges contiguous runs into [start,end] minute intervals.
+func personnelIntervals(r *models.Reservation, personnelID uint) [][2]int {
+	segments := models.DeriveReservationSegments(r)
+	var intervals [][2]int
+	for _, seg := range segments {
+		if seg.PersonnelID != personnelID {
+			continue
+		}
+		if n := len(intervals); n > 0 && intervals[n-1][1] == seg.StartMinutes {
+			intervals[n-1][1] = seg.EndMinutes
+			continue
+		}
+		intervals = append(intervals, [2]int{seg.StartMinutes, seg.EndMinutes})
+	}
+	return intervals
+}
+
+// formatClockMinutes renders minutes since midnight back as "HH:MM", the exact
+// shape the slot kernel parses.
+func formatClockMinutes(m int) string {
+	return fmt.Sprintf("%02d:%02d", m/60, m%60)
 }

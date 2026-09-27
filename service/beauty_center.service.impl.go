@@ -262,11 +262,14 @@ func (s *BeautyCenterServiceImpl) GetAvailableSlots(centerID uint, date string, 
 		return response.AvailableSlotsResponse{Date: date, Currency: center.Currency, Slots: []response.AvailableSlot{}}, nil
 	}
 
-	// Get existing reservations for that date (excluding CANCELLED)
+	// Get existing reservations for that date (excluding CANCELLED). When a
+	// professional is requested, the busy set is refined to THEIR segments only,
+	// so a shared reservation blocks just the professional's own line.
 	reservations, err := s.repo.FindReservationsForDate(centerID, parsedDate, personnelID)
 	if err != nil {
 		return response.AvailableSlotsResponse{}, err
 	}
+	reservations = PersonnelBusyReservations(reservations, personnelID)
 
 	// The slot kernel is shared with the cross-center search so the two can
 	// never disagree (see service/availability).

@@ -103,14 +103,18 @@ func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint, fr
 	return reservations, err
 }
 
-// FindByPersonnelId implements ReservationRepository. The where clause is
-// assembled conditionally so nil from/to stay open-ended while GORM still
-// handles the bound parameters.
+// FindByPersonnelId implements ReservationRepository. A professional's agenda
+// must contain every reservation that has a service line attributed to them —
+// not only the ones where they are the derived lead. The OR keeps lead
+// membership (and line-less legacy rows) working, while the subquery adds the
+// non-lead lines. The where clause is assembled conditionally so nil from/to
+// stay open-ended while GORM still handles the bound parameters.
 func (r *ReservationRepositoryImpl) FindByPersonnelId(personnelID uint, from, to *time.Time) ([]models.Reservation, error) {
 	var reservations []models.Reservation
 	query := r.db.
 		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
-		Where("personnel_id = ?", personnelID)
+		Where("(personnel_id = ? OR id IN (SELECT reservation_id FROM reservation_services WHERE personnel_id = ? AND deleted_at IS NULL))",
+			personnelID, personnelID)
 	if from != nil {
 		query = query.Where("date >= ?", *from)
 	}
@@ -140,8 +144,29 @@ func (r *ReservationRepositoryImpl) FindAll(page, limit int, centerID uint) ([]m
 	return reservations, total, err
 }
 
+// CheckOverlap reports whether personnelID is busy inside [startTime, endTime)
+// on date at the center. A professional is busy only for THEIR OWN segments of
+// a reservation, not for the whole envelope of a shared reservation.
+//
+// Strategy (superset SQL prefilter + exact Go refinement):
+//
+//  1. SQL narrows to envelope-overlapping, non-cancelled reservations at the
+//     center (exactly the historical predicate). For a professional it also
+//     requires the reservation to carry them — either as its derived lead or
+//     as the professional of one of its service lines. This is a SUPERSET of
+//     the true conflicts: any segment that overlaps the window lies inside its
+//     reservation's envelope, so no real conflict can be filtered out.
+//  2. Go derives each candidate's segments (models.DeriveReservationSegments)
+//     and checks overlap against the professional's own segments, which can
+//     only narrow the set.
+//
+// For a single-professional reservation the segments tile the envelope
+// contiguously, so step 2 returns the same answer the envelope check always
+// did — a byte-for-byte no-op for all existing data.
+//
+// personnelID == 0 keeps the historical center-wide semantics: any
+// envelope-overlapping reservation blocks.
 func (r *ReservationRepositoryImpl) CheckOverlap(centerID uint, date time.Time, startTime, endTime string, personnelID, excludeID uint) (bool, error) {
-	var count int64
 	query := r.db.Model(&models.Reservation{}).
 		Where("beauty_center_id = ? AND date = ? AND status != 'CANCELLED'", centerID, date).
 		Where("((start_time < ? AND end_time > ?) OR (start_time >= ? AND start_time < ?) OR (end_time > ? AND end_time <= ?))",
@@ -151,12 +176,32 @@ func (r *ReservationRepositoryImpl) CheckOverlap(centerID uint, date time.Time, 
 		query = query.Where("id != ?", excludeID)
 	}
 
-	if personnelID > 0 {
-		query = query.Where("personnel_id = ?", personnelID)
+	if personnelID == 0 {
+		var count int64
+		if err := query.Count(&count).Error; err != nil {
+			return false, err
+		}
+		return count > 0, nil
 	}
 
-	err := query.Count(&count).Error
-	return count > 0, err
+	var candidates []models.Reservation
+	err := query.
+		Where("(personnel_id = ? OR id IN (SELECT reservation_id FROM reservation_services WHERE personnel_id = ? AND deleted_at IS NULL))",
+			personnelID, personnelID).
+		Preload("ReservationServices", func(db *gorm.DB) *gorm.DB { return db.Order("id ASC") }).
+		Find(&candidates).Error
+	if err != nil {
+		return false, err
+	}
+
+	startMinutes := models.ParseClockMinutes(startTime)
+	endMinutes := models.ParseClockMinutes(endTime)
+	for i := range candidates {
+		if models.ReservationBusyForPersonnel(&candidates[i], personnelID, startMinutes, endMinutes) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // UpdatePersonnelID sets the reservation's professional: the DERIVED LEAD and
