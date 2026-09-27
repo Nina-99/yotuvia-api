@@ -43,6 +43,33 @@ type CreateReservationRequest struct {
 	SourcePostID *uint `json:"source_post_id"`
 }
 
+// UpdateReservationRequest is the PUT /api/reservation/:id body. It mirrors the
+// create body because an update REPLACES the reservation's service lines, and it
+// carries the SAME OPTIONAL multi-professional plan (assignments) with the SAME
+// validation semantics as create.
+//
+//   - Assignments ABSENT: the historical edit behaviour is preserved when the
+//     stored lines all share one professional; when they DIVERGE, each retained
+//     service keeps its own line professional instead of being flattened onto a
+//     single professional (see ReservationServiceImpl.Update).
+//   - Assignments PRESENT: each line's professional is authoritative, the plan
+//     must cover service_ids EXACTLY once, and the reservation's DERIVED LEAD is
+//     the professional of the FIRST service in service_ids order.
+type UpdateReservationRequest struct {
+	BeautyCenterID uint   `json:"beauty_center_id" validate:"required"`
+	ClientID       uint   `json:"client_id"`
+	PersonnelID    uint   `json:"personnel_id"`
+	ServiceIDs     []uint `json:"service_ids" validate:"required,min=1"`
+
+	// Assignments is the OPTIONAL multi-professional plan, identical in shape
+	// and semantics to CreateReservationRequest.Assignments.
+	Assignments []ServiceAssignment `json:"assignments"`
+
+	Date         string `json:"date" validate:"required"`
+	StartTime    string `json:"start_time" validate:"required"`
+	SourcePostID *uint  `json:"source_post_id"`
+}
+
 // CreateAdminReservationRequest is the walk-in booking DTO (design D3): the
 // client is explicit and required (unlike the client flow, where it is
 // resolved from the JWT claim), while personnel stays optional. Date follows

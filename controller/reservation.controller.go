@@ -106,7 +106,7 @@ func (c *ReservationController) Update(ctx *gin.Context) {
 		return
 	}
 
-	var req request.CreateReservationRequest
+	var req request.UpdateReservationRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return

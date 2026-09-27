@@ -648,7 +648,61 @@ func (s *ReservationServiceImpl) CreateAdminReservation(req request.CreateAdminR
 //  UPDATE
 // ──────────────────────────────────────────────
 
-func (s *ReservationServiceImpl) Update(reservationID uint, req request.CreateReservationRequest, clientID, centerID uint, role string) error {
+// storedLinesDiverge reports whether a reservation's stored service lines name
+// more than one professional — a genuine multi-professional booking. A line
+// without a professional (legacy row) inherits the reservation's stored lead, so
+// it never counts as divergence.
+func storedLinesDiverge(storedLead uint, lines []models.ReservationService) bool {
+	for i := range lines {
+		if lines[i].PersonnelID != nil && *lines[i].PersonnelID != storedLead {
+			return true
+		}
+	}
+	return false
+}
+
+// existingLineProfessional returns the professional already recorded for
+// serviceID on the stored lines. A legacy line without a professional inherits
+// the reservation's stored lead. found is false when the service is NEW to this
+// reservation (it has no stored line), which lets the caller apply the
+// newly-added-service rule.
+func existingLineProfessional(storedLead uint, lines []models.ReservationService, serviceID uint) (uint, bool) {
+	for i := range lines {
+		if lines[i].ServiceID != serviceID {
+			continue
+		}
+		if lines[i].PersonnelID == nil {
+			return storedLead, true
+		}
+		return *lines[i].PersonnelID, true
+	}
+	return 0, false
+}
+
+// Update replaces a reservation's service lines, envelope, price and
+// professional attribution.
+//
+// MULTI-PROFESSIONAL CONTRACT (the anti-flatten rule):
+//
+//   - assignments PRESENT: the plan is authoritative, exactly as on create —
+//     BuildAssignmentPlan enforces exact coverage of service_ids, the capability
+//     rule is applied PER LINE, the DERIVED LEAD is the professional of the
+//     FIRST service in service_ids order, the rebuilt lines follow service_ids
+//     order, and the overlap check validates the NEW derived segments per
+//     professional through the shared Phase 3a helper (CheckOverlapSegments).
+//
+//   - assignments ABSENT and every stored line shares one professional (the
+//     stored lead): the new top-level personnel_id is applied to every line —
+//     today's behaviour, byte for byte. This is the normal edit form changing
+//     the professional of a single-professional booking.
+//
+//   - assignments ABSENT and the stored lines DIVERGE (a genuine
+//     multi-professional booking): each RETAINED service keeps its own stored
+//     line professional and the stored lead is preserved, while a service NEWLY
+//     added by the edit takes the requested personnel_id (or the reservation's
+//     existing lead when none was given). A client's per-line assignment is
+//     NEVER silently destroyed.
+func (s *ReservationServiceImpl) Update(reservationID uint, req request.UpdateReservationRequest, clientID, centerID uint, role string) error {
 	// Ownership at entry: fetch the resource, then prove the caller may touch it.
 	reservation, err := s.ReservationRepository.FindById(reservationID)
 	if err != nil || reservation == nil {
@@ -686,8 +740,43 @@ func (s *ReservationServiceImpl) Update(reservationID uint, req request.CreateRe
 	startParsed, _ := time.Parse("15:04", req.StartTime)
 	endTimeStr := startParsed.Add(time.Duration(totalDuration) * time.Minute).Format("15:04")
 
-	// Check overlap excluding current reservation
-	if !reservation.Date.Equal(parsedDate) || reservation.StartTime != req.StartTime || endTimeStr != reservation.EndTime || reservation.BeautyCenterID != req.BeautyCenterID {
+	// Resolve the OPTIONAL multi-professional plan exactly like Create: the plan
+	// must cover service_ids EXACTLY once (missing/duplicate/unknown/zero → 400),
+	// each line's professional must cover their service, and the DERIVED LEAD is
+	// the professional of the FIRST service in service_ids order.
+	planProvided := len(req.Assignments) > 0
+	var linePersonnel map[uint]uint
+	if planProvided {
+		plan, err := BuildAssignmentPlan(req.ServiceIDs, req.Assignments)
+		if err != nil {
+			return err
+		}
+		if err := s.validateAssignmentCapability(plan, req.ServiceIDs); err != nil {
+			return err
+		}
+		linePersonnel = plan
+	}
+
+	// Overlap check, excluding the reservation being edited. A supplied plan
+	// validates its NEW derived segments per professional through the SHARED
+	// Phase 3a helper (one query, superset SQL + the same Go refinement) — no
+	// second interval engine. The assignment-free path keeps the historical
+	// single-professional CheckOverlap, applied only when the envelope moved.
+	envelopeChanged := !reservation.Date.Equal(parsedDate) ||
+		reservation.StartTime != req.StartTime ||
+		endTimeStr != reservation.EndTime ||
+		reservation.BeautyCenterID != req.BeautyCenterID
+	if planProvided {
+		lead := linePersonnel[req.ServiceIDs[0]]
+		segments := prospectiveSegments(lead, req.StartTime, endTimeStr, req.ServiceIDs, linePersonnel, services)
+		overlap, err := s.ReservationRepository.CheckOverlapSegments(req.BeautyCenterID, parsedDate, req.StartTime, endTimeStr, segments, reservationID)
+		if err != nil {
+			return err
+		}
+		if overlap {
+			return apperrors.ErrConflict
+		}
+	} else if envelopeChanged {
 		overlap, err := s.ReservationRepository.CheckOverlap(req.BeautyCenterID, parsedDate, req.StartTime, endTimeStr, req.PersonnelID, reservationID)
 		if err != nil {
 			return err
@@ -701,28 +790,77 @@ func (s *ReservationServiceImpl) Update(reservationID uint, req request.CreateRe
 	// against the actor's claim, and the body may carry an arbitrary client_id
 	// that must not reassign the reservation to someone else.
 	reservation.BeautyCenterID = req.BeautyCenterID
-	reservation.PersonnelID = req.PersonnelID
 	reservation.Date = parsedDate
 	reservation.StartTime = req.StartTime
 	reservation.EndTime = endTimeStr
 	reservation.TotalPrice = totalPrice
 
-	// Replace services: clear old, add new
+	// Replace services: clear old, add new. The STORED attribution is captured
+	// before the slice is reset so the assignment-free path can honour it.
 	if err := s.ReservationRepository.DeleteReservationServices(reservationID); err != nil {
 		return err
 	}
+	storedLead := reservation.PersonnelID
+	storedLines := reservation.ReservationServices
 	reservation.ReservationServices = nil
-	// Phase 1: every replacement line carries the reservation's lead (the
-	// professional chosen for this update) so line attribution stays defined.
-	linePersonnelID := req.PersonnelID
+
+	if planProvided {
+		// Mirror Create: lines follow service_ids order, each carrying its own
+		// plan professional; the lead is the first service's professional.
+		svcByID := make(map[uint]models.Service, len(services))
+		for _, svc := range services {
+			svcByID[svc.ID] = svc
+		}
+		for _, sid := range req.ServiceIDs {
+			svc := svcByID[sid]
+			pid := linePersonnel[sid]
+			reservation.ReservationServices = append(reservation.ReservationServices, models.ReservationService{
+				ServiceID:   svc.ID,
+				ServiceName: svc.Name,
+				Price:       svc.Price,
+				Duration:    svc.Duration,
+				PersonnelID: &pid,
+			})
+		}
+		// The preloaded belongs-to association would otherwise overwrite the FK
+		// on Save, so drop it and let the DERIVED LEAD land on the row.
+		reservation.Personnel = models.Personnel{}
+		reservation.PersonnelID = linePersonnel[req.ServiceIDs[0]]
+		return s.ReservationRepository.Update(reservation)
+	}
+
+	// Assignment-free edit. When every stored line already shares one
+	// professional, keep the historical flatten: the requested personnel_id
+	// becomes every line. Otherwise PRESERVE the split: a client's per-line
+	// assignment must survive an edit that does not carry a plan.
+	diverge := storedLinesDiverge(storedLead, storedLines)
 	for _, svc := range services {
+		pid := req.PersonnelID
+		if diverge {
+			if existing, found := existingLineProfessional(storedLead, storedLines, svc.ID); found {
+				pid = existing // retained service keeps its own professional
+			} else if req.PersonnelID != 0 {
+				pid = req.PersonnelID // newly added service takes the requested one
+			} else {
+				pid = storedLead // ...or falls back to the reservation's existing lead
+			}
+		}
 		reservation.ReservationServices = append(reservation.ReservationServices, models.ReservationService{
 			ServiceID:   svc.ID,
 			ServiceName: svc.Name,
 			Price:       svc.Price,
 			Duration:    svc.Duration,
-			PersonnelID: &linePersonnelID,
+			PersonnelID: &pid,
 		})
+	}
+	if diverge {
+		// PRESERVE the stored lead: the row's professional is not moved by an
+		// assignment-free edit of a multi-professional booking. (The preloaded
+		// belongs-to association enforces the same value on Save; setting it
+		// explicitly keeps the rule obvious.)
+		reservation.PersonnelID = storedLead
+	} else {
+		reservation.PersonnelID = req.PersonnelID
 	}
 
 	return s.ReservationRepository.Update(reservation)

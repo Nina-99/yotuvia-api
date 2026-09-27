@@ -63,7 +63,7 @@ type ReservationService interface {
 	// Update/Delete/FindById/GenerateVerificationToken take actor params
 	// (clientID, centerID, role claims) and enforce ownership: a client may act
 	// on its own reservation, a center on its own center's reservation.
-	Update(reservationID uint, req request.CreateReservationRequest, clientID, centerID uint, role string) error
+	Update(reservationID uint, req request.UpdateReservationRequest, clientID, centerID uint, role string) error
 	Delete(reservationID uint, clientID, centerID uint, role string) error
 	UpdateStatus(reservationID uint, status string, centerID uint) error
 	// UpdateStatusByPersonnel lets a staff member transition ONLY their own
