@@ -12,7 +12,7 @@ import (
 
 func PersonnelRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
 	repo := repository.NewPersonnelRepositoryImpl(db)
-	svc := service.NewPersonnelServiceImpl(repo, validate)
+	svc := service.NewPersonnelServiceImpl(repo, repository.NewServiceRepositoryImpl(db), validate)
 	followRepo := repository.NewPersonnelFollowRepositoryImpl(db)
 	followSvc := service.NewPersonnelFollowServiceImpl(followRepo, repo, validate)
 	ctrl := controller.NewPersonnelController(svc, followSvc)

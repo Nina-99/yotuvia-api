@@ -9,4 +9,8 @@ type PersonnelServiceRepository interface {
 	FindByPersonnelID(personnelID uint) ([]models.PersonnelService, error)
 	FindByServiceID(serviceID uint) ([]models.PersonnelService, error)
 	FindByPersonnelAndService(personnelID, serviceID uint) (*models.PersonnelService, error)
+	// FindServiceIDsByPersonnel returns the ids of the services a professional
+	// has capability rows for. An empty result means the professional is
+	// UNRESTRICTED (see service.PersonnelCoversServices).
+	FindServiceIDsByPersonnel(personnelID uint) ([]uint, error)
 }

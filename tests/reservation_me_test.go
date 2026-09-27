@@ -133,5 +133,6 @@ func newReservationServiceForMeTests(t *testing.T, db *gorm.DB) interface {
 		validator.New(),
 		repository.NewBeautyCenterRepositoryImpl(db),
 		nil, // FeedPostRepository: attribution not exercised here
+		repository.NewPersonnelServiceRepositoryImpl(db),
 	)
 }

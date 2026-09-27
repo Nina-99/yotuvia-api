@@ -33,6 +33,7 @@ func newReservationTriggerTestService(t *testing.T, db *gorm.DB) service.Reserva
 		validate,
 		repository.NewBeautyCenterRepositoryImpl(db),
 		nil, // FeedPostRepository: attribution not exercised here
+		repository.NewPersonnelServiceRepositoryImpl(db),
 	)
 }
 

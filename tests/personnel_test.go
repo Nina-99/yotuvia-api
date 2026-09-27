@@ -56,7 +56,7 @@ func TestPersonnelCRUD(t *testing.T) {
 	validate := validator.New()
 	db := setupTestDB(t)
 	repo := repository.NewPersonnelRepositoryImpl(db)
-	svc := service.NewPersonnelServiceImpl(repo, validate)
+	svc := service.NewPersonnelServiceImpl(repo, repository.NewServiceRepositoryImpl(db), validate)
 
 	var personnel models.Personnel
 	if err := db.First(&personnel).Error; err != nil {
@@ -88,7 +88,7 @@ func TestPersonnelCRUD(t *testing.T) {
 	})
 
 	t.Run("Find All Personnel", func(t *testing.T) {
-		res, total, err := svc.FindAll(1, 1, 20)
+		res, total, err := svc.FindAll(1, nil, 1, 20)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, res)
 		assert.Equal(t, int64(1), total)
@@ -151,7 +151,7 @@ func TestPersonnelService_UpdateMe(t *testing.T) {
 	validate := validator.New()
 	db := setupTestDB(t)
 	repo := repository.NewPersonnelRepositoryImpl(db)
-	svc := service.NewPersonnelServiceImpl(repo, validate)
+	svc := service.NewPersonnelServiceImpl(repo, repository.NewServiceRepositoryImpl(db), validate)
 
 	var personnel models.Personnel
 	if err := db.First(&personnel).Error; err != nil {

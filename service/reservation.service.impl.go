@@ -43,6 +43,9 @@ import (
 //	MarketConfigService  — VerifyQR (nil-guarded)
 //	FeedPostRepository   — Create attribution only (nil-guarded): when nil, a
 //	                       source_post_id hint is simply ignored.
+//	PersonnelServiceRepo — Create (capability check, nil-guarded): when nil the
+//	                       capability rule is skipped, which is correct for the
+//	                       sweeps wiring where Create is never reachable.
 //
 // The Phase 3 ticker calls only SendDueReminders, SweepNoShows and
 // ExpireHolds, which need ReservationRepository + NotificationService +
@@ -64,7 +67,12 @@ type ReservationServiceImpl struct {
 	// FeedPostRepository resolves an optional source_post_id hint from the
 	// client booking flow. It is OPTIONAL: nil simply disables attribution.
 	FeedPostRepository repository.FeedPostRepository
-	Validate           *validator.Validate
+	// PersonnelServiceRepository backs the capability check on the client
+	// booking path (a professional with capability rows may only be booked for
+	// those services). OPTIONAL: nil disables the check, which is the correct
+	// configuration for the sweeps wiring, where Create is never reachable.
+	PersonnelServiceRepository repository.PersonnelServiceRepository
+	Validate                   *validator.Validate
 }
 
 func NewReservationServiceImpl(
@@ -82,25 +90,27 @@ func NewReservationServiceImpl(
 	validate *validator.Validate,
 	centerRepository repository.BeautyCenterRepository,
 	feedPostRepository repository.FeedPostRepository,
+	personnelServiceRepository repository.PersonnelServiceRepository,
 ) ReservationService {
 	requireDeps("NewReservationServiceImpl",
 		dep("ReservationRepository", reservationRepository),
 	)
 	return &ReservationServiceImpl{
-		ReservationRepository: reservationRepository,
-		PersonnelRepository:   personnelRepository,
-		ServiceRepository:     serviceRepository,
-		ClientRepository:      clientRepository,
-		CenterRepository:      centerRepository,
-		TokenAccountRepo:      tokenAccountRepository,
-		NotificationService:   notificationService,
-		LoyaltyService:        loyaltyService,
-		PromotionService:      promotionService,
-		TokenAccountService:   tokenAccountService,
-		MissionService:        missionService,
-		MarketConfigService:   marketConfigService,
-		FeedPostRepository:    feedPostRepository,
-		Validate:              validate,
+		ReservationRepository:      reservationRepository,
+		PersonnelRepository:        personnelRepository,
+		ServiceRepository:          serviceRepository,
+		ClientRepository:           clientRepository,
+		CenterRepository:           centerRepository,
+		TokenAccountRepo:           tokenAccountRepository,
+		NotificationService:        notificationService,
+		LoyaltyService:             loyaltyService,
+		PromotionService:           promotionService,
+		TokenAccountService:        tokenAccountService,
+		MissionService:             missionService,
+		MarketConfigService:        marketConfigService,
+		FeedPostRepository:         feedPostRepository,
+		PersonnelServiceRepository: personnelServiceRepository,
+		Validate:                   validate,
 	}
 }
 
@@ -371,6 +381,16 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 	if err := s.validateClientBookingWindow(req.BeautyCenterID, req.Date, req.StartTime, req.ServiceIDs); err != nil {
 		return err
 	}
+	// Capability rule (personnel↔service). Placed HERE, in the client entry
+	// point, for the same reason as the working-hours check above: the
+	// admin/walk-in path (CreateAdminReservation) is a centre taking
+	// responsibility for its own manual bookings and stays exempt. The picker
+	// filter (GET /api/personnel?service_ids=) is a client surface, so the
+	// read/write agreement that matters is client-side. An unbookable pairing is
+	// invalid INPUT, so it maps to 400 (apperrors.ErrBadRequest).
+	if err := s.validateClientServiceCapability(req.PersonnelID, req.ServiceIDs); err != nil {
+		return err
+	}
 	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime, s.resolveSourcePostID(req.SourcePostID))
 	if err != nil {
 		return err
@@ -419,6 +439,30 @@ func (s *ReservationServiceImpl) validateClientBookingWindow(centerID uint, date
 	startMinutes := startParsed.Hour()*60 + startParsed.Minute()
 	endMinutes := startMinutes + TotalServicesDuration(services)
 	if !BookingWindowAllowed(parsedDate, startMinutes, endMinutes, schedules, time.Now()) {
+		return apperrors.ErrBadRequest
+	}
+	return nil
+}
+
+// validateClientServiceCapability enforces the personnel↔service capability
+// rule on the client booking path: a professional with capability rows may only
+// be booked for services among them. A professional with NO rows is
+// UNRESTRICTED, which keeps the seeded/demo database (zero rows) and any fresh
+// install fully bookable — the backward-compatible guarantee.
+//
+// personnelID == 0 means "no professional preference" (the centre assigns one
+// later), so there is nothing to constrain. A nil repository disables the rule,
+// which only happens in the sweeps wiring where Create is unreachable. The exact
+// predicate is shared with the picker read filter via PersonnelCoversServices.
+func (s *ReservationServiceImpl) validateClientServiceCapability(personnelID uint, serviceIDs []uint) error {
+	if personnelID == 0 || s.PersonnelServiceRepository == nil {
+		return nil
+	}
+	capabilityIDs, err := s.PersonnelServiceRepository.FindServiceIDsByPersonnel(personnelID)
+	if err != nil {
+		return err
+	}
+	if !PersonnelCoversServices(capabilityIDs, serviceIDs) {
 		return apperrors.ErrBadRequest
 	}
 	return nil

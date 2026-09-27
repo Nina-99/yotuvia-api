@@ -14,12 +14,13 @@ import (
 )
 
 type PersonnelServiceImpl struct {
-	repo     repository.PersonnelRepository
-	Validate *validator.Validate
+	repo        repository.PersonnelRepository
+	serviceRepo repository.ServiceRepository
+	Validate    *validator.Validate
 }
 
-func NewPersonnelServiceImpl(repo repository.PersonnelRepository, validate *validator.Validate) PersonnelService {
-	return &PersonnelServiceImpl{repo: repo, Validate: validate}
+func NewPersonnelServiceImpl(repo repository.PersonnelRepository, serviceRepo repository.ServiceRepository, validate *validator.Validate) PersonnelService {
+	return &PersonnelServiceImpl{repo: repo, serviceRepo: serviceRepo, Validate: validate}
 }
 
 // Update implements PersonnelService
@@ -158,9 +159,24 @@ func (s *PersonnelServiceImpl) FindByID(id uint) (response.PersonnelResponse, er
 	return s.mapToResponse(*personnel), nil
 }
 
-// FindAll implements PersonnelService
-func (s *PersonnelServiceImpl) FindAll(beautyCenterID uint, page, limit int) ([]response.PersonnelResponse, int64, error) {
-	list, total, err := s.repo.FindAll(beautyCenterID, page, limit)
+// FindAll implements PersonnelService. The optional serviceIDs filter powers the
+// booking picker; the capability rule itself lives in the repository query,
+// which mirrors service.PersonnelCoversServices. Requested ids are deduped so a
+// repeated id cannot inflate the "covers ALL" comparison, and any id that does
+// not resolve to a real service is invalid input (400).
+func (s *PersonnelServiceImpl) FindAll(beautyCenterID uint, serviceIDs []uint, page, limit int) ([]response.PersonnelResponse, int64, error) {
+	unique := dedupeIDs(serviceIDs)
+	if len(unique) > 0 && s.serviceRepo != nil {
+		services, err := s.serviceRepo.FindByIDs(unique)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(services) != len(unique) {
+			return nil, 0, apperrors.ErrBadRequest // unknown service id
+		}
+	}
+
+	list, total, err := s.repo.FindAll(beautyCenterID, unique, page, limit)
 	if err != nil {
 		return nil, total, err
 	}

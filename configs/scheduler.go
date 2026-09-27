@@ -97,6 +97,7 @@ func StartBackgroundScheduler(db *gorm.DB) {
 		validate,
 		repository.NewBeautyCenterRepositoryImpl(db),
 		nil, // FeedPostRepository: sweeps never attribute bookings
+		nil, // PersonnelServiceRepository: sweeps never book, so the capability rule is unreachable
 	)
 	waitlistSvc := service.NewWaitlistServiceImpl(
 		repository.NewWaitlistRepositoryImpl(db),

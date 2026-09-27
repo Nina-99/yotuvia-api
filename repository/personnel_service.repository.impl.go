@@ -67,3 +67,13 @@ func (r *PersonnelServiceRepositoryImpl) FindByPersonnelAndService(personnelID, 
 	}
 	return &ps, nil
 }
+
+// FindServiceIDsByPersonnel implements PersonnelServiceRepository. It loads only
+// the service_id column — the capability check needs no preloads.
+func (r *PersonnelServiceRepositoryImpl) FindServiceIDsByPersonnel(personnelID uint) ([]uint, error) {
+	var ids []uint
+	err := r.db.Model(&models.PersonnelService{}).
+		Where("personnel_id = ?", personnelID).
+		Pluck("service_id", &ids).Error
+	return ids, err
+}

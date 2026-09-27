@@ -13,5 +13,9 @@ type PersonnelService interface {
 	UpdateMe(id uint, req request.UpdateMePersonnelRequest) (response.PersonnelResponse, error)
 	Delete(id uint) error
 	FindByID(id uint) (response.PersonnelResponse, error)
-	FindAll(beautyCenterID uint, page, limit int) ([]response.PersonnelResponse, int64, error)
+	// FindAll returns a page of a centre's personnel. serviceIDs is the optional
+	// booking-picker capability filter: empty means unchanged behaviour, while a
+	// non-empty set keeps only personnel who are unrestricted or cover EVERY
+	// requested service. An unknown service id is ErrBadRequest.
+	FindAll(beautyCenterID uint, serviceIDs []uint, page, limit int) ([]response.PersonnelResponse, int64, error)
 }

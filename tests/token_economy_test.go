@@ -173,6 +173,7 @@ func newEconomyVerifySUT(t *testing.T) (*gorm.DB, service.ReservationService) {
 		validator.New(),
 		repository.NewBeautyCenterRepositoryImpl(db),
 		nil, // FeedPostRepository: attribution not exercised here
+		repository.NewPersonnelServiceRepositoryImpl(db),
 	)
 	return db, svc
 }

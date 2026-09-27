@@ -38,21 +38,48 @@ func (r *PersonnelRepositoryImpl) FindByID(id uint) (*models.Personnel, error) {
 	return &personnel, nil
 }
 
-// FindAll implements PersonnelRepository
-func (r *PersonnelRepositoryImpl) FindAll(beautyCenterID uint, page, limit int) ([]models.Personnel, int64, error) {
-	var personnel []models.Personnel
-	var total int64
-
-	countDb := r.db.Model(&models.Personnel{})
-	fetchDb := r.db.Preload("PersonnelImage").Preload("BeautyCenter")
-	if beautyCenterID != 0 {
-		countDb = countDb.Where("beauty_center_id = ?", beautyCenterID)
-		fetchDb = fetchDb.Where("beauty_center_id = ?", beautyCenterID)
+// FindAll implements PersonnelRepository. The optional serviceIDs filter is the
+// read side of the personnel↔service capability rule and must agree with the
+// booking write validation (service.PersonnelCoversServices):
+//
+//	no capability rows         → unrestricted, always kept
+//	rows covering ALL services → kept
+//	rows missing any service   → dropped
+//
+// It is enforced in SQL so COUNT and pagination stay correct. The rule is
+// expressed as two correlated subqueries: a NOT EXISTS for "has no rows" and a
+// COUNT(DISTINCT …) for "covers every requested service".
+func (r *PersonnelRepositoryImpl) FindAll(beautyCenterID uint, serviceIDs []uint, page, limit int) ([]models.Personnel, int64, error) {
+	base := func() *gorm.DB {
+		q := r.db.Model(&models.Personnel{})
+		if beautyCenterID != 0 {
+			q = q.Where("personnels.beauty_center_id = ?", beautyCenterID)
+		}
+		if len(serviceIDs) > 0 {
+			hasNoRows := r.db.Model(&models.PersonnelService{}).
+				Select("1").
+				Where("personnel_services.personnel_id = personnels.id")
+			covered := r.db.Model(&models.PersonnelService{}).
+				Select("COUNT(DISTINCT personnel_services.service_id)").
+				Where("personnel_services.personnel_id = personnels.id").
+				Where("personnel_services.service_id IN ?", serviceIDs)
+			q = q.Where("NOT EXISTS (?) OR (?) = ?", hasNoRows, covered, len(serviceIDs))
+		}
+		return q
 	}
-	countDb.Count(&total)
 
+	var total int64
+	if err := base().Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var personnel []models.Personnel
 	offset := (page - 1) * limit
-	err := fetchDb.Offset(offset).Limit(limit).Find(&personnel).Error
+	err := base().
+		Preload("PersonnelImage").Preload("BeautyCenter").
+		Order("personnels.id").
+		Offset(offset).Limit(limit).
+		Find(&personnel).Error
 	return personnel, total, err
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
@@ -187,6 +188,16 @@ func (c *PersonnelController) FindAll(ctx *gin.Context) {
 		beautyCenterID = uint(id)
 	}
 
+	// service_ids is the optional picker capability filter: a comma-separated
+	// list of service ids. Omitted → unchanged behaviour. A malformed element
+	// (non-numeric or <= 0) is invalid input (400); an id that is well-formed
+	// but unknown is rejected by the service layer with the same 400.
+	serviceIDs, ok := parseServiceIDs(ctx.Query("service_ids"))
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Format of service_ids invalid"})
+		return
+	}
+
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
 	if page < 1 {
@@ -196,7 +207,7 @@ func (c *PersonnelController) FindAll(ctx *gin.Context) {
 		limit = 20
 	}
 
-	res, total, err := c.personnelService.FindAll(beautyCenterID, page, limit)
+	res, total, err := c.personnelService.FindAll(beautyCenterID, serviceIDs, page, limit)
 	if err != nil {
 		c.writeError(ctx, err)
 		return
@@ -208,4 +219,27 @@ func (c *PersonnelController) FindAll(ctx *gin.Context) {
 		Page:  page,
 		Limit: limit,
 	})
+}
+
+// parseServiceIDs parses a comma-separated service_ids query value. An empty
+// value yields a nil slice and ok=true (filter omitted). Each element must be a
+// positive integer; a bad element yields ok=false so the controller answers 400.
+func parseServiceIDs(raw string) ([]uint, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	parts := strings.Split(raw, ",")
+	ids := make([]uint, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			return nil, false
+		}
+		id, err := strconv.Atoi(trimmed)
+		if err != nil || id <= 0 {
+			return nil, false
+		}
+		ids = append(ids, uint(id))
+	}
+	return ids, true
 }
