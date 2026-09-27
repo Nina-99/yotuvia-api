@@ -72,6 +72,8 @@ func authzTestRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 	router.ReservationRoutes(rg, db, validate)
 	router.ClientRoutes(rg, db, validate)
 	router.PersonnelRoutes(rg, db, validate)
+	router.PersonnelServiceRoutes(rg, db, validate)
+	router.ServiceRoutes(rg, db, validate)
 	router.NotificationRoutes(rg, db)
 	router.TokenRoutes(rg, db, validate)
 	return r, db
@@ -154,6 +156,9 @@ func TestRouterAuthz_NoToken401(t *testing.T) {
 		{"personnel find all", "GET", "/api/personnel", []string{"client"}, "client", "", 0},
 		{"personnel update", "PUT", "/api/personnel/1", []string{"beauty_center"}, "client", "", 0},
 		{"personnel delete", "DELETE", "/api/personnel/1", []string{"beauty_center"}, "client", "", 0},
+		{"personnel service create", "POST", "/api/personnel-services", []string{"beauty_center"}, "client", "", 0},
+		{"personnel service delete", "DELETE", "/api/personnel-services/1", []string{"beauty_center"}, "client", "", 0},
+		{"personnel service list", "GET", "/api/personnel-services", []string{"beauty_center", "client"}, "", "", 0},
 		{"notifications by client", "GET", "/api/notifications/client/1", []string{"client"}, "client", "", 0},
 		{"notifications unread", "GET", "/api/notifications/client/1/unread", []string{"client"}, "client", "", 0},
 		{"notifications count", "GET", "/api/notifications/client/1/count", []string{"client"}, "client", "", 0},
@@ -203,6 +208,8 @@ func TestRouterAuthz_RoleGates(t *testing.T) {
 		{"client find all", "GET", "/api/client", []string{"beauty_center"}, "client", "", 200},
 		{"personnel update", "PUT", "/api/personnel/1", []string{"beauty_center"}, "client", "", 0},
 		{"personnel delete", "DELETE", "/api/personnel/1", []string{"beauty_center"}, "client", "", 0},
+		{"personnel service create", "POST", "/api/personnel-services", []string{"beauty_center"}, "client", "", 0},
+		{"personnel service delete", "DELETE", "/api/personnel-services/1", []string{"beauty_center"}, "client", "", 0},
 		{"notifications center list", "GET", "/api/notifications/center", []string{"beauty_center"}, "client", "", 200},
 		{"notifications center unread", "GET", "/api/notifications/center/unread", []string{"beauty_center"}, "client", "", 200},
 		{"notifications center count", "GET", "/api/notifications/center/count", []string{"beauty_center"}, "client", "", 200},

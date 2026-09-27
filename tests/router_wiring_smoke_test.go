@@ -220,8 +220,8 @@ func TestRouterWiring_No5xxWithValidToken(t *testing.T) {
 		{"personnel image delete", http.MethodDelete, "/api/personnel-images/1", "client"},
 		{"personnel image by personnel", http.MethodGet, "/api/personnel-images/personnel/1", "client"},
 		// ── personnel services ──
-		{"personnel service create", http.MethodPost, "/api/personnel-services", "client"},
-		{"personnel service delete", http.MethodDelete, "/api/personnel-services/1", "client"},
+		{"personnel service create", http.MethodPost, "/api/personnel-services", "beauty_center"},
+		{"personnel service delete", http.MethodDelete, "/api/personnel-services/1", "beauty_center"},
 		{"personnel service list", http.MethodGet, "/api/personnel-services", "client"},
 		// ── post likes ──
 		{"post likes by post", http.MethodGet, "/api/post-likes/post/1", "client"},

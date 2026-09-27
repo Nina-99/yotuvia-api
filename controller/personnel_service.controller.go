@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/service"
@@ -16,6 +17,14 @@ type PersonnelServiceController struct {
 
 func NewPersonnelServiceController(svc service.PersonnelServiceService) *PersonnelServiceController {
 	return &PersonnelServiceController{svc: svc}
+}
+
+// writeError maps a service error through apperrors.MapToHTTP so clients get the
+// canonical status + stable message (403 for a foreign centre, 409 for a
+// duplicate, 404 for a missing row) and internal details never leak.
+func (c *PersonnelServiceController) writeError(ctx *gin.Context, err error) {
+	status, msg := apperrors.MapToHTTP(err)
+	ctx.JSON(status, gin.H{"error": msg})
 }
 
 // Create godoc
@@ -36,13 +45,11 @@ func (c *PersonnelServiceController) Create(ctx *gin.Context) {
 		return
 	}
 
-	res, err := c.svc.Create(req)
+	// The acting centre is the JWT claim, never a body field: the write is
+	// ownership-checked against it in the service.
+	res, err := c.svc.Create(req, ctx.GetUint("centerID"))
 	if err != nil {
-		if err.Error() == "this service is already assigned to the personnel" {
-			ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-			return
-		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -65,8 +72,8 @@ func (c *PersonnelServiceController) Delete(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.svc.Delete(uint(id)); err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	if err := c.svc.Delete(uint(id), ctx.GetUint("centerID")); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 
