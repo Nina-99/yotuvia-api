@@ -1178,8 +1178,46 @@ func (s *ReservationServiceImpl) NotifyPersonnelAssigned(reservation *models.Res
 	return s.NotificationService.CreateForPersonnel(personnelID, "personnel_changed", title, message, dataStr)
 }
 
-// NotifyPersonnelReassigned tells the losing staff member their reservation
-// was reassigned to another professional.
+// reservationPersonnelRecipients returns the distinct professionals who have a
+// service line on the reservation, in first-seen line order. A line whose
+// PersonnelID is nil inherits the reservation's derived lead (the Phase 2a
+// kernel rule); a reservation with no lines at all falls back to its lead so
+// legacy rows keep notifying exactly who they did before.
+//
+// The lines arrive with the caller's single FindById preload, so this resolves
+// every recipient without an extra query and never looks one up per recipient.
+func reservationPersonnelRecipients(reservation *models.Reservation) []uint {
+	seen := make(map[uint]struct{}, len(reservation.ReservationServices)+1)
+	recipients := make([]uint, 0, len(reservation.ReservationServices)+1)
+	add := func(id uint) {
+		if id == 0 {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		recipients = append(recipients, id)
+	}
+
+	for i := range reservation.ReservationServices {
+		if line := reservation.ReservationServices[i]; line.PersonnelID != nil {
+			add(*line.PersonnelID)
+		} else {
+			add(reservation.PersonnelID)
+		}
+	}
+	if len(reservation.ReservationServices) == 0 {
+		add(reservation.PersonnelID)
+	}
+	return recipients
+}
+
+// NotifyPersonnelReassigned tells every LOSING professional their reservation
+// was reassigned to another professional. The losing parties are the
+// professionals on the reservation's PREVIOUS lines (the caller passes the
+// pre-update reservation); the new assignee is excluded so a professional who
+// kept a line is never told their own turn moved away.
 func (s *ReservationServiceImpl) NotifyPersonnelReassigned(reservation *models.Reservation, personnelID uint) error {
 	dataStr := fmt.Sprintf(`{"reservation_id":%d,"personnel_id":%d}`, reservation.ID, personnelID)
 	title := "Turno reasignado"
@@ -1187,11 +1225,22 @@ func (s *ReservationServiceImpl) NotifyPersonnelReassigned(reservation *models.R
 		reservation.Date.Format("02/01"),
 		reservation.StartTime,
 	)
-	return s.NotificationService.CreateForPersonnel(reservation.PersonnelID, "personnel_changed", title, message, dataStr)
+	var firstErr error
+	for _, losing := range reservationPersonnelRecipients(reservation) {
+		if losing == personnelID {
+			continue
+		}
+		if err := s.NotificationService.CreateForPersonnel(losing, "personnel_changed", title, message, dataStr); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
-// NotifyPersonnelCancelled tells the assigned staff member their reservation
-// was cancelled by the client.
+// NotifyPersonnelCancelled tells EVERY professional with a line on the
+// reservation that it was cancelled by the client. Each recipient gets their
+// own row (never one row addressed to many); a failure for one recipient never
+// stops the others, and the first error is returned best-effort.
 func (s *ReservationServiceImpl) NotifyPersonnelCancelled(reservation *models.Reservation, reason string) error {
 	dataStr := fmt.Sprintf(`{"reservation_id":%d}`, reservation.ID)
 	title := "Turno cancelado"
@@ -1202,7 +1251,13 @@ func (s *ReservationServiceImpl) NotifyPersonnelCancelled(reservation *models.Re
 	if reason != "" {
 		message += fmt.Sprintf(" — Motivo: %s", reason)
 	}
-	return s.NotificationService.CreateForPersonnel(reservation.PersonnelID, "reservation_cancelled", title, message, dataStr)
+	var firstErr error
+	for _, personnelID := range reservationPersonnelRecipients(reservation) {
+		if err := s.NotificationService.CreateForPersonnel(personnelID, "reservation_cancelled", title, message, dataStr); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // ──────────────────────────────────────────────
