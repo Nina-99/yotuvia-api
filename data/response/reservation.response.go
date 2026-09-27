@@ -26,28 +26,34 @@ type ClientLite struct {
 }
 
 type ReservationResponse struct {
-	ID               uint                         `json:"id"`
-	BeautyCenterID   uint                         `json:"beauty_center_id"`
-	BeautyCenterName string                       `json:"beauty_center_name"`
-	ClientID         uint                         `json:"client_id"`
-	ClientName       string                       `json:"client_name"`
-	Currency         string                       `json:"currency"`
-	PersonnelID      uint                         `json:"personnel_id"`
-	Date             time.Time                    `json:"date"`
-	StartTime        string                       `json:"start_time"`
-	EndTime          string                       `json:"end_time"`
-	TotalPrice       float64                      `json:"total_price"`
-	Status           string                       `json:"status"`
-	PaymentStatus    string                       `json:"payment_status"`
-	DepositAmount    float64                      `json:"deposit_amount"`
-	DepositQRURL     string                       `json:"deposit_qr_url"`
-	ProofImageURL    *string                      `json:"proof_image_url,omitempty"`
-	HoldExpiresAt    *time.Time                   `json:"hold_expires_at,omitempty"`
-	CancelReason     *string                      `json:"cancel_reason,omitempty"`
+	ID               uint   `json:"id"`
+	BeautyCenterID   uint   `json:"beauty_center_id"`
+	BeautyCenterName string `json:"beauty_center_name"`
+	ClientID         uint   `json:"client_id"`
+	ClientName       string `json:"client_name"`
+	Currency         string `json:"currency"`
+	// PersonnelID is the reservation's DERIVED LEAD: the professional of the
+	// first (creation-order) service line, kept for backward compatibility.
+	// With multi-professional bookings it may not be every viewer's own
+	// professional — the authoritative per-line attribution is
+	// Services[].personnel_id. A caller that needs "is this mine?" must check
+	// the lines, not this field.
+	PersonnelID   uint       `json:"personnel_id"`
+	Date          time.Time  `json:"date"`
+	StartTime     string     `json:"start_time"`
+	EndTime       string     `json:"end_time"`
+	TotalPrice    float64    `json:"total_price"`
+	Status        string     `json:"status"`
+	PaymentStatus string     `json:"payment_status"`
+	DepositAmount float64    `json:"deposit_amount"`
+	DepositQRURL  string     `json:"deposit_qr_url"`
+	ProofImageURL *string    `json:"proof_image_url,omitempty"`
+	HoldExpiresAt *time.Time `json:"hold_expires_at,omitempty"`
+	CancelReason  *string    `json:"cancel_reason,omitempty"`
 	// SourcePostID is the feed post credited with this booking, when known.
 	// Additive and omitted when nil, so existing consumers are unaffected.
-	SourcePostID *uint `json:"source_post_id,omitempty"`
-	Services         []ReservationServiceResponse `json:"services,omitempty"`
-	Client           *ClientLite                  `json:"client,omitempty"`
-	Personnel        *PersonnelLite               `json:"personnel,omitempty"`
+	SourcePostID *uint                        `json:"source_post_id,omitempty"`
+	Services     []ReservationServiceResponse `json:"services,omitempty"`
+	Client       *ClientLite                  `json:"client,omitempty"`
+	Personnel    *PersonnelLite               `json:"personnel,omitempty"`
 }
