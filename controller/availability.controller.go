@@ -36,6 +36,11 @@ func (c *AvailabilityController) Search(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "treatment_ids must be a comma-separated list of positive integers"})
 		return
 	}
+	assignments, ok := parseAssignments(ctx.Query("assignments"))
+	if !ok && ctx.Query("assignments") != "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "assignments must be a comma-separated list of service_id:personnel_id pairs"})
+		return
+	}
 	if len(serviceIDs) == 0 && len(treatmentIDs) == 0 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "service_ids or treatment_ids query param is required (comma-separated)"})
 		return
@@ -76,6 +81,7 @@ func (c *AvailabilityController) Search(ctx *gin.Context) {
 	req := request.AvailabilitySearchRequest{
 		ServiceIDs:   serviceIDs,
 		TreatmentIDs: treatmentIDs,
+		Assignments:  assignments,
 		From:         from,
 		To:           to,
 		CenterID:     centerID,
@@ -130,4 +136,31 @@ func parseOptionalUint(raw string) (uint, bool) {
 		return 0, false
 	}
 	return uint(n), true
+}
+
+// parseAssignments parses the OPTIONAL multi-professional chain query param:
+// `serviceId:personnelId,serviceId:personnelId`. Order is preserved (it defines
+// the chain). An empty value means "not set" and returns (nil, false); any
+// malformed pair or a non-positive id is (nil, false) and the caller answers
+// 400.
+func parseAssignments(raw string) ([]request.ServiceAssignment, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]request.ServiceAssignment, 0, len(parts))
+	for _, part := range parts {
+		pair := strings.Split(strings.TrimSpace(part), ":")
+		if len(pair) != 2 {
+			return nil, false
+		}
+		serviceID, errSvc := strconv.Atoi(strings.TrimSpace(pair[0]))
+		personnelID, errPers := strconv.Atoi(strings.TrimSpace(pair[1]))
+		if errSvc != nil || errPers != nil || serviceID <= 0 || personnelID <= 0 {
+			return nil, false
+		}
+		out = append(out, request.ServiceAssignment{ServiceID: uint(serviceID), PersonnelID: uint(personnelID)})
+	}
+	return out, true
 }

@@ -24,14 +24,24 @@ type AvailabilityServiceImpl struct {
 	centerRepo    repository.BeautyCenterRepository
 	serviceRepo   repository.ServiceRepository
 	treatmentRepo repository.TreatmentRepository
+	// personnelRepo backs the chain plan's "known professionals" validation.
+	// OPTIONAL: nil disables the existence check (only relevant for a chain
+	// request, which is never the sweeps wiring).
+	personnelRepo repository.PersonnelRepository
 }
 
 func NewAvailabilityServiceImpl(
 	centerRepo repository.BeautyCenterRepository,
 	serviceRepo repository.ServiceRepository,
 	treatmentRepo repository.TreatmentRepository,
+	personnelRepo repository.PersonnelRepository,
 ) AvailabilityService {
-	return &AvailabilityServiceImpl{centerRepo: centerRepo, serviceRepo: serviceRepo, treatmentRepo: treatmentRepo}
+	return &AvailabilityServiceImpl{
+		centerRepo:    centerRepo,
+		serviceRepo:   serviceRepo,
+		treatmentRepo: treatmentRepo,
+		personnelRepo: personnelRepo,
+	}
 }
 
 // Search loads candidate centers, their working hours and the whole range's
@@ -58,6 +68,7 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 
 	// ── Services → total duration (legacy path; same aggregation as booking) ──
 	legacyDuration := 0
+	var legacyServices []models.Service
 	if !treatmentDriven {
 		if len(req.ServiceIDs) == 0 {
 			return empty, apperrors.ErrBadRequest
@@ -69,9 +80,38 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 		if len(services) != len(req.ServiceIDs) {
 			return empty, apperrors.ErrBadRequest // unknown service
 		}
+		legacyServices = services
 		legacyDuration = TotalServicesDuration(services)
 		if legacyDuration <= 0 {
 			return empty, apperrors.ErrBadRequest
+		}
+	}
+
+	// ── Multi-professional chain plan (OPTIONAL) ──
+	// A chain is only meaningful over the caller-supplied service list, so it
+	// cannot be combined with the treatment-driven sizing path. The plan is
+	// validated with the SAME predicate the booking write path uses, and every
+	// professional must resolve, otherwise the whole request is 400.
+	chainDriven := len(req.Assignments) > 0
+	var chain []ChainStep
+	if chainDriven {
+		if treatmentDriven || len(req.ServiceIDs) == 0 {
+			return empty, apperrors.ErrBadRequest
+		}
+		plan, perr := BuildAssignmentPlan(req.ServiceIDs, req.Assignments)
+		if perr != nil {
+			return empty, apperrors.ErrBadRequest
+		}
+		if verr := s.validateChainPersonnel(plan); verr != nil {
+			return empty, verr
+		}
+		durationByID := make(map[uint]int, len(legacyServices))
+		for _, svc := range legacyServices {
+			durationByID[svc.ID] = svc.Duration
+		}
+		chain = make([]ChainStep, 0, len(req.ServiceIDs))
+		for _, sid := range req.ServiceIDs {
+			chain = append(chain, ChainStep{PersonnelID: plan[sid], Duration: durationByID[sid]})
 		}
 	}
 
@@ -161,14 +201,24 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 	}
 
 	// ── Reservations over the whole range (one query) ──
-	reservations, err := s.centerRepo.FindReservationsForRange(centerIDs, from, to, req.PersonnelID)
-	if err != nil {
-		return empty, err
+	var reservations []models.Reservation
+	if chainDriven {
+		// Only reservations that involve a chain professional, with lines
+		// preloaded — ONE query (+ preload), never one per professional.
+		reservations, err = s.centerRepo.FindReservationsForRangeForPersonnel(centerIDs, from, to, ChainPersonnel(chain))
+		if err != nil {
+			return empty, err
+		}
+	} else {
+		reservations, err = s.centerRepo.FindReservationsForRange(centerIDs, from, to, req.PersonnelID)
+		if err != nil {
+			return empty, err
+		}
+		// Professional-scoped searches must block only that professional's own
+		// segments, not the envelope of every shared reservation. Center-wide
+		// searches (personnelID == 0) are returned untouched.
+		reservations = PersonnelBusyReservations(reservations, req.PersonnelID)
 	}
-	// Professional-scoped searches must block only that professional's own
-	// segments, not the envelope of every shared reservation. Center-wide
-	// searches (personnelID == 0) are returned untouched.
-	reservations = PersonnelBusyReservations(reservations, req.PersonnelID)
 	// center → date (YYYY-MM-DD) → reservations
 	resByCenter := map[uint]map[string][]models.Reservation{}
 	for _, r := range reservations {
@@ -191,13 +241,15 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 				continue
 			}
 			dateStr := d.Format("2006-01-02")
-			slots := ComputeAvailabilitySlots(d, duration, blocks, centerRes[dateStr], now)
-			for _, slot := range slots {
+
+			// appendSlot keeps the period filter and the result shape in ONE
+			// place so the legacy and chain branches cannot drift.
+			appendSlot := func(slot response.AvailableSlot) {
 				if !slot.Available {
-					continue
+					return
 				}
 				if req.Period != "" && AvailabilityPeriodForMinutes(ParseScheduleMinutes(slot.Time)) != req.Period {
-					continue
+					return
 				}
 				var personPtr *uint
 				if req.PersonnelID > 0 {
@@ -220,6 +272,32 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 					ServiceIDs:  resultServiceIDs,
 				})
 			}
+
+			if chainDriven {
+				// The chain must fit each professional's OWN segment, so the
+				// base grid is generated with NO busy reservations (only the
+				// shared kernel's window/closing/past rules apply) and the chain
+				// predicate then filters it. Using the center-wide busy union
+				// here would over-block: a shared reservation can occupy pro 1
+				// at [t,t+d1) and pro 2 at [t+d1,t+d2) without the chain
+				// conflicting at all.
+				busy := ChainBusyByPersonnel(centerRes[dateStr], chain)
+				for _, slot := range ComputeAvailabilitySlots(d, duration, blocks, nil, now) {
+					if !slot.Available {
+						continue
+					}
+					if !ChainFits(ParseScheduleMinutes(slot.Time), chain, busy) {
+						continue
+					}
+					appendSlot(slot)
+				}
+				continue
+			}
+
+			slots := ComputeAvailabilitySlots(d, duration, blocks, centerRes[dateStr], now)
+			for _, slot := range slots {
+				appendSlot(slot)
+			}
 		}
 	}
 
@@ -241,6 +319,36 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 		all = all[:limit]
 	}
 	return response.AvailabilitySearchResponse{Results: all, Total: total}, nil
+}
+
+// validateChainPersonnel enforces the chain's "known professionals" rule in ONE
+// batched query: every distinct professional in the plan must resolve to a live
+// personnel row, otherwise the request is invalid INPUT (400). A nil repository
+// disables the check (the chain path is never reachable from the sweeps wiring
+// that leaves it nil).
+func (s *AvailabilityServiceImpl) validateChainPersonnel(plan map[uint]uint) error {
+	if s.personnelRepo == nil {
+		return nil
+	}
+	ids := make([]uint, 0, len(plan))
+	seen := make(map[uint]struct{}, len(plan))
+	for _, pid := range plan {
+		if _, ok := seen[pid]; ok {
+			continue
+		}
+		seen[pid] = struct{}{}
+		ids = append(ids, pid)
+	}
+	existing, err := s.personnelRepo.FindExistingIDs(ids)
+	if err != nil {
+		return err
+	}
+	for _, pid := range ids {
+		if !existing[pid] {
+			return apperrors.ErrBadRequest
+		}
+	}
+	return nil
 }
 
 // resolveTreatmentDurations restricts centers to those offering EVERY requested

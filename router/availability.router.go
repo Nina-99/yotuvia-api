@@ -16,7 +16,8 @@ func AvailabilityRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Va
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	serviceRepo := repository.NewServiceRepositoryImpl(db)
 	treatmentRepo := repository.NewTreatmentRepositoryImpl(db)
-	svc := service.NewAvailabilityServiceImpl(centerRepo, serviceRepo, treatmentRepo)
+	personnelRepo := repository.NewPersonnelRepositoryImpl(db)
+	svc := service.NewAvailabilityServiceImpl(centerRepo, serviceRepo, treatmentRepo, personnelRepo)
 	ctrl := controller.NewAvailabilityController(svc)
 
 	availability := rg.Group("/availability")

@@ -22,6 +22,20 @@ type AvailabilitySearchRequest struct {
 	CenterID uint
 	// PersonnelID is passed through to the shared slot kernel when > 0.
 	PersonnelID uint
+	// Assignments is the OPTIONAL multi-professional chain, parsed from the
+	// `assignments=serviceId:personnelId,...` query param. ORDER DEFINES THE
+	// CHAIN: for a candidate start t, each professional k must be free for
+	// [t + Σ previous durations, + own duration).
+	//
+	//   - ABSENT: unchanged behaviour and contract.
+	//   - PRESENT: only slots where the WHOLE CHAIN fits are returned. The plan
+	//     must cover ServiceIDs exactly once and every professional must exist;
+	//     otherwise 400.
+	//
+	// It reuses the same ServiceAssignment shape (and the same plan validation)
+	// as the client booking body, so the search and the booking cannot disagree
+	// on what a valid plan is.
+	Assignments []ServiceAssignment
 	// Period filters candidate starts to morning | afternoon | evening.
 	Period string
 	// Limit caps the returned slots (default 20, max 50).

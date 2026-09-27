@@ -14,4 +14,8 @@ type PersonnelRepository interface {
 	// service.PersonnelCoversServices.
 	FindAll(beautyCenterID uint, serviceIDs []uint, page, limit int) ([]models.Personnel, int64, error)
 	FindByEmail(email string) (*models.Personnel, error)
+	// FindExistingIDs returns the subset of ids that resolve to a personnel row
+	// in ONE query. It backs batched existence validation (e.g. the multi-
+	// professional availability chain) without a per-id round trip.
+	FindExistingIDs(ids []uint) (map[uint]bool, error)
 }

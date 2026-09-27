@@ -95,3 +95,22 @@ func (r *PersonnelRepositoryImpl) FindByEmail(email string) (*models.Personnel, 
 	}
 	return &personnel, nil
 }
+
+// FindExistingIDs implements PersonnelRepository. One SELECT resolves the
+// subset of ids that map to a live personnel row; the rest are simply absent
+// from the returned set. Soft-deleted rows are excluded (Model + Pluck honour
+// the gorm.DeletedAt scope).
+func (r *PersonnelRepositoryImpl) FindExistingIDs(ids []uint) (map[uint]bool, error) {
+	existing := make(map[uint]bool, len(ids))
+	if len(ids) == 0 {
+		return existing, nil
+	}
+	var found []uint
+	if err := r.db.Model(&models.Personnel{}).Where("id IN ?", ids).Pluck("id", &found).Error; err != nil {
+		return nil, err
+	}
+	for _, id := range found {
+		existing[id] = true
+	}
+	return existing, nil
+}

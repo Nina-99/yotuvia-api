@@ -228,6 +228,31 @@ func (r *BeautyCenterRepositoryImpl) FindReservationsForRange(centerIDs []uint, 
 	return reservations, nil
 }
 
+// FindReservationsForRangeForPersonnel implements BeautyCenterRepository. It is
+// the multi-professional twin of FindReservationsForRange: ONE query for the
+// range's reservations that involve ANY of the given professionals (as lead or
+// as a service line), with the service lines preloaded so the availability
+// chain can project each professional's own busy intervals in memory. Keeping
+// it batched is what stops the chain from querying per professional.
+func (r *BeautyCenterRepositoryImpl) FindReservationsForRangeForPersonnel(centerIDs []uint, from, to time.Time, personnelIDs []uint) ([]models.Reservation, error) {
+	if len(centerIDs) == 0 || len(personnelIDs) == 0 {
+		return []models.Reservation{}, nil
+	}
+	var reservations []models.Reservation
+	err := r.db.Where(
+		"beauty_center_id IN ? AND DATE(date) BETWEEN DATE(?) AND DATE(?) AND status != ?",
+		centerIDs, from, to, "CANCELLED",
+	).
+		Where("(personnel_id IN ? OR id IN (SELECT reservation_id FROM reservation_services WHERE personnel_id IN ? AND deleted_at IS NULL))",
+			personnelIDs, personnelIDs).
+		Preload("ReservationServices", func(db *gorm.DB) *gorm.DB { return db.Order("id ASC") }).
+		Find(&reservations).Error
+	if err != nil {
+		return nil, err
+	}
+	return reservations, nil
+}
+
 // Search implements BeautyCenterRepository
 func (r *BeautyCenterRepositoryImpl) Search(query string, page, limit int) ([]models.BeautyCenter, int64, error) {
 	var centers []models.BeautyCenter

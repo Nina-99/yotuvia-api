@@ -49,6 +49,13 @@ type BeautyCenterRepository interface {
 	// optionally scoped to one personnel), mirroring FindReservationsForDate's
 	// semantics for the whole range at once.
 	FindReservationsForRange(centerIDs []uint, from, to time.Time, personnelID uint) ([]models.Reservation, error)
+	// FindReservationsForRangeForPersonnel is the multi-professional twin of
+	// FindReservationsForRange: it loads, in ONE query (plus the line preload),
+	// the range's reservations that involve ANY of the given professionals —
+	// either as their lead or as a service line — with lines preloaded so the
+	// availability chain can project each professional's own busy intervals in
+	// memory without a query per professional.
+	FindReservationsForRangeForPersonnel(centerIDs []uint, from, to time.Time, personnelIDs []uint) ([]models.Reservation, error)
 	Search(query string, page, limit int) ([]models.BeautyCenter, int64, error)
 	FindTopRated(limit int) ([]models.BeautyCenter, error)
 	FindNearby(latitude, longitude float64, limit int) ([]models.BeautyCenter, error)
