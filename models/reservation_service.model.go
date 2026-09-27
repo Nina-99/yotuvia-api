@@ -19,4 +19,12 @@ type ReservationService struct {
 	ServiceName   string      `gorm:"size:100;not null" json:"service_name"`
 	Price         float64     `gorm:"type:decimal(10,2);not null" json:"price"`
 	Duration      int         `gorm:"not null" json:"duration"`
+
+	// PersonnelID is the professional who performs THIS service line. It is
+	// nullable so pre-attribution rows can be filled by the startup backfill
+	// (configs.BackfillReservationServicePersonnel). In Phase 1 both creation
+	// paths set it to Reservation.PersonnelID, so the line's professional always
+	// equals the reservation's derived lead by construction; Phase 2 will make
+	// it authoritative for line-level invariants (overlap, agenda, availability).
+	PersonnelID *uint `gorm:"index" json:"personnel_id,omitempty"`
 }

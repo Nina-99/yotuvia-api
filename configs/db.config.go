@@ -86,4 +86,8 @@ func DBConnection() {
 	// the same boot. Idempotent and non-destructive: never overwrites a row
 	// that already carries a TreatmentID.
 	BackfillServiceTreatments()
+	// Fills line-level professional attribution for reservations created before
+	// ReservationService.PersonnelID existed. Idempotent (only NULL rows) and
+	// never fatal on a bad row.
+	BackfillReservationServicePersonnel()
 }

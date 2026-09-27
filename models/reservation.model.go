@@ -16,8 +16,13 @@ type Reservation struct {
 	BeautyCenter   BeautyCenter `gorm:"foreignKey:BeautyCenterID" json:"beauty_center,omitempty"`
 	ClientID       uint         `gorm:"not null" json:"client_id"`
 	Client         Client       `gorm:"foreignKey:ClientID" json:"client,omitempty"`
-	PersonnelID    uint         `gorm:"not null" json:"personnel_id"`
-	Personnel      Personnel    `gorm:"foreignKey:PersonnelID" json:"personnel,omitempty"`
+	// PersonnelID is the DERIVED LEAD: the professional of the FIRST service
+	// line (ReservationServices[0]). It is intentionally kept as a plain field
+	// so the ~184 existing readers keep working untouched. At booking and update
+	// time it equals every line's PersonnelID by construction; Phase 2 will
+	// reconcile the paths where lines may diverge.
+	PersonnelID uint      `gorm:"not null" json:"personnel_id"`
+	Personnel   Personnel `gorm:"foreignKey:PersonnelID" json:"personnel,omitempty"`
 
 	Date       time.Time `gorm:"type:date;not null" json:"date"`
 	StartTime  string    `gorm:"size:5;not null" json:"start_time"`

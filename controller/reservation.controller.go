@@ -704,6 +704,7 @@ func mapToReservationResponse(r *models.Reservation) response.ReservationRespons
 			ServiceName: svc.ServiceName,
 			Price:       svc.Price,
 			Duration:    svc.Duration,
+			PersonnelID: svc.PersonnelID,
 		})
 	}
 

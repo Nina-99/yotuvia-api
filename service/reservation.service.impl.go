@@ -330,6 +330,9 @@ func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID,
 			ServiceName: svc.Name,
 			Price:       svc.Price,
 			Duration:    svc.Duration,
+			// Phase 1: the line's professional is the reservation's lead by
+			// construction.
+			PersonnelID: &personnelID,
 		})
 	}
 
@@ -596,12 +599,16 @@ func (s *ReservationServiceImpl) Update(reservationID uint, req request.CreateRe
 		return err
 	}
 	reservation.ReservationServices = nil
+	// Phase 1: every replacement line carries the reservation's lead (the
+	// professional chosen for this update) so line attribution stays defined.
+	linePersonnelID := req.PersonnelID
 	for _, svc := range services {
 		reservation.ReservationServices = append(reservation.ReservationServices, models.ReservationService{
 			ServiceID:   svc.ID,
 			ServiceName: svc.Name,
 			Price:       svc.Price,
 			Duration:    svc.Duration,
+			PersonnelID: &linePersonnelID,
 		})
 	}
 

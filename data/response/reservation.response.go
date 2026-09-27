@@ -7,6 +7,11 @@ type ReservationServiceResponse struct {
 	ServiceName string  `json:"service_name"`
 	Price       float64 `json:"price"`
 	Duration    int     `json:"duration"`
+	// PersonnelID is the line's professional, exposed additively. It is
+	// omitted when unset (legacy rows before the startup backfill ran), so
+	// existing consumers are unaffected. No personnel NAME is exposed here to
+	// avoid a per-line preload and the N+1 it would cause.
+	PersonnelID *uint `json:"personnel_id,omitempty"`
 }
 
 type PersonnelLite struct {
