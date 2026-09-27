@@ -855,11 +855,15 @@ func (s *ReservationServiceImpl) Update(reservationID uint, req request.UpdateRe
 	}
 	if diverge {
 		// PRESERVE the stored lead: the row's professional is not moved by an
-		// assignment-free edit of a multi-professional booking. (The preloaded
-		// belongs-to association enforces the same value on Save; setting it
-		// explicitly keeps the rule obvious.)
+		// assignment-free edit of a multi-professional booking.
 		reservation.PersonnelID = storedLead
 	} else {
+		// Clear the preloaded belongs-to association BEFORE setting the id:
+		// GORM's Save derives the FK from the association's PK, so a stale
+		// association silently wins and the lead would keep the OLD
+		// professional while the lines moved - exactly the divergence the
+		// per-line model exists to prevent.
+		reservation.Personnel = models.Personnel{}
 		reservation.PersonnelID = req.PersonnelID
 	}
 
