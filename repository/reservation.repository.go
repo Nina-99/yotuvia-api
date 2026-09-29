@@ -8,6 +8,15 @@ import (
 	"github.com/Nina-99/yottu-api/models"
 )
 
+// PersonnelStatusTotalsRow bundles a professional's reservation counts over a
+// range: appointments is non-CANCELLED, the rest are per-status buckets.
+type PersonnelStatusTotalsRow struct {
+	Appointments int64 `gorm:"column:appointments"`
+	Completed    int64 `gorm:"column:completed"`
+	Cancelled    int64 `gorm:"column:cancelled"`
+	NoShow       int64 `gorm:"column:no_show"`
+}
+
 type ReservationRepository interface {
 	Create(reservation *models.Reservation) error
 	Update(reservation *models.Reservation) error
@@ -15,17 +24,42 @@ type ReservationRepository interface {
 	FindById(reservationID uint) (*models.Reservation, error)
 	FindByClientID(clientID uint) ([]models.Reservation, error)
 	FindUpcomingByClientID(clientID uint) (*models.Reservation, error)
-// FindByBeautyCenterId returns a center's reservations. An optional date
-// (typically a parsed YYYY-MM-DD) scopes the query to that day and orders
-// by start_time ascending. An optional clientID scopes the query to one
-// client's history at that center and orders date DESC, start_time DESC
-// (design D3). An optional from/to date range scopes the query to that
-// inclusive range (design D4). All-nil keeps the current unfiltered, unordered behavior.
-FindByBeautyCenterId(beautyCenterID uint, from, to *time.Time, clientID *uint) ([]models.Reservation, error)
+	// FindByBeautyCenterId returns a center's reservations. An optional date
+	// (typically a parsed YYYY-MM-DD) scopes the query to that day and orders
+	// by start_time ascending. An optional clientID scopes the query to one
+	// client's history at that center and orders date DESC, start_time DESC
+	// (design D3). An optional from/to date range scopes the query to that
+	// inclusive range (design D4). All-nil keeps the current unfiltered, unordered behavior.
+	FindByBeautyCenterId(beautyCenterID uint, from, to *time.Time, clientID *uint) ([]models.Reservation, error)
 	// FindByPersonnelId returns a staff member's reservations (agenda). from/to
 	// are an optional inclusive date range; nil means open-ended on that side.
 	// Results are ordered by date then start_time ascending.
 	FindByPersonnelId(personnelID uint, from, to *time.Time) ([]models.Reservation, error)
+	// IsPersonnelMember reports whether the professional participates in the
+	// reservation — as its DERIVED LEAD or as the professional of one of its
+	// live service lines. It shares personnelMembershipSQL with the agenda so
+	// "can see" and "can operate" never drift. One bounded query.
+	IsPersonnelMember(reservationID, personnelID uint) (bool, error)
+	// PersonnelStatusTotals aggregates a professional's reservation counts in
+	// the half-open range [from, to), scoped by membership: appointments
+	// excludes CANCELLED (the admin appointmentsSeries definition), plus the
+	// completed/cancelled/no_show status buckets. One query.
+	PersonnelStatusTotals(personnelID uint, from, to time.Time) (PersonnelStatusTotalsRow, error)
+	// PersonnelRevenueByDay returns the professional's per-day COMPLETED
+	// revenue, attributed PER LINE via the shared personnelRevenueExpr. One
+	// query.
+	PersonnelRevenueByDay(personnelID uint, from, to time.Time) ([]RevenueDayRow, error)
+	// PersonnelAppointmentsByDay counts the professional's non-CANCELLED
+	// reservations per day in [from, to) (mirrors the admin
+	// appointmentsSeries, membership-scoped). One query.
+	PersonnelAppointmentsByDay(personnelID uint, from, to time.Time) ([]CountDayRow, error)
+	// PersonnelTopServices is the professional-scoped twin of
+	// TopServicesByRevenue (same ranking, same cap). One query.
+	PersonnelTopServices(personnelID uint, from, to time.Time, limit int) ([]TopServiceRow, error)
+	// CenterCurrency returns the ISO currency of the given centre ("" when the
+	// centre is missing/soft-deleted). A single-column read so the metrics
+	// display field never drags in the heavy FindByID eager-loads.
+	CenterCurrency(centerID uint) (string, error)
 	// FindAll is scoped to a single beauty center (the caller's centerID claim).
 	FindAll(page, limit int, centerID uint) ([]models.Reservation, int64, error)
 	CheckOverlap(centerID uint, date time.Time, startTime, endTime string, personnelID, excludeID uint) (bool, error)

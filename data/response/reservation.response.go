@@ -32,6 +32,46 @@ type ClientLite struct {
 	Phone     string `json:"phone"`
 }
 
+// PersonnelMetricsRange is the inclusive date window echoed back by the staff
+// metrics endpoint ("2006-01-02").
+type PersonnelMetricsRange struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// PersonnelMetricsTotals are the range totals for the acting professional.
+// appointments excludes CANCELLED; revenue counts COMPLETED only, attributed
+// per line. currency is the centre's ISO code.
+type PersonnelMetricsTotals struct {
+	Appointments int     `json:"appointments"`
+	Completed    int     `json:"completed"`
+	Cancelled    int     `json:"cancelled"`
+	NoShow       int     `json:"no_show"`
+	Revenue      float64 `json:"revenue"`
+	Currency     string  `json:"currency"`
+}
+
+// PersonnelTopService is one rank of the professional-scoped top-services
+// leaderboard. Revenue is SUM(price) over their COMPLETED lines in range;
+// count is the number of distinct COMPLETED bookings carrying the service.
+type PersonnelTopService struct {
+	ServiceID   uint    `json:"service_id"`
+	ServiceName string  `json:"service_name"`
+	Revenue     float64 `json:"revenue"`
+	Count       int     `json:"count"`
+}
+
+// PersonnelMetricsResponse is the frozen wire shape of GET
+// /api/reservation/me/metrics. All series cover the requested inclusive range
+// with zero-filled gaps; arrays are never null.
+type PersonnelMetricsResponse struct {
+	Range              PersonnelMetricsRange  `json:"range"`
+	Totals             PersonnelMetricsTotals `json:"totals"`
+	RevenueSeries      []SeriesDayDTO         `json:"revenue_series"`
+	AppointmentsSeries []SeriesDayDTO         `json:"appointments_series"`
+	TopServices        []PersonnelTopService  `json:"top_services"`
+}
+
 type ReservationResponse struct {
 	ID               uint   `json:"id"`
 	BeautyCenterID   uint   `json:"beauty_center_id"`

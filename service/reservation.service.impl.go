@@ -10,6 +10,7 @@ import (
 
 	"github.com/Nina-99/yottu-api/apperrors"
 	"github.com/Nina-99/yottu-api/data/request"
+	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
 	"github.com/Nina-99/yottu-api/repository"
 	"github.com/Nina-99/yottu-api/utils"
@@ -969,18 +970,44 @@ func (s *ReservationServiceImpl) UpdateStatus(reservationID uint, status string,
 	return s.updateStatus(reservation, status)
 }
 
-// UpdateStatusByPersonnel lets a staff member transition ONLY their own
-// reservations (design D1: claim-scoped, never a path parameter). Same state
-// machine as the admin UpdateStatus, plus ownership: the reservation must be
-// assigned to the acting staff member and belong to the acting center.
+// UpdateStatusByPersonnel lets a staff member transition a reservation they
+// PARTICIPATE in (design D1: claim-scoped, never a path parameter).
+//
+// Membership rule — "you can operate on what you can see": the actor is allowed
+// when they are the reservation's DERIVED LEAD or own a service line on it,
+// which is EXACTLY the predicate that already puts the booking in their agenda
+// (ReservationRepository.FindByPersonnelId). Both share personnelMembershipSQL
+// in the repository, so a non-lead professional can no longer SEE a shared
+// booking in their agenda and then be refused the accept/complete transition
+// with a 403. The centre check is unchanged: the acting centre must own the
+// reservation.
+//
+// Deliberate tradeoff: any participating professional may advance the WHOLE
+// shared reservation, including cancelling it, because the person present is
+// the one who must be able to operate. A finer split (only the lead cancels,
+// each line completes its own part) is a deliberate FUTURE refinement, not
+// built here.
 func (s *ReservationServiceImpl) UpdateStatusByPersonnel(reservationID uint, status string, personnelID, centerID uint) error {
 	reservation, err := s.ReservationRepository.FindById(reservationID)
 	if err != nil || reservation == nil {
 		return apperrors.ErrNotFound
 	}
 
-	if reservation.PersonnelID != personnelID || reservation.BeautyCenterID != centerID {
+	// Centre check, unchanged: the acting centre must own the reservation.
+	if reservation.BeautyCenterID != centerID {
 		return apperrors.ErrForbidden
+	}
+
+	// Lead fast path; otherwise fall back to the shared membership predicate
+	// (one bounded query, never a query per line).
+	if reservation.PersonnelID != personnelID {
+		member, err := s.ReservationRepository.IsPersonnelMember(reservationID, personnelID)
+		if err != nil {
+			return err
+		}
+		if !member {
+			return apperrors.ErrForbidden
+		}
 	}
 
 	return s.updateStatus(reservation, status)
@@ -1583,6 +1610,110 @@ func (s *ReservationServiceImpl) FindByBeautyCenterID(beautyCenterID, actorCente
 // cross-staff surface exists; from/to bound the optional date range.
 func (s *ReservationServiceImpl) FindByPersonnelID(personnelID uint, from, to *time.Time) ([]models.Reservation, error) {
 	return s.ReservationRepository.FindByPersonnelId(personnelID, from, to)
+}
+
+// PersonnelMetrics aggregates the acting professional's metrics server-side
+// over the inclusive [from, to] range. The range is converted to the half-open
+// UTC window [from 00:00, to+1d 00:00) the repository queries expect. It
+// mirrors the centre admin definitions (see dashboard.repository.impl.go):
+//
+//   - revenue / revenue_series: COMPLETED only, attributed PER LINE via the
+//     shared personnelRevenueExpr (a non-lead professional earns only their
+//     line, never the lead's whole booking);
+//   - appointments_series / totals.appointments: every non-CANCELLED booking
+//     per day (the admin appointmentsSeries rule);
+//   - top_services: the admin TopServicesByRevenue ranking (revenue DESC, then
+//     count DESC, then service_id), capped at topListLimit, scoped to the
+//     professional's lines.
+//
+// All series cover the requested range with ZERO-FILLED gaps (the client
+// renders gaps as zero). Four aggregation queries plus one centre-currency
+// lookup — constant, no N+1. totals.revenue is the exact sum of the revenue
+// series, so no extra revenue-total query is issued.
+func (s *ReservationServiceImpl) PersonnelMetrics(personnelID, centerID uint, from, to time.Time) (*response.PersonnelMetricsResponse, error) {
+	fromUTC := startOfDayUTC(from)
+	toUTC := startOfDayUTC(to).AddDate(0, 0, 1) // inclusive [from, to] → half-open
+
+	totals, err := s.ReservationRepository.PersonnelStatusTotals(personnelID, fromUTC, toUTC)
+	if err != nil {
+		return nil, err
+	}
+	revenueRows, err := s.ReservationRepository.PersonnelRevenueByDay(personnelID, fromUTC, toUTC)
+	if err != nil {
+		return nil, err
+	}
+	appointmentRows, err := s.ReservationRepository.PersonnelAppointmentsByDay(personnelID, fromUTC, toUTC)
+	if err != nil {
+		return nil, err
+	}
+	topRows, err := s.ReservationRepository.PersonnelTopServices(personnelID, fromUTC, toUTC, topListLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	revenueMap := make(map[string]float64, len(revenueRows))
+	revenueTotal := 0.0
+	for _, row := range revenueRows {
+		key := row.Date.Format("2006-01-02")
+		revenueMap[key] += row.Value
+		revenueTotal += row.Value
+	}
+	appointmentMap := make(map[string]int64, len(appointmentRows))
+	for _, row := range appointmentRows {
+		appointmentMap[row.Date.Format("2006-01-02")] = row.Value
+	}
+
+	// Zero-fill every day of the range, in order.
+	revenueSeries := make([]response.SeriesDayDTO, 0)
+	appointmentsSeries := make([]response.SeriesDayDTO, 0)
+	for d := fromUTC; d.Before(toUTC); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		revenueSeries = append(revenueSeries, response.SeriesDayDTO{Date: key, Value: revenueMap[key]})
+		appointmentsSeries = append(appointmentsSeries, response.SeriesDayDTO{Date: key, Value: float64(appointmentMap[key])})
+	}
+
+	topServices := make([]response.PersonnelTopService, 0, len(topRows))
+	for _, row := range topRows {
+		topServices = append(topServices, response.PersonnelTopService{
+			ServiceID:   row.ServiceID,
+			ServiceName: row.ServiceName,
+			Revenue:     row.Revenue,
+			Count:       int(row.AppointmentCount),
+		})
+	}
+
+	currency, err := s.resolveCenterCurrency(centerID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &response.PersonnelMetricsResponse{
+		Range: response.PersonnelMetricsRange{
+			From: fromUTC.Format("2006-01-02"),
+			To:   startOfDayUTC(to).Format("2006-01-02"),
+		},
+		Totals: response.PersonnelMetricsTotals{
+			Appointments: int(totals.Appointments),
+			Completed:    int(totals.Completed),
+			Cancelled:    int(totals.Cancelled),
+			NoShow:       int(totals.NoShow),
+			Revenue:      revenueTotal,
+			Currency:     currency,
+		},
+		RevenueSeries:      revenueSeries,
+		AppointmentsSeries: appointmentsSeries,
+		TopServices:        topServices,
+	}, nil
+}
+
+// resolveCenterCurrency returns the ISO currency of the acting professional's
+// centre. A missing centre claim or a missing centre yields "" rather than an
+// error — the metrics never fail on a display field. One single-column query.
+func (s *ReservationServiceImpl) resolveCenterCurrency(centerID uint) (string, error) {
+	if centerID == 0 {
+		return "", nil
+	}
+	return s.ReservationRepository.CenterCurrency(centerID)
 }
 
 // ──────────────────────────────────────────────

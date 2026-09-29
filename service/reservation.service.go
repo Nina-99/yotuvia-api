@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/Nina-99/yottu-api/data/request"
+	"github.com/Nina-99/yottu-api/data/response"
 	"github.com/Nina-99/yottu-api/models"
 )
 
@@ -66,11 +67,18 @@ type ReservationService interface {
 	Update(reservationID uint, req request.UpdateReservationRequest, clientID, centerID uint, role string) error
 	Delete(reservationID uint, clientID, centerID uint, role string) error
 	UpdateStatus(reservationID uint, status string, centerID uint) error
-	// UpdateStatusByPersonnel lets a staff member transition ONLY their own
-	// reservations (personnelID = JWT subject). Same state machine as
-	// UpdateStatus plus ownership: the reservation must be assigned to the
-	// acting staff member and belong to the acting center.
+	// UpdateStatusByPersonnel lets a staff member transition a reservation they
+	// PARTICIPATE in — the derived lead or the professional of one of its
+	// service lines — scoped to the acting center. Membership uses the same
+	// predicate as the agenda (personnelMembershipSQL), so a professional can
+	// operate on exactly what they can see. Same state machine as UpdateStatus.
 	UpdateStatusByPersonnel(reservationID uint, status string, personnelID, centerID uint) error
+	// PersonnelMetrics returns the server-side aggregated metrics for the
+	// acting professional (personnelID from the JWT claim) over the inclusive
+	// [from, to] range, zero-filled per day. Revenue is COMPLETED-only and
+	// attributed per line; it mirrors the centre admin definitions so the two
+	// surfaces agree. centerID resolves the currency.
+	PersonnelMetrics(personnelID, centerID uint, from, to time.Time) (*response.PersonnelMetricsResponse, error)
 	Cancel(reservationID uint, clientID uint, reason string) error
 	// FindAll is scoped to the caller's centerID claim (beauty_center only).
 	FindAll(page, limit int, centerID uint) ([]models.Reservation, int64, error)
@@ -79,11 +87,11 @@ type ReservationService interface {
 	// match the actor's clientID claim.
 	FindByClientID(clientID, actorClientID uint) ([]models.Reservation, error)
 	FindUpcomingByClientID(clientID, actorClientID uint) (*models.Reservation, error)
-// FindByBeautyCenterID allows center staff only for their own centerID.
-// The optional from/to date range scopes the agenda to that inclusive range
-// (design D4); the optional date (parsed YYYY-MM-DD) scopes it to one day
-// (design D3); nil params keep the current unfiltered behavior.
-FindByBeautyCenterID(beautyCenterID, actorCenterID uint, from, to *time.Time, clientID *uint) ([]models.Reservation, error)
+	// FindByBeautyCenterID allows center staff only for their own centerID.
+	// The optional from/to date range scopes the agenda to that inclusive range
+	// (design D4); the optional date (parsed YYYY-MM-DD) scopes it to one day
+	// (design D3); nil params keep the current unfiltered behavior.
+	FindByBeautyCenterID(beautyCenterID, actorCenterID uint, from, to *time.Time, clientID *uint) ([]models.Reservation, error)
 	// FindByPersonnelID returns a staff member's agenda. The personnelID is the
 	// caller's own claim (never a path parameter); from/to are an optional
 	// inclusive date range (nil = open-ended).

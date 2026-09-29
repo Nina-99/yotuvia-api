@@ -253,6 +253,7 @@ func TestRouterWiring_No5xxWithValidToken(t *testing.T) {
 		{"reservation generate qr", http.MethodPost, "/api/reservation/generate-qr/1", "client"},
 		{"reservation verify qr", http.MethodGet, "/api/reservation/verify-qr", "beauty_center"},
 		{"reservation my agenda", http.MethodGet, "/api/reservation/me", "personnel"},
+		{"reservation my metrics", http.MethodGet, "/api/reservation/me/metrics", "personnel"},
 		{"reservation my status", http.MethodPatch, "/api/reservation/me/1/status", "personnel"},
 		{"waitlist join", http.MethodPost, "/api/reservation/waitlist", "client"},
 		{"waitlist mine", http.MethodGet, "/api/reservation/waitlist/mine", "client"},

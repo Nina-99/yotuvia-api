@@ -208,7 +208,8 @@ func (c *ReservationController) UploadProof(ctx *gin.Context) {
 // ReviewProof approves or rejects a deposit receipt:
 // PATCH /reservation/:id/proof (beauty_center). Approving a PENDING
 // reservation also confirms it.
-func (c *ReservationController) ReviewProof(ctx *gin.Context) {	centerID := ctx.GetUint("centerID")
+func (c *ReservationController) ReviewProof(ctx *gin.Context) {
+	centerID := ctx.GetUint("centerID")
 
 	reservationID, ok := parsePositiveID(ctx.Param("id"))
 	if !ok {
@@ -563,6 +564,47 @@ func (c *ReservationController) FindMyReservations(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, mapReservationsToResponses(reservations))
+}
+
+// GetMyMetrics returns the caller's server-side aggregated metrics for the
+// requested inclusive date range. The personnel identity is the JWT claim (ctx
+// clientID) — never the body or a path parameter. from/to are YYYY-MM-DD; a
+// malformed value yields 400. Absent bounds default to the LAST 30 DAYS ending
+// today (inclusive): the staff metric ranges are backward-looking, and the
+// legacy agenda default (today → +90d) left COMPLETED revenue permanently
+// empty.
+func (c *ReservationController) GetMyMetrics(ctx *gin.Context) {
+	personnelID := ctx.GetUint("clientID")
+
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	from := today.AddDate(0, 0, -29)
+	if raw := ctx.Query("from"); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			c.writeError(ctx, apperrors.ErrBadRequest)
+			return
+		}
+		from = parsed
+	}
+	to := today
+	if raw := ctx.Query("to"); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			c.writeError(ctx, apperrors.ErrBadRequest)
+			return
+		}
+		to = parsed
+	}
+
+	resp, err := c.reservationService.PersonnelMetrics(personnelID, ctx.GetUint("centerID"), from, to)
+	if err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, resp)
 }
 
 // ──────────────────────────────────────────────

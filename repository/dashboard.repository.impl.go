@@ -205,6 +205,18 @@ func (r *DashboardRepositoryImpl) TopServicesByRevenue(centerID uint, from, to t
 	return rows, err
 }
 
+// personnelRevenueExpr is the ONE definition of per-line revenue attribution:
+// each COMPLETED reservation's stored total_price is split across its lines in
+// proportion to the lines' own prices, and each line's share is credited to the
+// line's professional (a NULL line professional inherits the reservation's
+// derived lead — the Phase 2a kernel rule). For the data the write path
+// produces total_price == SUM(line.price), so a line's share is byte-for-byte
+// its own price. Shared by the admin PersonnelRevenue leaderboard and the
+// staff self-service metrics so the two surfaces can never disagree. The query
+// that uses it must join reservation_services (aliased) and the line_totals
+// subquery.
+const personnelRevenueExpr = `COALESCE(SUM(reservations.total_price * COALESCE(reservation_services.price, reservations.total_price) / NULLIF(COALESCE(line_totals.line_total, reservations.total_price), 0)), 0)`
+
 // PersonnelRevenue ranks staff by COMPLETED revenue in [from, to), attributed
 // PER SERVICE LINE instead of per whole booking.
 //
@@ -229,7 +241,7 @@ func (r *DashboardRepositoryImpl) PersonnelRevenue(centerID uint, from, to time.
 	err := r.db.Model(&models.Reservation{}).
 		Select(`COALESCE(reservation_services.personnel_id, reservations.personnel_id) AS personnel_id,
 			       COALESCE(personnels.first_name || ' ' || personnels.last_name, '') AS personnel_name,
-			       COALESCE(SUM(reservations.total_price * COALESCE(reservation_services.price, reservations.total_price) / NULLIF(COALESCE(line_totals.line_total, reservations.total_price), 0)), 0) AS revenue,
+			       `+personnelRevenueExpr+` AS revenue,
 			       COUNT(DISTINCT reservations.id) AS appointment_count`).
 		Joins("LEFT JOIN reservation_services ON reservation_services.reservation_id = reservations.id AND reservation_services.deleted_at IS NULL").
 		Joins("LEFT JOIN (SELECT reservation_id, SUM(price) AS line_total FROM reservation_services WHERE deleted_at IS NULL GROUP BY reservation_id) AS line_totals ON line_totals.reservation_id = reservations.id").

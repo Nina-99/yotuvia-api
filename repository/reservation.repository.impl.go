@@ -16,6 +16,20 @@ func NewReservationRepositoryImpl(db *gorm.DB) ReservationRepository {
 	return &ReservationRepositoryImpl{db: db}
 }
 
+// personnelMembershipSQL is the ONE definition of "this reservation involves
+// this professional": the reservation's DERIVED LEAD, or any live service line
+// attributed to them. It is the SQL twin of the agenda membership test and is
+// consumed by FindByPersonnelId (the agenda), the write-path overlap checks,
+// the status-transition guard (IsPersonnelMember) and the staff metrics
+// aggregations — so "you can see it" and "you can operate on it" can never
+// drift, and no path ever answers membership with a per-line query.
+const personnelMembershipSQL = "(personnel_id = ? OR id IN (SELECT reservation_id FROM reservation_services WHERE personnel_id = ? AND deleted_at IS NULL))"
+
+// personnelMembershipArgs returns the bind arguments for personnelMembershipSQL.
+func personnelMembershipArgs(personnelID uint) []interface{} {
+	return []interface{}{personnelID, personnelID}
+}
+
 func (r *ReservationRepositoryImpl) Create(reservation *models.Reservation) error {
 	return r.db.Create(reservation).Error
 }
@@ -117,7 +131,7 @@ func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint, fr
 		// reverse chronological order. Takes precedence over the date-agenda
 		// ordering when both params are present.
 		query = query.Where("client_id = ?", *clientID).Order("date DESC, start_time DESC")
-} else if from != nil && to == nil {
+	} else if from != nil && to == nil {
 		// Single from-date: treat as exact day query.
 		query = query.Where("date = ?", *from).Order("start_time ASC")
 	} else if from == nil && to != nil {
@@ -131,16 +145,16 @@ func (r *ReservationRepositoryImpl) FindByBeautyCenterId(beautyCenterID uint, fr
 
 // FindByPersonnelId implements ReservationRepository. A professional's agenda
 // must contain every reservation that has a service line attributed to them —
-// not only the ones where they are the derived lead. The OR keeps lead
-// membership (and line-less legacy rows) working, while the subquery adds the
-// non-lead lines. The where clause is assembled conditionally so nil from/to
-// stay open-ended while GORM still handles the bound parameters.
+// not only the ones where they are the derived lead. The shared
+// personnelMembershipSQL predicate keeps lead membership (and line-less legacy
+// rows) working while the subquery adds the non-lead lines. The where clause is
+// assembled conditionally so nil from/to stay open-ended while GORM still
+// handles the bound parameters.
 func (r *ReservationRepositoryImpl) FindByPersonnelId(personnelID uint, from, to *time.Time) ([]models.Reservation, error) {
 	var reservations []models.Reservation
 	query := r.db.
 		Preload("ReservationServices").Preload("BeautyCenter").Preload("Client").Preload("Personnel").
-		Where("(personnel_id = ? OR id IN (SELECT reservation_id FROM reservation_services WHERE personnel_id = ? AND deleted_at IS NULL))",
-			personnelID, personnelID)
+		Where(personnelMembershipSQL, personnelMembershipArgs(personnelID)...)
 	if from != nil {
 		query = query.Where("date >= ?", *from)
 	}
@@ -149,6 +163,107 @@ func (r *ReservationRepositoryImpl) FindByPersonnelId(personnelID uint, from, to
 	}
 	err := query.Order("date ASC, start_time ASC").Find(&reservations).Error
 	return reservations, err
+}
+
+// IsPersonnelMember reports whether personnelID is the reservation's DERIVED
+// LEAD or owns one of its live service lines — the ONE membership definition
+// shared with the agenda (personnelMembershipSQL). The status-transition guard
+// uses it so a professional can operate on exactly what they can see. It is a
+// single bounded EXISTS-style COUNT, never a query per line.
+func (r *ReservationRepositoryImpl) IsPersonnelMember(reservationID, personnelID uint) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.Reservation{}).
+		Where("reservations.id = ?", reservationID).
+		Where(personnelMembershipSQL, personnelMembershipArgs(personnelID)...).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// PersonnelStatusTotals aggregates the acting professional's reservation counts
+// over the half-open range [from, to), scoped by the shared membership
+// predicate: appointments excludes CANCELLED (mirroring the admin
+// appointmentsSeries), completed/cancelled/no_show are the status buckets the
+// staff metrics expose. ONE query, reservation-level (never joined to lines, so
+// a shared booking is counted once per professional).
+func (r *ReservationRepositoryImpl) PersonnelStatusTotals(personnelID uint, from, to time.Time) (PersonnelStatusTotalsRow, error) {
+	var row PersonnelStatusTotalsRow
+	err := r.db.Model(&models.Reservation{}).
+		Where("date >= ? AND date < ?", from, to).
+		Where(personnelMembershipSQL, personnelMembershipArgs(personnelID)...).
+		Select(`COALESCE(SUM(CASE WHEN status <> 'CANCELLED' THEN 1 ELSE 0 END), 0) AS appointments,
+			       COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END), 0) AS completed,
+			       COALESCE(SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END), 0) AS cancelled,
+			       COALESCE(SUM(CASE WHEN status = 'NO_SHOW' THEN 1 ELSE 0 END), 0) AS no_show`).
+		Scan(&row).Error
+	return row, err
+}
+
+// PersonnelRevenueByDay is the per-day twin of the admin RevenueByDay, but
+// attributed PER LINE with the shared personnelRevenueExpr (the Phase 2b rule),
+// scoped to the acting professional's lines. COMPLETED only. ONE query.
+func (r *ReservationRepositoryImpl) PersonnelRevenueByDay(personnelID uint, from, to time.Time) ([]RevenueDayRow, error) {
+	var rows []RevenueDayRow
+	err := r.db.Model(&models.Reservation{}).
+		Select(`reservations.date AS date, `+personnelRevenueExpr+` AS value`).
+		Joins("LEFT JOIN reservation_services ON reservation_services.reservation_id = reservations.id AND reservation_services.deleted_at IS NULL").
+		Joins("LEFT JOIN (SELECT reservation_id, SUM(price) AS line_total FROM reservation_services WHERE deleted_at IS NULL GROUP BY reservation_id) AS line_totals ON line_totals.reservation_id = reservations.id").
+		Where("reservations.status = ? AND reservations.date >= ? AND reservations.date < ? AND COALESCE(reservation_services.personnel_id, reservations.personnel_id) = ?",
+			"COMPLETED", from, to, personnelID).
+		Group("reservations.date").
+		Order("reservations.date ASC").
+		Scan(&rows).Error
+	return rows, err
+}
+
+// PersonnelAppointmentsByDay counts the acting professional's non-CANCELLED
+// reservations per day in [from, to), grouped by date. It mirrors the admin
+// AppointmentsByDay definition but scopes by membership. ONE query; COUNT(*)
+// counts each booking once (no line join, so a shared booking never inflates).
+func (r *ReservationRepositoryImpl) PersonnelAppointmentsByDay(personnelID uint, from, to time.Time) ([]CountDayRow, error) {
+	var rows []CountDayRow
+	err := r.db.Model(&models.Reservation{}).
+		Where("status <> ? AND date >= ? AND date < ?", "CANCELLED", from, to).
+		Where(personnelMembershipSQL, personnelMembershipArgs(personnelID)...).
+		Select("date, COUNT(*) AS value").
+		Group("date").
+		Order("date ASC").
+		Scan(&rows).Error
+	return rows, err
+}
+
+// PersonnelTopServices mirrors TopServicesByRevenue (revenue DESC, then
+// count DESC, then service_id ASC; same limit) but scoped to the acting
+// professional's lines: revenue is SUM(price) and count is
+// COUNT(DISTINCT reservation_id) over COMPLETED reservations in [from, to).
+// ONE query.
+func (r *ReservationRepositoryImpl) PersonnelTopServices(personnelID uint, from, to time.Time, limit int) ([]TopServiceRow, error) {
+	var rows []TopServiceRow
+	err := r.db.Model(&models.ReservationService{}).
+		Select(`reservation_services.service_id,
+			       reservation_services.service_name,
+			       SUM(reservation_services.price) AS revenue,
+			       COUNT(DISTINCT reservation_services.reservation_id) AS appointment_count`).
+		Joins("JOIN reservations ON reservations.id = reservation_services.reservation_id AND reservations.deleted_at IS NULL").
+		Where("reservations.status = ? AND reservations.date >= ? AND reservations.date < ? AND COALESCE(reservation_services.personnel_id, reservations.personnel_id) = ?",
+			"COMPLETED", from, to, personnelID).
+		Group("reservation_services.service_id, reservation_services.service_name").
+		Order("revenue DESC, appointment_count DESC, reservation_services.service_id ASC").
+		Limit(limit).
+		Scan(&rows).Error
+	return rows, err
+}
+
+// CenterCurrency reads just the centre's ISO currency. One single-column
+// statement (no eager-loads); a missing/soft-deleted centre yields "".
+func (r *ReservationRepositoryImpl) CenterCurrency(centerID uint) (string, error) {
+	var currency string
+	err := r.db.Model(&models.BeautyCenter{}).
+		Where("id = ?", centerID).
+		Pluck("currency", &currency).Error
+	return currency, err
 }
 
 func (r *ReservationRepositoryImpl) FindAll(page, limit int, centerID uint) ([]models.Reservation, int64, error) {
@@ -212,8 +327,7 @@ func (r *ReservationRepositoryImpl) CheckOverlap(centerID uint, date time.Time, 
 
 	var candidates []models.Reservation
 	err := query.
-		Where("(personnel_id = ? OR id IN (SELECT reservation_id FROM reservation_services WHERE personnel_id = ? AND deleted_at IS NULL))",
-			personnelID, personnelID).
+		Where(personnelMembershipSQL, personnelMembershipArgs(personnelID)...).
 		Preload("ReservationServices", func(db *gorm.DB) *gorm.DB { return db.Order("id ASC") }).
 		Find(&candidates).Error
 	if err != nil {
