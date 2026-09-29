@@ -35,4 +35,18 @@ type AuthAccountService interface {
 	Refresh(ctx context.Context, refreshToken string) (RefreshResult, error)
 	// Logout revokes the session presenting the refresh token (D3). Idempotent.
 	Logout(ctx context.Context, refreshToken string) error
+
+	// VerifyEmail redeems an email-verification token: single-use and
+	// time-bounded. Invalid/expired/used tokens all return ErrInvalidToken.
+	VerifyEmail(ctx context.Context, rawToken string) error
+	// ResendVerification issues a fresh verification token when an unverified
+	// account exists and sends the email. It is deliberately silent about
+	// whether the account exists (returns nil either way).
+	ResendVerification(ctx context.Context, req request.ResendVerificationRequest) error
+	// ForgotPassword sends a reset link when an account exists, and is silent
+	// about whether it does (returns nil either way).
+	ForgotPassword(ctx context.Context, req request.ForgotPasswordRequest) error
+	// ResetPassword redeems a single-use reset token, sets the new password and
+	// revokes every session of that account (all devices, all families).
+	ResetPassword(ctx context.Context, req request.ResetPasswordRequest) error
 }

@@ -20,6 +20,16 @@ func main() {
 		Format: os.Getenv("LOG_FORMAT"), // "console" or "json"
 	})
 
+	// Transactional email transport. SMTP when SMTP_HOST is configured,
+	// otherwise the log-only dev mailer (the automatic fallback). Log the active
+	// mode loudly ONCE so an operator can tell whether real mail is going out.
+	mailer, err := utils.MailerFromEnv()
+	if err != nil {
+		utils.Log.Fatalf("Invalid email configuration: %v", err)
+	}
+	utils.SetDefaultMailer(mailer)
+	utils.Log.Infof("[MAILER] active mode: %s", mailer.Mode())
+
 	// NOTE: DataBase
 	// validate := validator.New()
 	configs.DBConnection()

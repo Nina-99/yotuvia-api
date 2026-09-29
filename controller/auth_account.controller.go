@@ -121,6 +121,78 @@ func (c *AuthAccountController) Logout(ctx *gin.Context) {
 	ctx.JSON(http.StatusNoContent, nil)
 }
 
+// VerifyEmail redeems a verification token: 200 on success, 400 for an
+// unknown/expired/used token (uniform message).
+func (c *AuthAccountController) VerifyEmail(ctx *gin.Context) {
+	var req request.VerifyEmailRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if err := c.authAccountService.VerifyEmail(ctx.Request.Context(), req.Token); err != nil {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "email verified"})
+}
+
+// ResendVerification ALWAYS answers 200 for a well-formed email, whether or not
+// the account exists or is already verified — no enumeration signal.
+func (c *AuthAccountController) ResendVerification(ctx *gin.Context) {
+	var req request.ResendVerificationRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if err := c.authAccountService.ResendVerification(ctx.Request.Context(), req); err != nil {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "if the email exists and is unverified, a verification link has been sent"})
+}
+
+// ForgotPassword ALWAYS answers 200 for a well-formed email, whether or not the
+// account exists — no enumeration signal.
+func (c *AuthAccountController) ForgotPassword(ctx *gin.Context) {
+	var req request.ForgotPasswordRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if err := c.authAccountService.ForgotPassword(ctx.Request.Context(), req); err != nil {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "if the email exists, a reset link has been sent"})
+}
+
+// ResetPassword redeems a single-use reset token, sets the new password and
+// revokes every session: 200 on success, 400 for a bad token or password.
+func (c *AuthAccountController) ResetPassword(ctx *gin.Context) {
+	var req request.ResetPasswordRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if err := c.authAccountService.ResetPassword(ctx.Request.Context(), req); err != nil {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "password reset"})
+}
+
 func toAuthResponse(result service.AuthResult) response.AuthResponse {
 	return response.AuthResponse{
 		Token:        result.Token,

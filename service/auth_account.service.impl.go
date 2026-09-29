@@ -21,6 +21,8 @@ type AuthAccountServiceImpl struct {
 	PersonnelRepo   repository.PersonnelRepository
 	CenterRepo      repository.BeautyCenterRepository
 	SessionRepo     repository.UserSessionRepository
+	TokenRepo       repository.AuthTokenRepository
+	Mailer          utils.Mailer
 	TokenAccountSvc TokenAccountService
 	Validate        *validator.Validate
 }
@@ -31,15 +33,24 @@ func NewAuthAccountServiceImpl(
 	personnelRepo repository.PersonnelRepository,
 	centerRepo repository.BeautyCenterRepository,
 	sessionRepo repository.UserSessionRepository,
+	tokenRepo repository.AuthTokenRepository,
+	mailer utils.Mailer,
 	tokenAccountSvc TokenAccountService,
 	validate *validator.Validate,
 ) AuthAccountService {
+	if mailer == nil {
+		// A nil mailer must never panic a request; fall back to the log-only
+		// transport (tests that don't exercise email still get a working flow).
+		mailer = utils.NewDevMailer()
+	}
 	return &AuthAccountServiceImpl{
 		AuthRepo:        authRepo,
 		ClientRepo:      clientRepo,
 		PersonnelRepo:   personnelRepo,
 		CenterRepo:      centerRepo,
 		SessionRepo:     sessionRepo,
+		TokenRepo:       tokenRepo,
+		Mailer:          mailer,
 		TokenAccountSvc: tokenAccountSvc,
 		Validate:        validate,
 	}
@@ -85,11 +96,12 @@ func termsVersion() string {
 }
 
 // recordTermsAcceptance persists the server-stamped Terms acceptance for a
-// freshly registered user. AuthAccount is the account-audit record; a classic
-// registration has no provider link, so it writes a "local" one. A failure is
-// returned: an unrecorded acceptance must not masquerade as a successful
-// registration.
-func (s *AuthAccountServiceImpl) recordTermsAcceptance(userType, providerID string, clientID, personnelID, centerID *uint) error {
+// freshly registered user and returns the created account so the caller can key
+// the verification token to it. AuthAccount is the account-audit record; a
+// classic registration has no provider link, so it writes a "local" one. A
+// failure is returned: an unrecorded acceptance must not masquerade as a
+// successful registration.
+func (s *AuthAccountServiceImpl) recordTermsAcceptance(userType, providerID string, clientID, personnelID, centerID *uint) (*models.AuthAccount, error) {
 	now := time.Now()
 	account := models.AuthAccount{
 		Provider:        "local",
@@ -103,9 +115,9 @@ func (s *AuthAccountServiceImpl) recordTermsAcceptance(userType, providerID stri
 	}
 	if err := s.AuthRepo.Create(&account); err != nil {
 		utils.Log.Errorf("[AUTH] Failed to record terms acceptance for %s: %v", userType, err)
-		return err
+		return nil, err
 	}
-	return nil
+	return &account, nil
 }
 
 // ──────────────────────────────────────────────
@@ -251,6 +263,9 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 	var username string
 	var firstName string
 	var lastName string
+	// verificationAccount is the local AuthAccount created for this
+	// registration; the verification token is keyed to it.
+	var verificationAccount *models.AuthAccount
 
 	switch req.UserType {
 	case "client":
@@ -278,7 +293,7 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		if err := s.ClientRepo.Create(&client); err != nil {
 			return AuthResult{}, err
 		}
-		if err := s.recordTermsAcceptance("client", client.Email, &client.ID, nil, nil); err != nil {
+		if verificationAccount, err = s.recordTermsAcceptance("client", client.Email, &client.ID, nil, nil); err != nil {
 			return AuthResult{}, err
 		}
 		userID = client.ID
@@ -304,7 +319,7 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		if err := s.PersonnelRepo.Create(&personnel); err != nil {
 			return AuthResult{}, err
 		}
-		if err := s.recordTermsAcceptance("personnel", personnel.Email, nil, &personnel.ID, nil); err != nil {
+		if verificationAccount, err = s.recordTermsAcceptance("personnel", personnel.Email, nil, &personnel.ID, nil); err != nil {
 			return AuthResult{}, err
 		}
 		userID = personnel.ID
@@ -339,7 +354,7 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		if err := s.CenterRepo.Create(&center); err != nil {
 			return AuthResult{}, err
 		}
-		if err := s.recordTermsAcceptance("beauty_center", center.Email, nil, nil, &center.ID); err != nil {
+		if verificationAccount, err = s.recordTermsAcceptance("beauty_center", center.Email, nil, nil, &center.ID); err != nil {
 			return AuthResult{}, err
 		}
 		userID = center.ID
@@ -363,6 +378,11 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 	default:
 		return AuthResult{}, errors.New("invalid user type")
 	}
+
+	// Best-effort verification email: a mail failure must NOT fail
+	// registration. The account is created and usable immediately (login is not
+	// gated on verification); the user can always resend later.
+	s.sendVerificationEmail(context.Background(), verificationAccount, req.UserType, userID, email, firstName)
 
 	utils.Log.Infof("[AUTH] New %s registered successfully. ID: %d, Email: %s", req.UserType, userID, email)
 	token, err := utils.GenerateJWT(userID, centerID, req.UserType, email, username)
@@ -674,4 +694,265 @@ func (s *AuthAccountServiceImpl) Logout(ctx context.Context, rawToken string) er
 		return apperrors.ErrBadRequest
 	}
 	return s.SessionRepo.RevokeByHash(ctx, utils.HashRefreshToken(rawToken))
+}
+
+// ──────────────────────────────────────────────
+//  EMAIL VERIFICATION
+// ──────────────────────────────────────────────
+
+// VerifyEmail redeems a verification token and stamps EmailVerifiedAt on the
+// owning AuthAccount. Every invalid outcome — unknown, wrong purpose, already
+// used, expired — maps to ErrInvalidToken (400) with one uniform message.
+func (s *AuthAccountServiceImpl) VerifyEmail(ctx context.Context, rawToken string) error {
+	token, err := s.consumeToken(ctx, rawToken, models.TokenPurposeEmailVerification)
+	if err != nil {
+		return err
+	}
+	if token.AccountID == nil {
+		utils.Log.Errorf("[AUTH] verification token %d has no account", token.ID)
+		return apperrors.ErrInvalidToken
+	}
+	account, err := s.AuthRepo.FindById(*token.AccountID)
+	if err != nil || account == nil {
+		utils.Log.Errorf("[AUTH] verification token %d references missing account %d: %v", token.ID, *token.AccountID, err)
+		return apperrors.ErrInvalidToken
+	}
+	now := time.Now()
+	account.EmailVerifiedAt = &now
+	if err := s.AuthRepo.Update(account); err != nil {
+		return err
+	}
+	utils.Log.Infof("[AUTH] email verified for %s account %d", account.UserType, account.ID)
+	return nil
+}
+
+// ResendVerification issues and sends a new verification link when an
+// unverified account exists for the email. It NEVER reveals whether the account
+// exists (nor whether it is already verified): the returned error is nil for
+// every well-formed address, and mail failures are logged, not surfaced.
+func (s *AuthAccountServiceImpl) ResendVerification(ctx context.Context, req request.ResendVerificationRequest) error {
+	if err := s.Validate.Struct(req); err != nil {
+		return fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
+	}
+
+	userType, userID, firstName, found := s.resolveUserByEmail(req.Email)
+	if !found {
+		utils.Log.Infof("[AUTH] resend-verification requested for unknown email; answering 200")
+		return nil
+	}
+	account, err := s.AuthRepo.FindByLocalUser(userType, userID)
+	if err != nil {
+		utils.Log.Errorf("[AUTH] resend-verification account lookup failed: %v", err)
+		return nil
+	}
+	// Already-verified: nothing to send, still silent.
+	if account == nil || account.EmailVerifiedAt != nil {
+		return nil
+	}
+	if err := s.issueAndSendVerification(ctx, account, userType, userID, req.Email, firstName); err != nil {
+		utils.Log.Errorf("[AUTH] resend-verification email failed for %s: %v", req.Email, err)
+	}
+	return nil
+}
+
+// ──────────────────────────────────────────────
+//  PASSWORD RECOVERY
+// ──────────────────────────────────────────────
+
+// ForgotPassword sends a reset link when the email belongs to an account and is
+// otherwise silent (no enumeration). Mail failures are logged, never surfaced.
+func (s *AuthAccountServiceImpl) ForgotPassword(ctx context.Context, req request.ForgotPasswordRequest) error {
+	if err := s.Validate.Struct(req); err != nil {
+		return fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
+	}
+
+	userType, userID, firstName, found := s.resolveUserByEmail(req.Email)
+	if !found {
+		utils.Log.Infof("[AUTH] forgot-password requested for unknown email; answering 200")
+		return nil
+	}
+	if err := s.issueAndSendPasswordReset(ctx, userType, userID, req.Email, firstName); err != nil {
+		utils.Log.Errorf("[AUTH] forgot-password email failed for %s: %v", req.Email, err)
+	}
+	return nil
+}
+
+// ResetPassword redeems a single-use reset token, sets the new password and
+// revokes EVERY session of that account across all devices. Order matters: the
+// token is consumed first (so a replay after a successful reset is rejected),
+// then the password is written, then sessions are killed. If a step after
+// consumption fails, the token is spent and the user must request a new link —
+// the safe direction for a credential-reset flow.
+func (s *AuthAccountServiceImpl) ResetPassword(ctx context.Context, req request.ResetPasswordRequest) error {
+	if err := s.Validate.Struct(req); err != nil {
+		return fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
+	}
+
+	token, err := s.consumeToken(ctx, req.Token, models.TokenPurposePasswordReset)
+	if err != nil {
+		return err
+	}
+
+	hashed, err := utils.HashPassword(req.Password)
+	if err != nil {
+		return err
+	}
+	if err := s.updatePassword(token.UserType, token.UserID, hashed); err != nil {
+		return err
+	}
+	if err := s.SessionRepo.RevokeAllForUser(ctx, token.UserID, token.UserType); err != nil {
+		return err
+	}
+	utils.Log.Infof("[AUTH] password reset for %s #%d; all sessions revoked", token.UserType, token.UserID)
+	return nil
+}
+
+// ──────────────────────────────────────────────
+//  EMAIL HELPERS
+// ──────────────────────────────────────────────
+
+// consumeToken validates a raw token against purpose/single-use/expiry and
+// claims it atomically. A nil, wrong-purpose, used, expired or already-claimed
+// token is ErrInvalidToken.
+func (s *AuthAccountServiceImpl) consumeToken(ctx context.Context, rawToken, purpose string) (*models.AuthToken, error) {
+	if rawToken == "" {
+		return nil, apperrors.ErrInvalidToken
+	}
+	token, err := s.TokenRepo.FindByHash(ctx, utils.HashAuthToken(rawToken))
+	if err != nil {
+		return nil, err
+	}
+	if token == nil || token.Purpose != purpose || token.IsUsed() || token.IsExpired() {
+		return nil, apperrors.ErrInvalidToken
+	}
+	claimed, err := s.TokenRepo.Consume(ctx, token.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !claimed {
+		// A concurrent request consumed it between read and CAS.
+		return nil, apperrors.ErrInvalidToken
+	}
+	return token, nil
+}
+
+// sendVerificationEmail is the best-effort wrapper used by Register: any
+// failure is logged and swallowed so registration still succeeds.
+func (s *AuthAccountServiceImpl) sendVerificationEmail(ctx context.Context, account *models.AuthAccount, userType string, userID uint, email, firstName string) {
+	if account == nil {
+		return
+	}
+	if err := s.issueAndSendVerification(ctx, account, userType, userID, email, firstName); err != nil {
+		utils.Log.Errorf("[AUTH] verification email not sent for %s (registration still succeeded): %v", email, err)
+	}
+}
+
+// issueAndSendVerification retires any outstanding verification token, mints a
+// new one, stores its hash and sends the Spanish email.
+func (s *AuthAccountServiceImpl) issueAndSendVerification(ctx context.Context, account *models.AuthAccount, userType string, userID uint, email, firstName string) error {
+	if err := s.TokenRepo.InvalidateOutstanding(ctx, userType, userID, models.TokenPurposeEmailVerification); err != nil {
+		return err
+	}
+	raw, err := utils.GenerateAuthToken()
+	if err != nil {
+		return err
+	}
+	accountID := account.ID
+	token := &models.AuthToken{
+		UserType:  userType,
+		UserID:    userID,
+		AccountID: &accountID,
+		Purpose:   models.TokenPurposeEmailVerification,
+		TokenHash: utils.HashAuthToken(raw),
+		ExpiresAt: time.Now().Add(utils.EmailVerificationTTL),
+	}
+	if err := s.TokenRepo.Create(ctx, token); err != nil {
+		return err
+	}
+	content := utils.VerificationEmail(firstName, utils.VerificationLink(raw))
+	return s.Mailer.Send(ctx, utils.Message{
+		To:      email,
+		Subject: content.Subject,
+		Text:    content.Text,
+		HTML:    content.HTML,
+	})
+}
+
+// issueAndSendPasswordReset retires any outstanding reset token, mints a new
+// one and sends the Spanish email.
+func (s *AuthAccountServiceImpl) issueAndSendPasswordReset(ctx context.Context, userType string, userID uint, email, firstName string) error {
+	var accountID *uint
+	if account, err := s.AuthRepo.FindByLocalUser(userType, userID); err == nil && account != nil {
+		accountID = &account.ID
+	}
+	if err := s.TokenRepo.InvalidateOutstanding(ctx, userType, userID, models.TokenPurposePasswordReset); err != nil {
+		return err
+	}
+	raw, err := utils.GenerateAuthToken()
+	if err != nil {
+		return err
+	}
+	token := &models.AuthToken{
+		UserType:  userType,
+		UserID:    userID,
+		AccountID: accountID,
+		Purpose:   models.TokenPurposePasswordReset,
+		TokenHash: utils.HashAuthToken(raw),
+		ExpiresAt: time.Now().Add(utils.PasswordResetTTL),
+	}
+	if err := s.TokenRepo.Create(ctx, token); err != nil {
+		return err
+	}
+	content := utils.PasswordResetEmail(firstName, utils.PasswordResetLink(raw))
+	return s.Mailer.Send(ctx, utils.Message{
+		To:      email,
+		Subject: content.Subject,
+		Text:    content.Text,
+		HTML:    content.HTML,
+	})
+}
+
+// resolveUserByEmail finds the account holder behind an email across the three
+// user types. It returns found=false when nothing matches; callers must never
+// turn that into a different HTTP response (enumeration).
+func (s *AuthAccountServiceImpl) resolveUserByEmail(email string) (userType string, userID uint, firstName string, found bool) {
+	if client, _ := s.ClientRepo.FindByEmail(email); client != nil {
+		return "client", client.ID, client.FirstName, true
+	}
+	if personnel, _ := s.PersonnelRepo.FindByEmail(email); personnel != nil {
+		return "personnel", personnel.ID, personnel.FirstName, true
+	}
+	if center, _ := s.CenterRepo.FindByEmail(email); center != nil {
+		return "beauty_center", center.ID, center.Name, true
+	}
+	return "", 0, "", false
+}
+
+// updatePassword writes a new bcrypt hash onto the right domain entity.
+func (s *AuthAccountServiceImpl) updatePassword(userType string, userID uint, hashed string) error {
+	switch userType {
+	case "client":
+		client, err := s.ClientRepo.FindById(userID)
+		if err != nil || client == nil {
+			return errors.New("account no longer exists")
+		}
+		client.Password = hashed
+		return s.ClientRepo.Update(client)
+	case "personnel":
+		personnel, err := s.PersonnelRepo.FindByID(userID)
+		if err != nil || personnel == nil {
+			return errors.New("account no longer exists")
+		}
+		personnel.Password = hashed
+		return s.PersonnelRepo.Update(personnel)
+	case "beauty_center":
+		center, err := s.CenterRepo.FindByID(userID)
+		if err != nil || center == nil {
+			return errors.New("account no longer exists")
+		}
+		center.Password = hashed
+		return s.CenterRepo.Update(center)
+	default:
+		return apperrors.ErrInvalidToken
+	}
 }
