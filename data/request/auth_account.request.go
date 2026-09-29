@@ -5,7 +5,7 @@ type RegisterRequest struct {
 	LastName  string  `json:"last_name" validate:"omitempty,max=50"`
 	Email     string  `json:"email" validate:"required,email,max=70"`
 	Phone     string  `json:"phone" validate:"required,max=20"`
-	Password  string  `json:"password" validate:"required,min=6,max=255"`
+	Password  string  `json:"password" validate:"required,min=8,max=255"`
 	Username  string  `json:"username" validate:"omitempty,max=50"`
 	UserType  string  `json:"user_type" validate:"required,oneof=client personnel beauty_center"`
 	Address   string  `json:"address" validate:"omitempty,max=255"`
@@ -36,7 +36,7 @@ type RegisterPersonnelRequest struct {
 	LastName       string `json:"last_name" validate:"required,max=50"`
 	Email          string `json:"email" validate:"required,email,max=70"`
 	Phone          string `json:"phone" validate:"required,max=20"`
-	Password       string `json:"password" validate:"required,min=6,max=255"`
+	Password       string `json:"password" validate:"required,min=8,max=255"`
 	IsActive       *bool  `json:"is_active"`
 }
 

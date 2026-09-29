@@ -20,8 +20,8 @@ type ForgotPasswordRequest struct {
 }
 
 // ResetPasswordRequest is the body of POST /auth-accounts/reset-password. The
-// password uses the SAME rules as registration (min 6, max 255).
+// password uses the SAME rules as registration (min 8, max 255).
 type ResetPasswordRequest struct {
 	Token    string `json:"token" validate:"required"`
-	Password string `json:"password" validate:"required,min=6,max=255"`
+	Password string `json:"password" validate:"required,min=8,max=255"`
 }

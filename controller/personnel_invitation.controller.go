@@ -78,7 +78,7 @@ func (c *PersonnelInvitationController) Accept(ctx *gin.Context) {
 		FirstName string `json:"first_name" binding:"required"`
 		LastName  string `json:"last_name" binding:"required"`
 		Phone     string `json:"phone"`
-		Password  string `json:"password" binding:"required,min=6"`
+		Password  string `json:"password" binding:"required,min=8"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
