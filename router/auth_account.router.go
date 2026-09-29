@@ -32,8 +32,14 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	svc := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo, sessionRepo, tokenAccountSvc, validate)
 	ctrl := controller.NewAuthAccountController(svc)
 
+	// One limiter shared by every auth route below so a single attacker burns a
+	// single budget across login/register/social/check-email/refresh/logout.
+	// 429 + Retry-After on throttle; limits are env-configurable
+	// (RATE_LIMIT_*) with production defaults.
+	authLimiter := middleware.RateLimit(middleware.RateLimitConfigFromEnv())
+
 	// Legacy routes under /auth-accounts
-	authAccount := rg.Group("/auth-accounts")
+	authAccount := rg.Group("/auth-accounts", authLimiter)
 	authAccount.POST("/login", ctrl.Login)
 	authAccount.POST("/social", ctrl.SocialLogin)
 	authAccount.POST("/register", ctrl.Register)
@@ -41,7 +47,8 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	authAccount.POST("/refresh", ctrl.Refresh)
 	authAccount.POST("/logout", middleware.JWTAuthMiddleware(), ctrl.Logout)
 
-	// Routes under /auth (used by mobile admin panel)
+	// Routes under /auth (used by mobile admin panel). The limiter runs before
+	// the JWT check so throttling happens before any CPU is spent on the token.
 	auth := rg.Group("/auth")
-	auth.POST("/register-personnel", middleware.JWTAuthMiddleware(), ctrl.RegisterPersonnel)
+	auth.POST("/register-personnel", authLimiter, middleware.JWTAuthMiddleware(), ctrl.RegisterPersonnel)
 }
