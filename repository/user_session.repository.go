@@ -41,4 +41,10 @@ type UserSessionRepository interface {
 
 	// RevokeFamily revokes every generation row of a session family.
 	RevokeFamily(ctx context.Context, familyID string) error
+
+	// RevokeAllForUser revokes every session of one account across every family.
+	// role is required because UserID is polymorphic: client #5 and center #5
+	// share the numeric id, and a password reset must only kill the resetting
+	// account's sessions, never another type's.
+	RevokeAllForUser(ctx context.Context, userID uint, role string) error
 }

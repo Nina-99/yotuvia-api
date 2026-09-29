@@ -36,6 +36,10 @@ var (
 	// ErrUsernameTaken signals a registration attempt with a username that is
 	// already registered.
 	ErrUsernameTaken = errors.New("username already exists")
+	// ErrInvalidToken signals an email-verification or password-reset token that
+	// is unknown, expired or already used. The three cases collapse into one
+	// client-visible message so a caller cannot probe token state.
+	ErrInvalidToken = errors.New("invalid or expired token")
 )
 
 // MapToHTTP returns the HTTP status code and a client-safe message for err.
@@ -62,6 +66,8 @@ func MapToHTTP(err error) (int, string) {
 		return http.StatusConflict, ErrEmailTaken.Error()
 	case errors.Is(err, ErrUsernameTaken):
 		return http.StatusConflict, ErrUsernameTaken.Error()
+	case errors.Is(err, ErrInvalidToken):
+		return http.StatusBadRequest, ErrInvalidToken.Error()
 	case errors.Is(err, ErrFileTooLarge):
 		return http.StatusRequestEntityTooLarge, ErrFileTooLarge.Error()
 	default:

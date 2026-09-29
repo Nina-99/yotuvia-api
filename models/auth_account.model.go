@@ -21,6 +21,13 @@ type AuthAccount struct {
 	// accepted (TERMS_VERSION env). The client cannot dictate it.
 	TermsVersion string `gorm:"size:20" json:"terms_version,omitempty"`
 
+	// EmailVerifiedAt records when the account holder proved control of the
+	// email address through the verification link. NULL means unverified. It is
+	// stamped by the server on redemption, never supplied by the client.
+	// Verification is NOT a login gate (see the auth service report): it proves
+	// the address is real and enables recovery, without locking anyone out.
+	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`
+
 	ClientID       *uint         `json:"client_id,omitempty"`
 	Client         *Client       `gorm:"foreignKey:ClientID" json:"-"`
 	PersonnelID    *uint         `json:"personnel_id,omitempty"`

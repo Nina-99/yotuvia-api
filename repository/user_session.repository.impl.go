@@ -136,3 +136,9 @@ func (r *UserSessionRepositoryImpl) RevokeByHash(ctx context.Context, hash strin
 func (r *UserSessionRepositoryImpl) RevokeFamily(ctx context.Context, familyID string) error {
 	return revokeFamilyWith(r.db.WithContext(ctx), familyID)
 }
+
+func (r *UserSessionRepositoryImpl) RevokeAllForUser(ctx context.Context, userID uint, role string) error {
+	return r.db.WithContext(ctx).Model(&models.UserSession{}).
+		Where("user_id = ? AND role = ?", userID, role).
+		Update("is_revoked", true).Error
+}
