@@ -1,6 +1,10 @@
 package models
 
-import "gorm.io/gorm"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type AuthAccount struct {
 	gorm.Model
@@ -8,6 +12,14 @@ type AuthAccount struct {
 	ProviderID string `gorm:"size:255" json:"provider_id"`
 
 	UserType string `gorm:"size:255;not null" json:"user_type"`
+
+	// TermsAcceptedAt records the moment the account holder accepted the
+	// platform Terms. NULL means acceptance was never captured. It is stamped
+	// by the server at registration, never supplied by the client.
+	TermsAcceptedAt *time.Time `json:"terms_accepted_at,omitempty"`
+	// TermsVersion is the server-authoritative version of the Terms the user
+	// accepted (TERMS_VERSION env). The client cannot dictate it.
+	TermsVersion string `gorm:"size:20" json:"terms_version,omitempty"`
 
 	ClientID       *uint         `json:"client_id,omitempty"`
 	Client         *Client       `gorm:"foreignKey:ClientID" json:"-"`

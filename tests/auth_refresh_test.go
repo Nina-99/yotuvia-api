@@ -82,7 +82,7 @@ type authResponseEnvelope struct {
 // additive refresh_token field is present (D4).
 func registerClient(t *testing.T, r *gin.Engine) authResponseEnvelope {
 	t.Helper()
-	body := `{"first_name":"Ana","last_name":"Lopez","email":"ana.lopez@test.com","phone":"5550100","password":"password123","username":"ana","user_type":"client"}`
+	body := `{"first_name":"Ana","last_name":"Lopez","email":"ana.lopez@test.com","phone":"5550100","password":"password123","username":"ana","user_type":"client","terms_accepted":true}`
 	w := do(r, http.MethodPost, "/api/auth-accounts/register", "", body)
 	assert.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 

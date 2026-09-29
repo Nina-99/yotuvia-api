@@ -27,7 +27,8 @@ func (c *AuthAccountController) Register(ctx *gin.Context) {
 
 	result, err := c.authAccountService.Register(req)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
 		return
 	}
 
@@ -74,27 +75,12 @@ func (c *AuthAccountController) RegisterPersonnel(ctx *gin.Context) {
 	}
 
 	if err := c.authAccountService.RegisterPersonnel(req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
 		return
 	}
 
 	ctx.JSON(http.StatusCreated, gin.H{"message": "Created"})
-}
-
-func (c *AuthAccountController) CheckEmail(ctx *gin.Context) {
-	var req request.CheckEmailRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	exists, err := c.authAccountService.CheckEmail(req)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{"exists": exists})
 }
 
 // Refresh rotates the presented refresh token (public — the access token is

@@ -105,7 +105,6 @@ func TestRouterWiring_No5xxWithValidToken(t *testing.T) {
 		{"auth login", http.MethodPost, "/api/auth-accounts/login", "client"},
 		{"auth social", http.MethodPost, "/api/auth-accounts/social", "client"},
 		{"auth register", http.MethodPost, "/api/auth-accounts/register", "client"},
-		{"auth check email", http.MethodPost, "/api/auth-accounts/check-email", "client"},
 		{"auth refresh", http.MethodPost, "/api/auth-accounts/refresh", "client"},
 		{"auth logout", http.MethodPost, "/api/auth-accounts/logout", "client"},
 		{"auth register personnel", http.MethodPost, "/api/auth/register-personnel", "client"},

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/Nina-99/yottu-api/apperrors"
@@ -71,31 +73,39 @@ func (s *AuthAccountServiceImpl) mintSession(userID, centerID uint, role, email,
 	return raw, nil
 }
 
-// ──────────────────────────────────────────────
-//  CHECK EMAIL
-// ──────────────────────────────────────────────
-
-func (s *AuthAccountServiceImpl) CheckEmail(req request.CheckEmailRequest) (bool, error) {
-	if err := s.Validate.Struct(req); err != nil {
-		return false, err
+// termsVersion returns the server-authoritative Terms version stamped on every
+// accepted registration. It is read from TERMS_VERSION (plain os.Getenv, as in
+// configs/scheduler.go) and defaults to "1" when unset. A client-supplied
+// version is never trusted.
+func termsVersion() string {
+	if v := os.Getenv("TERMS_VERSION"); v != "" {
+		return v
 	}
+	return "1"
+}
 
-	client, _ := s.ClientRepo.FindByEmail(req.Email)
-	if client != nil {
-		return true, nil
+// recordTermsAcceptance persists the server-stamped Terms acceptance for a
+// freshly registered user. AuthAccount is the account-audit record; a classic
+// registration has no provider link, so it writes a "local" one. A failure is
+// returned: an unrecorded acceptance must not masquerade as a successful
+// registration.
+func (s *AuthAccountServiceImpl) recordTermsAcceptance(userType, providerID string, clientID, personnelID, centerID *uint) error {
+	now := time.Now()
+	account := models.AuthAccount{
+		Provider:        "local",
+		ProviderID:      providerID,
+		UserType:        userType,
+		ClientID:        clientID,
+		PersonnelID:     personnelID,
+		BeautyCenterID:  centerID,
+		TermsAcceptedAt: &now,
+		TermsVersion:    termsVersion(),
 	}
-
-	center, _ := s.CenterRepo.FindByEmail(req.Email)
-	if center != nil {
-		return true, nil
+	if err := s.AuthRepo.Create(&account); err != nil {
+		utils.Log.Errorf("[AUTH] Failed to record terms acceptance for %s: %v", userType, err)
+		return err
 	}
-
-	personnel, _ := s.PersonnelRepo.FindByEmail(req.Email)
-	if personnel != nil {
-		return true, nil
-	}
-
-	return false, nil
+	return nil
 }
 
 // ──────────────────────────────────────────────
@@ -227,7 +237,7 @@ func (s *AuthAccountServiceImpl) tryLoginAllTypes(identifier, password string) (
 
 func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResult, error) {
 	if err := s.Validate.Struct(req); err != nil {
-		return AuthResult{}, err
+		return AuthResult{}, fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
 	}
 
 	hashedPassword, err := utils.HashPassword(req.Password)
@@ -246,7 +256,7 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 	case "client":
 		existingEmail, _ := s.ClientRepo.FindByEmail(req.Email)
 		if existingEmail != nil {
-			return AuthResult{}, errors.New("email already exists")
+			return AuthResult{}, apperrors.ErrEmailTaken
 		}
 		usernameVal := req.Username
 		if usernameVal == "" {
@@ -254,7 +264,7 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		}
 		existingUsername, _ := s.ClientRepo.FindByUsername(usernameVal)
 		if existingUsername != nil {
-			return AuthResult{}, errors.New("username already exists")
+			return AuthResult{}, apperrors.ErrUsernameTaken
 		}
 		client := models.Client{
 			FirstName: req.FirstName,
@@ -268,6 +278,9 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		if err := s.ClientRepo.Create(&client); err != nil {
 			return AuthResult{}, err
 		}
+		if err := s.recordTermsAcceptance("client", client.Email, &client.ID, nil, nil); err != nil {
+			return AuthResult{}, err
+		}
 		userID = client.ID
 		centerID = 0
 		email = client.Email
@@ -278,7 +291,7 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 	case "personnel":
 		existingEmail, _ := s.PersonnelRepo.FindByEmail(req.Email)
 		if existingEmail != nil {
-			return AuthResult{}, errors.New("email already exists")
+			return AuthResult{}, apperrors.ErrEmailTaken
 		}
 		personnel := models.Personnel{
 			FirstName: req.FirstName,
@@ -291,6 +304,9 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		if err := s.PersonnelRepo.Create(&personnel); err != nil {
 			return AuthResult{}, err
 		}
+		if err := s.recordTermsAcceptance("personnel", personnel.Email, nil, &personnel.ID, nil); err != nil {
+			return AuthResult{}, err
+		}
 		userID = personnel.ID
 		centerID = personnel.BeautyCenterID
 		email = personnel.Email
@@ -301,7 +317,7 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 	case "beauty_center":
 		existingEmail, _ := s.CenterRepo.FindByEmail(req.Email)
 		if existingEmail != nil {
-			return AuthResult{}, errors.New("email already exists")
+			return AuthResult{}, apperrors.ErrEmailTaken
 		}
 		// Generate unique referral code
 		refCode, err := utils.GenerateReferralCode()
@@ -321,6 +337,9 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 			ReferralCode: refCode,
 		}
 		if err := s.CenterRepo.Create(&center); err != nil {
+			return AuthResult{}, err
+		}
+		if err := s.recordTermsAcceptance("beauty_center", center.Email, nil, nil, &center.ID); err != nil {
 			return AuthResult{}, err
 		}
 		userID = center.ID
@@ -488,13 +507,13 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (Au
 
 func (s *AuthAccountServiceImpl) RegisterPersonnel(req request.RegisterPersonnelRequest) error {
 	if err := s.Validate.Struct(req); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
 	}
 
 	// Check existing email
 	existing, _ := s.PersonnelRepo.FindByEmail(req.Email)
 	if existing != nil {
-		return errors.New("email already exists")
+		return apperrors.ErrEmailTaken
 	}
 
 	hashedPassword, err := utils.HashPassword(req.Password)

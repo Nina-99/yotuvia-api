@@ -11,6 +11,11 @@ type RegisterRequest struct {
 	Address   string  `json:"address" validate:"omitempty,max=255"`
 	Latitude  float64 `json:"latitude" validate:"omitempty"`
 	Longitude float64 `json:"longitude" validate:"omitempty"`
+	// TermsAccepted is the client's assertion that the user was shown the
+	// Terms and accepted them. `required` rejects false, so registration
+	// without an explicit acceptance answers 400. The server stamps the
+	// timestamp and the authoritative version; the client never sends those.
+	TermsAccepted bool `json:"terms_accepted" validate:"required"`
 }
 
 type LoginRequest struct {
@@ -23,10 +28,6 @@ type SocialLoginRequest struct {
 	Provider    string `json:"provider" validate:"required,oneof=google facebook"`
 	AccessToken string `json:"access_token" validate:"required"`
 	UserType    string `json:"user_type" validate:"required,oneof=client personnel beauty_center"`
-}
-
-type CheckEmailRequest struct {
-	Email string `json:"email" validate:"required,email"`
 }
 
 type RegisterPersonnelRequest struct {

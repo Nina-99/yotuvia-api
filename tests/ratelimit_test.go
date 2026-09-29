@@ -111,7 +111,7 @@ func TestRateLimit_PerIdentifierAcrossIPs(t *testing.T) {
 	assert429(t, limiterRequest(r, "3.3.3.3:3", "", victim))
 
 	// Different identifier → its own budget (note "email" is also an identifier
-	// key, exercised here via the check-email shape).
+	// key the limiter extracts from the body).
 	w := limiterRequest(r, "4.4.4.4:4", "", `{"email":"other@test.com"}`)
 	assert.Equal(t, http.StatusOK, w.Code, "a different identifier must be unaffected")
 }

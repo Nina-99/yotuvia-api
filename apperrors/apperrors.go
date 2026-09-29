@@ -29,6 +29,13 @@ var (
 	ErrFileTooLarge = errors.New("file too large")
 	// ErrInsufficientBalance signals the client cannot afford the operation.
 	ErrInsufficientBalance = errors.New("insufficient balance")
+	// ErrEmailTaken signals a registration attempt with an email that is
+	// already registered. Kept distinct from ErrUsernameTaken (and from the
+	// generic ErrConflict) so a client can render a targeted message.
+	ErrEmailTaken = errors.New("email already exists")
+	// ErrUsernameTaken signals a registration attempt with a username that is
+	// already registered.
+	ErrUsernameTaken = errors.New("username already exists")
 )
 
 // MapToHTTP returns the HTTP status code and a client-safe message for err.
@@ -51,6 +58,10 @@ func MapToHTTP(err error) (int, string) {
 		return http.StatusConflict, ErrConflict.Error()
 	case errors.Is(err, ErrInsufficientBalance):
 		return http.StatusConflict, ErrInsufficientBalance.Error()
+	case errors.Is(err, ErrEmailTaken):
+		return http.StatusConflict, ErrEmailTaken.Error()
+	case errors.Is(err, ErrUsernameTaken):
+		return http.StatusConflict, ErrUsernameTaken.Error()
 	case errors.Is(err, ErrFileTooLarge):
 		return http.StatusRequestEntityTooLarge, ErrFileTooLarge.Error()
 	default:

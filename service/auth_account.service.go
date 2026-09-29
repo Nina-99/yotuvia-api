@@ -30,7 +30,6 @@ type AuthAccountService interface {
 	Login(req request.LoginRequest) (AuthResult, error)
 	SocialLogin(req request.SocialLoginRequest) (AuthResult, error)
 	RegisterPersonnel(req request.RegisterPersonnelRequest) error
-	CheckEmail(req request.CheckEmailRequest) (bool, error)
 	// Refresh rotates the presented refresh token (D2): atomic CAS rotation;
 	// reuse of an already-rotated token revokes the entire family.
 	Refresh(ctx context.Context, refreshToken string) (RefreshResult, error)
