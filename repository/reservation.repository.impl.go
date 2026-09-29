@@ -201,6 +201,106 @@ func (r *ReservationRepositoryImpl) PersonnelStatusTotals(personnelID uint, from
 	return row, err
 }
 
+// PersonnelWindowTotals returns the professional's status buckets for BOTH
+// windows — the requested [splitFrom, to) and the immediately preceding
+// [prevFrom, splitFrom) — in ONE statement, plus the centre currency via a
+// scalar subquery. Folding the currency here (instead of a separate
+// CenterCurrency round-trip) is deliberate: the staff metrics endpoint must
+// stay at a CONSTANT number of statements as additive blocks land, and this is
+// the one statement that always returns exactly one row even when both windows
+// are empty. The CASE split is portable SQL (no date functions), so it behaves
+// identically on Postgres and the SQLite test harness.
+func (r *ReservationRepositoryImpl) PersonnelWindowTotals(personnelID, centerID uint, prevFrom, splitFrom, to time.Time) (PersonnelWindowTotalsRow, error) {
+	var row PersonnelWindowTotalsRow
+	err := r.db.Model(&models.Reservation{}).
+		Where("date >= ? AND date < ?", prevFrom, to).
+		Where(personnelMembershipSQL, personnelMembershipArgs(personnelID)...).
+		Select(`COALESCE(SUM(CASE WHEN date >= ? AND status <> 'CANCELLED' THEN 1 ELSE 0 END), 0) AS appointments,
+			       COALESCE(SUM(CASE WHEN date >= ? AND status = 'COMPLETED' THEN 1 ELSE 0 END), 0) AS completed,
+			       COALESCE(SUM(CASE WHEN date >= ? AND status = 'CANCELLED' THEN 1 ELSE 0 END), 0) AS cancelled,
+			       COALESCE(SUM(CASE WHEN date >= ? AND status = 'NO_SHOW' THEN 1 ELSE 0 END), 0) AS no_show,
+			       COALESCE(SUM(CASE WHEN date < ? AND status <> 'CANCELLED' THEN 1 ELSE 0 END), 0) AS prev_appointments,
+			       COALESCE(SUM(CASE WHEN date < ? AND status = 'COMPLETED' THEN 1 ELSE 0 END), 0) AS prev_completed,
+			       COALESCE(SUM(CASE WHEN date < ? AND status = 'CANCELLED' THEN 1 ELSE 0 END), 0) AS prev_cancelled,
+			       COALESCE(SUM(CASE WHEN date < ? AND status = 'NO_SHOW' THEN 1 ELSE 0 END), 0) AS prev_no_show,
+			       COALESCE((SELECT currency FROM beauty_centers WHERE id = ? AND deleted_at IS NULL LIMIT 1), '') AS currency`,
+			splitFrom, splitFrom, splitFrom, splitFrom,
+			splitFrom, splitFrom, splitFrom, splitFrom,
+			centerID).
+		Scan(&row).Error
+	return row, err
+}
+
+// personnelSegmentRow is one (reservation, service line) join row used to
+// rebuild a reservation with its ordered lines in a single statement. The line
+// columns are pointers: a legacy line-less reservation yields one row with NULL
+// line columns and is handed to the kernel as a reservation with no lines, so
+// its envelope fallback still blocks exactly as before.
+type personnelSegmentRow struct {
+	ReservationID uint      `gorm:"column:reservation_id"`
+	LeadID        uint      `gorm:"column:lead_id"`
+	Date          time.Time `gorm:"column:date"`
+	StartTime     string    `gorm:"column:start_time"`
+	EndTime       string    `gorm:"column:end_time"`
+	LineID        *uint     `gorm:"column:line_id"`
+	LineDuration  *int      `gorm:"column:line_duration"`
+	LinePersonnel *uint     `gorm:"column:line_personnel"`
+}
+
+// PersonnelBookedReservations loads the professional's bookable reservations in
+// [from, to) with their ordered lines, in ONE statement. The membership filter
+// runs inside a derived table (the shared personnelMembershipSQL, unchanged and
+// unqualified) so joining reservation_services afterwards cannot make its bare
+// `personnel_id`/`id` ambiguous. Non-CANCELLED only — the same busy definition
+// the availability read path uses — and only rows that involve this
+// professional as derived lead or via a service line.
+func (r *ReservationRepositoryImpl) PersonnelBookedReservations(personnelID, centerID uint, from, to time.Time) ([]models.Reservation, error) {
+	var rows []personnelSegmentRow
+	inner := "SELECT id, personnel_id, date, start_time, end_time, beauty_center_id, status " +
+		"FROM reservations WHERE reservations.deleted_at IS NULL AND " + personnelMembershipSQL
+	err := r.db.
+		Table("("+inner+") AS r", personnelMembershipArgs(personnelID)...).
+		Select(`r.id AS reservation_id, r.personnel_id AS lead_id, r.date AS date,
+			       r.start_time AS start_time, r.end_time AS end_time,
+			       reservation_services.id AS line_id,
+			       reservation_services.duration AS line_duration,
+			       reservation_services.personnel_id AS line_personnel`).
+		Joins("LEFT JOIN reservation_services ON reservation_services.reservation_id = r.id AND reservation_services.deleted_at IS NULL").
+		Where("r.beauty_center_id = ? AND r.status <> ? AND r.date >= ? AND r.date < ?", centerID, "CANCELLED", from, to).
+		Order("r.id ASC, reservation_services.id ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]models.Reservation, 0, len(rows))
+	for _, row := range rows {
+		if len(out) == 0 || out[len(out)-1].ID != row.ReservationID {
+			out = append(out, models.Reservation{
+				ID:          row.ReservationID,
+				PersonnelID: row.LeadID,
+				Date:        row.Date,
+				StartTime:   row.StartTime,
+				EndTime:     row.EndTime,
+			})
+		}
+		if row.LineID == nil {
+			continue
+		}
+		line := models.ReservationService{
+			ID:            *row.LineID,
+			ReservationID: row.ReservationID,
+			PersonnelID:   row.LinePersonnel,
+		}
+		if row.LineDuration != nil {
+			line.Duration = *row.LineDuration
+		}
+		last := &out[len(out)-1]
+		last.ReservationServices = append(last.ReservationServices, line)
+	}
+	return out, nil
+}
+
 // PersonnelRevenueByDay is the per-day twin of the admin RevenueByDay, but
 // attributed PER LINE with the shared personnelRevenueExpr (the Phase 2b rule),
 // scoped to the acting professional's lines. COMPLETED only. ONE query.

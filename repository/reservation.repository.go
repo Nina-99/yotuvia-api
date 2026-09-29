@@ -17,6 +17,23 @@ type PersonnelStatusTotalsRow struct {
 	NoShow       int64 `gorm:"column:no_show"`
 }
 
+// PersonnelWindowTotalsRow is one round-trip carrying BOTH the requested
+// window's status buckets and the immediately preceding window's, plus the
+// centre currency. The previous period exists so the client can show deltas;
+// folding all of it (and the currency) into one statement keeps the metrics
+// endpoint's query budget constant instead of growing one query per concern.
+type PersonnelWindowTotalsRow struct {
+	Appointments     int64  `gorm:"column:appointments"`
+	Completed        int64  `gorm:"column:completed"`
+	Cancelled        int64  `gorm:"column:cancelled"`
+	NoShow           int64  `gorm:"column:no_show"`
+	PrevAppointments int64  `gorm:"column:prev_appointments"`
+	PrevCompleted    int64  `gorm:"column:prev_completed"`
+	PrevCancelled    int64  `gorm:"column:prev_cancelled"`
+	PrevNoShow       int64  `gorm:"column:prev_no_show"`
+	Currency         string `gorm:"column:currency"`
+}
+
 type ReservationRepository interface {
 	Create(reservation *models.Reservation) error
 	Update(reservation *models.Reservation) error
@@ -45,6 +62,19 @@ type ReservationRepository interface {
 	// excludes CANCELLED (the admin appointmentsSeries definition), plus the
 	// completed/cancelled/no_show status buckets. One query.
 	PersonnelStatusTotals(personnelID uint, from, to time.Time) (PersonnelStatusTotalsRow, error)
+	// PersonnelWindowTotals returns the professional's status buckets for BOTH
+	// the requested half-open window [splitFrom, to) and the preceding
+	// half-open window [prevFrom, splitFrom), in ONE statement plus the centre
+	// currency. It replaces the separate status-totals and currency reads so the
+	// metrics endpoint stays at a constant query budget.
+	PersonnelWindowTotals(personnelID, centerID uint, prevFrom, splitFrom, to time.Time) (PersonnelWindowTotalsRow, error)
+	// PersonnelBookedReservations loads, in ONE statement, every non-CANCELLED
+	// reservation of the centre in [from, to) that involves the professional
+	// (as derived lead or via a service line), reconstructing each reservation
+	// with its ordered lines so the shared segment kernel can derive the
+	// professional's own booked time. Legacy line-less rows are returned with no
+	// lines (LEFT JOIN) so the kernel's envelope fallback still applies.
+	PersonnelBookedReservations(personnelID, centerID uint, from, to time.Time) ([]models.Reservation, error)
 	// PersonnelRevenueByDay returns the professional's per-day COMPLETED
 	// revenue, attributed PER LINE via the shared personnelRevenueExpr. One
 	// query.

@@ -1627,18 +1627,45 @@ func (s *ReservationServiceImpl) FindByPersonnelID(personnelID uint, from, to *t
 //     professional's lines.
 //
 // All series cover the requested range with ZERO-FILLED gaps (the client
-// renders gaps as zero). Four aggregation queries plus one centre-currency
-// lookup — constant, no N+1. totals.revenue is the exact sum of the revenue
-// series, so no extra revenue-total query is issued.
+// renders gaps as zero). Two additive blocks were added on top of the frozen
+// shape:
+//
+//   - previous: the SAME metrics (totals only) for the immediately preceding
+//     window of the SAME length, so the client can show deltas;
+//   - occupancy: the professional's booked minutes over the CENTRE's scheduled
+//     minutes (an approximation — see personnelOccupancy).
+//
+// Query budget stays CONSTANT (never per day, never per booking): one
+// window-totals+currency statement, a revenue statement over the union window,
+// an appointments statement, a top-services statement, a single booked-
+// reservations statement and a single working-hours statement. totals.revenue
+// is the exact sum of the revenue series, so no extra revenue-total query is
+// issued.
 func (s *ReservationServiceImpl) PersonnelMetrics(personnelID, centerID uint, from, to time.Time) (*response.PersonnelMetricsResponse, error) {
 	fromUTC := startOfDayUTC(from)
 	toUTC := startOfDayUTC(to).AddDate(0, 0, 1) // inclusive [from, to] → half-open
 
-	totals, err := s.ReservationRepository.PersonnelStatusTotals(personnelID, fromUTC, toUTC)
+	// PREVIOUS-RANGE ARITHMETIC (inclusive, day-count based):
+	//
+	//	n        = (to - from) + 1        = toUTC.Sub(fromUTC) in days
+	//	previous = [from - n, from - 1]   = [prevFromUTC, fromUTC)
+	//
+	// The previous window therefore has exactly n days and ends the day before
+	// `from` starts. UTC has no DST, so the day count from the duration is exact.
+	days := int(toUTC.Sub(fromUTC).Hours() / 24)
+	if days < 0 {
+		days = 0
+	}
+	prevFromUTC := fromUTC.AddDate(0, 0, -days)
+	prevToUTC := fromUTC // exclusive; the previous window's last inclusive day is from-1
+
+	window, err := s.ReservationRepository.PersonnelWindowTotals(personnelID, centerID, prevFromUTC, fromUTC, toUTC)
 	if err != nil {
 		return nil, err
 	}
-	revenueRows, err := s.ReservationRepository.PersonnelRevenueByDay(personnelID, fromUTC, toUTC)
+	// The revenue read spans the UNION window so the previous total is derived
+	// from the same statement, not an extra revenue round-trip.
+	revenueRows, err := s.ReservationRepository.PersonnelRevenueByDay(personnelID, prevFromUTC, toUTC)
 	if err != nil {
 		return nil, err
 	}
@@ -1653,9 +1680,13 @@ func (s *ReservationServiceImpl) PersonnelMetrics(personnelID, centerID uint, fr
 
 	revenueMap := make(map[string]float64, len(revenueRows))
 	revenueTotal := 0.0
+	prevRevenueTotal := 0.0
 	for _, row := range revenueRows {
-		key := row.Date.Format("2006-01-02")
-		revenueMap[key] += row.Value
+		if row.Date.Before(fromUTC) {
+			prevRevenueTotal += row.Value
+			continue
+		}
+		revenueMap[row.Date.Format("2006-01-02")] += row.Value
 		revenueTotal += row.Value
 	}
 	appointmentMap := make(map[string]int64, len(appointmentRows))
@@ -1682,7 +1713,7 @@ func (s *ReservationServiceImpl) PersonnelMetrics(personnelID, centerID uint, fr
 		})
 	}
 
-	currency, err := s.resolveCenterCurrency(centerID)
+	occupancy, err := s.personnelOccupancy(personnelID, centerID, fromUTC, toUTC)
 	if err != nil {
 		return nil, err
 	}
@@ -1693,27 +1724,109 @@ func (s *ReservationServiceImpl) PersonnelMetrics(personnelID, centerID uint, fr
 			To:   startOfDayUTC(to).Format("2006-01-02"),
 		},
 		Totals: response.PersonnelMetricsTotals{
-			Appointments: int(totals.Appointments),
-			Completed:    int(totals.Completed),
-			Cancelled:    int(totals.Cancelled),
-			NoShow:       int(totals.NoShow),
+			Appointments: int(window.Appointments),
+			Completed:    int(window.Completed),
+			Cancelled:    int(window.Cancelled),
+			NoShow:       int(window.NoShow),
 			Revenue:      revenueTotal,
-			Currency:     currency,
+			Currency:     window.Currency,
 		},
 		RevenueSeries:      revenueSeries,
 		AppointmentsSeries: appointmentsSeries,
 		TopServices:        topServices,
+		Previous: response.PersonnelMetricsPrevious{
+			Range: response.PersonnelMetricsRange{
+				From: prevFromUTC.Format("2006-01-02"),
+				To:   prevToUTC.AddDate(0, 0, -1).Format("2006-01-02"),
+			},
+			Totals: response.PersonnelMetricsTotals{
+				Appointments: int(window.PrevAppointments),
+				Completed:    int(window.PrevCompleted),
+				Cancelled:    int(window.PrevCancelled),
+				NoShow:       int(window.PrevNoShow),
+				Revenue:      prevRevenueTotal,
+				Currency:     window.Currency,
+			},
+		},
+		Occupancy: occupancy,
 	}, nil
 }
 
-// resolveCenterCurrency returns the ISO currency of the acting professional's
-// centre. A missing centre claim or a missing centre yields "" rather than an
-// error — the metrics never fail on a display field. One single-column query.
-func (s *ReservationServiceImpl) resolveCenterCurrency(centerID uint) (string, error) {
-	if centerID == 0 {
-		return "", nil
+// personnelOccupancy computes the acting professional's utilisation over
+// [fromUTC, toUTC):
+//
+//   - booked_minutes: the professional's OWN time, derived from their segments
+//     by the SAME shared kernel the admin dashboard occupancy uses
+//     (reservationBookedMinutes → models.DeriveReservationSegments). It is
+//     never the reservation envelope, so a non-lead line professional is
+//     credited only their own minutes.
+//   - available_minutes: the CENTRE's scheduled minutes for every weekday in
+//     range. The schema has NO per-professional schedule, so the centre's
+//     working hours are the APPROXIMATION used as the denominator — this
+//     OVERSTATES availability for part-timers. That is why the response also
+//     carries basis="center_hours", so the client can label the figure honestly
+//     rather than present it as a personal contract.
+//
+// BOOKED RULE — non-CANCELLED: a booking occupies the professional's calendar
+// for as long as it is not cancelled (PENDING/CONFIRMED/COMPLETED/NO_SHOW all
+// block the availability read path). Using COMPLETED only would make occupancy
+// disagree with what the agenda actually shows as taken. The rate can exceed
+// 100 for overlapping out-of-schedule rows, matching the admin dashboard.
+//
+// ZERO-HOURS CASE: when there are no working hours in range the denominator is
+// 0. Rather than divide (NaN/Inf) or fabricate a rate, available and rate_pct
+// are returned as 0 (a JSON-safe "no scheduled availability" signal); the raw
+// booked minutes are still reported truthfully. The client can detect
+// available_minutes == 0 and render "no schedule" instead of "0%".
+func (s *ReservationServiceImpl) personnelOccupancy(personnelID, centerID uint, fromUTC, toUTC time.Time) (response.PersonnelOccupancy, error) {
+	occ := response.PersonnelOccupancy{Basis: response.PersonnelOccupancyLabel}
+
+	reservations, err := s.ReservationRepository.PersonnelBookedReservations(personnelID, centerID, fromUTC, toUTC)
+	if err != nil {
+		return occ, err
 	}
-	return s.ReservationRepository.CenterCurrency(centerID)
+	for i := range reservations {
+		for _, booking := range reservationBookedMinutes(&reservations[i]) {
+			if booking.personnelID == personnelID {
+				occ.BookedMinutes += booking.minutes
+			}
+		}
+	}
+
+	available, err := s.centerAvailableMinutes(centerID, fromUTC, toUTC)
+	if err != nil {
+		return occ, err
+	}
+	occ.AvailableMinutes = available
+	if available > 0 {
+		occ.RatePct = round2(float64(occ.BookedMinutes) / float64(available) * 100)
+	}
+	return occ, nil
+}
+
+// centerAvailableMinutes sums the centre's working-block minutes for each day
+// in [fromUTC, toUTC). ONE working-hours read for all seven weekdays, so the
+// cost does not scale with the range length. A nil center repository (the
+// sweeps wiring) or a centre with no schedule yields 0.
+func (s *ReservationServiceImpl) centerAvailableMinutes(centerID uint, fromUTC, toUTC time.Time) (int, error) {
+	if s.CenterRepository == nil {
+		return 0, nil
+	}
+	schedules, err := s.CenterRepository.FindWorkingHoursForCenters([]uint{centerID}, []int{0, 1, 2, 3, 4, 5, 6})
+	if err != nil {
+		return 0, err
+	}
+	byWeekday := make(map[time.Weekday]int, 7)
+	for _, wh := range schedules {
+		if minutes, ok := slotMinutes(wh.StartTime, wh.EndTime); ok {
+			byWeekday[time.Weekday(wh.DayOfWeek)] += minutes
+		}
+	}
+	total := 0
+	for d := fromUTC; d.Before(toUTC); d = d.AddDate(0, 0, 1) {
+		total += byWeekday[d.UTC().Weekday()]
+	}
+	return total, nil
 }
 
 // ──────────────────────────────────────────────

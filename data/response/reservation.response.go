@@ -61,15 +61,48 @@ type PersonnelTopService struct {
 	Count       int     `json:"count"`
 }
 
+// PersonnelMetricsPrevious is the same-range-length window that immediately
+// precedes the requested range, used by the client to compute per-metric deltas
+// ("+12% vs the previous period"). Only the totals travel: the series would be
+// duplicated payload for no client use. Currency is the same centre's code.
+type PersonnelMetricsPrevious struct {
+	Range  PersonnelMetricsRange  `json:"range"`
+	Totals PersonnelMetricsTotals `json:"totals"`
+}
+
+// PersonnelOccupancyLabel is the declared basis of the availability
+// denominator. The schema has no per-professional schedule, so the CENTRE's
+// working hours are the shared denominator — an APPROXIMATION for part-timers.
+// The literal is exposed so the client can label the figure honestly instead of
+// presenting a centre-based denominator as a personal contract.
+const PersonnelOccupancyLabel = "center_hours"
+
+// PersonnelOccupancy is the acting professional's utilisation over the
+// requested range. AvailableMinutes is the centre's scheduled minutes for the
+// range (approximation: no per-professional schedule exists). BookedMinutes is
+// the professional's OWN booked time, derived from their segments via the
+// shared kernel. RatePct is round2(booked/available*100) and is 0 (never NaN)
+// when there are no working hours in range. Overlapping out-of-schedule rows
+// can push the rate above 100, exactly as the admin dashboard occupancy does.
+type PersonnelOccupancy struct {
+	AvailableMinutes int     `json:"available_minutes"`
+	BookedMinutes    int     `json:"booked_minutes"`
+	RatePct          float64 `json:"rate_pct"`
+	Basis            string  `json:"basis"`
+}
+
 // PersonnelMetricsResponse is the frozen wire shape of GET
 // /api/reservation/me/metrics. All series cover the requested inclusive range
-// with zero-filled gaps; arrays are never null.
+// with zero-filled gaps; arrays are never null. Previous and Occupancy are
+// additive blocks; the original fields keep their names and meaning.
 type PersonnelMetricsResponse struct {
-	Range              PersonnelMetricsRange  `json:"range"`
-	Totals             PersonnelMetricsTotals `json:"totals"`
-	RevenueSeries      []SeriesDayDTO         `json:"revenue_series"`
-	AppointmentsSeries []SeriesDayDTO         `json:"appointments_series"`
-	TopServices        []PersonnelTopService  `json:"top_services"`
+	Range              PersonnelMetricsRange    `json:"range"`
+	Totals             PersonnelMetricsTotals   `json:"totals"`
+	RevenueSeries      []SeriesDayDTO           `json:"revenue_series"`
+	AppointmentsSeries []SeriesDayDTO           `json:"appointments_series"`
+	TopServices        []PersonnelTopService    `json:"top_services"`
+	Previous           PersonnelMetricsPrevious `json:"previous"`
+	Occupancy          PersonnelOccupancy       `json:"occupancy"`
 }
 
 type ReservationResponse struct {
