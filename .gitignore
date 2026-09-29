@@ -18,6 +18,7 @@ vendor/
 # Environment files
 .env
 .env.*
+!.env.example
 
 # Local data directories
 postgres_data/
