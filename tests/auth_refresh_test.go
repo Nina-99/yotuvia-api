@@ -34,7 +34,7 @@ func authRefreshModels() []interface{} {
 		&models.PostLike{}, &models.PunchHistory{}, &models.Reservation{},
 		&models.ReservationService{}, &models.Review{}, &models.Service{},
 		&models.SocialMedia{}, &models.WorkingHour{}, &models.PersonnelInvitation{}, &models.Notification{}, &models.PushDevice{},
-		&models.UserSession{},
+		&models.UserSession{}, &models.AuthToken{},
 	}
 }
 
@@ -64,7 +64,7 @@ func authRefreshRouter(t *testing.T, db *gorm.DB) *gin.Engine {
 	validate := validator.New()
 	r := gin.New()
 	rg := r.Group("/api")
-	router.AuthAccountRoutes(rg, db, validate)
+	router.AuthAccountRoutes(rg, db, validate, utils.NewFakeMailer())
 	return r
 }
 

@@ -64,7 +64,8 @@ func TestAuthService_Login(t *testing.T) {
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	// Instanciamos el servicio unificado
 	authService := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo,
-		repository.NewUserSessionRepositoryImpl(db), nil, validate)
+		repository.NewUserSessionRepositoryImpl(db), repository.NewAuthTokenRepositoryImpl(db),
+		utils.NewFakeMailer(), nil, validate)
 	t.Run("Classic Login Success (Client)", func(t *testing.T) {
 		req := request.LoginRequest{
 			Identifier: "juan@perez.com", // Buscamos por email

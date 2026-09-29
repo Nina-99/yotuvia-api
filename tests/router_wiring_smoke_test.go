@@ -27,7 +27,7 @@ func fullWiringRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 	r.Use(gin.Recovery())
 	api := r.Group("/api")
 	{
-		router.AuthAccountRoutes(api, db, validate)
+		router.AuthAccountRoutes(api, db, validate, utils.NewFakeMailer())
 		router.AvailabilityRoutes(api, db, validate)
 		router.BeautyCenterRoutes(api, db, validate)
 		router.BeautyCenterImageRoutes(api, db, validate)
