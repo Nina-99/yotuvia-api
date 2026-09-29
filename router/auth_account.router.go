@@ -44,8 +44,8 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	ctrl := controller.NewAuthAccountController(svc)
 
 	// One limiter shared by every auth route below so a single attacker burns a
-	// single budget across login/register/social/refresh/logout and the email
-	// flows. 429 + Retry-After on throttle; limits are env-configurable
+	// single budget across login/register/social/refresh/logout/logout-all and
+	// the email flows. 429 + Retry-After on throttle; limits are env-configurable
 	// (RATE_LIMIT_*) with production defaults.
 	authLimiter := middleware.RateLimit(middleware.RateLimitConfigFromEnv())
 
@@ -58,6 +58,7 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	authAccount.POST("/register", ctrl.Register)
 	authAccount.POST("/refresh", ctrl.Refresh)
 	authAccount.POST("/logout", middleware.JWTAuthMiddleware(), ctrl.Logout)
+	authAccount.POST("/logout-all", middleware.JWTAuthMiddleware(), ctrl.LogoutAll)
 	authAccount.POST("/verify-email", ctrl.VerifyEmail)
 	authAccount.POST("/resend-verification", ctrl.ResendVerification)
 	authAccount.POST("/forgot-password", ctrl.ForgotPassword)

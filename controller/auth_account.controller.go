@@ -121,6 +121,24 @@ func (c *AuthAccountController) Logout(ctx *gin.Context) {
 	ctx.JSON(http.StatusNoContent, nil)
 }
 
+// LogoutAll revokes EVERY session of the authenticated actor across every
+// family and device, INCLUDING the calling session. The actor comes from the
+// JWT claims, never the body. The response is still 200: "signed out
+// everywhere" means this device too, so the client is expected to discard its
+// local access/refresh tokens.
+func (c *AuthAccountController) LogoutAll(ctx *gin.Context) {
+	userID := ctx.GetUint("clientID")
+	role := ctx.GetString("role")
+
+	if err := c.authAccountService.LogoutAll(ctx.Request.Context(), userID, role); err != nil {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "signed out of all sessions"})
+}
+
 // VerifyEmail redeems a verification token: 200 on success, 400 for an
 // unknown/expired/used token (uniform message).
 func (c *AuthAccountController) VerifyEmail(ctx *gin.Context) {

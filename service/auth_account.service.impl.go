@@ -696,6 +696,22 @@ func (s *AuthAccountServiceImpl) Logout(ctx context.Context, rawToken string) er
 	return s.SessionRepo.RevokeByHash(ctx, utils.HashRefreshToken(rawToken))
 }
 
+// LogoutAll revokes every session of the acting account across every family
+// and device. The actor is identified by the JWT claims (user_id + role), never
+// by the request body. It also revokes the calling session: "sign out
+// everywhere" is least surprising when it means everywhere, and the caller is
+// expected to clear its local tokens on the 200 response. role is required
+// because user_id is polymorphic (client #5 and center #5 share the numeric id),
+// so revocation must not leak to another account type.
+func (s *AuthAccountServiceImpl) LogoutAll(ctx context.Context, userID uint, role string) error {
+	if userID == 0 || role == "" {
+		// The JWT middleware guarantees both; a missing claim is not a valid
+		// identity and must never fall through to a broad update.
+		return apperrors.ErrUnauthorized
+	}
+	return s.SessionRepo.RevokeAllForUser(ctx, userID, role)
+}
+
 // ──────────────────────────────────────────────
 //  EMAIL VERIFICATION
 // ──────────────────────────────────────────────

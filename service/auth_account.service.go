@@ -35,6 +35,11 @@ type AuthAccountService interface {
 	Refresh(ctx context.Context, refreshToken string) (RefreshResult, error)
 	// Logout revokes the session presenting the refresh token (D3). Idempotent.
 	Logout(ctx context.Context, refreshToken string) error
+	// LogoutAll revokes EVERY session of the acting account across every
+	// family and device — including the session that made the call. The caller
+	// is responsible for discarding its local tokens; the endpoint still
+	// answers 200.
+	LogoutAll(ctx context.Context, userID uint, role string) error
 
 	// VerifyEmail redeems an email-verification token: single-use and
 	// time-bounded. Invalid/expired/used tokens all return ErrInvalidToken.
