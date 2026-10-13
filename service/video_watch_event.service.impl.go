@@ -2,10 +2,11 @@ package service
 
 import (
 	"errors"
+	"time"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
 )
@@ -215,14 +216,13 @@ func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit in
 		watched[w.FeedPostID] = true
 	}
 
-	// 5. Score each post
-	type scored struct {
-		ID    uint
-		Score float64
-	}
+	// 5. Score each candidate: affinity + engagement + recency + a bounded
+	// exploration jitter, then rank with a same-center diversity cap.
+	now := time.Now()
+	seed := now.UnixNano()
 
-	buildScored := func(applyExclusion bool) []scored {
-		var out []scored
+	buildCandidates := func(applyExclusion bool) []RankCandidate {
+		out := make([]RankCandidate, 0, len(allPosts))
 		for _, post := range allPosts {
 			if !post.IsActive {
 				continue
@@ -244,40 +244,40 @@ func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit in
 				score += personnelScore[*post.PersonnelID]
 			}
 
-			// Boost promos slightly
+			// Engagement (attention + booking intent) and recency decay.
+			score += EngagementScore(post.ViewsCount, post.BookTaps)
+			score += RecencyScore(post.CreatedAt, now)
+
+			// Promos get a small nudge, mirroring the previous +0.5.
 			if post.IsPromo {
-				score += 0.5
+				score += PromoRankBoost
 			}
 
-			// Boost recent content
-			// (Recency is handled by the DB ordering, but we add a small tiebreaker)
+			// Exploration: a bounded, seed-deterministic jitter that reshuffles
+			// near-ties so the feed never looks frozen in its DB order.
+			score += ExplorationScale * ExplorationScore(seed, post.ID)
 
-			out = append(out, scored{ID: post.ID, Score: score})
+			out = append(out, RankCandidate{
+				ID:       post.ID,
+				CenterID: post.BeautyCenterID,
+				Score:    score,
+			})
 		}
 		return out
 	}
 
-	scoredPosts := buildScored(true)
+	candidates := buildCandidates(true)
 	// Never ship an empty feed just because the client has watched everything:
 	// fall back to the unexcluded ranking so the endpoint still returns content.
-	if len(scoredPosts) == 0 {
-		scoredPosts = buildScored(false)
+	if len(candidates) == 0 {
+		candidates = buildCandidates(false)
 	}
 
-	// 6. Sort by score descending (simple bubble sort for small N)
-	for i := 0; i < len(scoredPosts); i++ {
-		for j := i + 1; j < len(scoredPosts); j++ {
-			if scoredPosts[j].Score > scoredPosts[i].Score {
-				scoredPosts[i], scoredPosts[j] = scoredPosts[j], scoredPosts[i]
-			}
-		}
-	}
+	orderedIDs := RankByScore(candidates, MaxSameCenterRun)
 
-	// 7. Return top N IDs
-	result := make([]uint, 0, limit)
-	for i := 0; i < len(scoredPosts) && i < limit; i++ {
-		result = append(result, scoredPosts[i].ID)
+	// 6. Return top N IDs.
+	if limit > 0 && len(orderedIDs) > limit {
+		orderedIDs = orderedIDs[:limit]
 	}
-
-	return result, nil
+	return orderedIDs, nil
 }
