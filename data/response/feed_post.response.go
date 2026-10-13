@@ -39,4 +39,9 @@ type FeedPostResponse struct {
 	IsLiked       bool `json:"is_liked"`
 	IsSaved       bool `json:"is_saved"`
 	CommentsCount int  `json:"comments_count"`
+
+	// IsBoosted marks a post served through the CPM auction (a paid promoted
+	// slot). Additive: existing clients ignore it, and the feed must always
+	// label a true value as "Promocionado" wherever it renders.
+	IsBoosted bool `json:"is_boosted"`
 }

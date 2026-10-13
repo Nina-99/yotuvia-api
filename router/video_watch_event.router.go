@@ -32,7 +32,18 @@ func VideoWatchEventRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator
 		repository.NewPushDeviceRepositoryImpl(db),
 	)
 	feedSvc := service.NewFeedPostServiceImpl(feedRepo, bcRepo, personnelRepo, serviceRepo, likeRepo, savedRepo, repoComment, followRepo, notifSvc, validate)
-	ctrl := controller.NewVideoWatchEventController(watchSvc, feedSvc)
+
+	// Boost (CPM promotion). The auction holds budgets through the token account
+	// service, so it is wired exactly like the token routes.
+	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
+	topUpRepo := repository.NewTokenTopUpRepositoryImpl(db)
+	missionRepo := repository.NewTokenMissionRepositoryImpl(db)
+	missionSvc := service.NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
+	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, bcRepo, missionSvc, notifSvc)
+	missionSvc = service.NewTokenMissionServiceImpl(missionRepo, accountSvc, accountRepo)
+	boostSvc := service.NewBoostServiceImpl(repository.NewBoostCampaignRepositoryImpl(db), feedRepo, accountSvc)
+
+	ctrl := controller.NewVideoWatchEventController(watchSvc, feedSvc, boostSvc)
 
 	events := rg.Group("/video-watch-events")
 	{

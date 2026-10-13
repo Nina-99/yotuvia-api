@@ -95,3 +95,54 @@ func TestCostPerImpressionMilli_RoundsUp(t *testing.T) {
 		t.Fatalf("1.5 milli/impression must round up to 2, got %d", got)
 	}
 }
+
+func TestMergePromotedIDs_SpacesOnePerDensity(t *testing.T) {
+	ordered, promoted := MergePromotedIDs([]uint{1, 2, 3, 4, 5, 6}, []uint{99}, 5)
+	want := []uint{1, 2, 3, 4, 99, 5, 6}
+	if len(ordered) != len(want) {
+		t.Fatalf("length: want %d, got %d (%v)", len(want), len(ordered), ordered)
+	}
+	for i := range want {
+		if ordered[i] != want[i] {
+			t.Fatalf("position %d: want %d, got %d (%v)", i, want[i], ordered[i], ordered)
+		}
+	}
+	if !promoted[99] {
+		t.Fatal("99 must be marked promoted")
+	}
+}
+
+func TestMergePromotedIDs_MovesOrganicDuplicateWithoutDuplicating(t *testing.T) {
+	ordered, promoted := MergePromotedIDs([]uint{1, 2, 3}, []uint{2}, 5)
+	if len(ordered) != 3 {
+		t.Fatalf("length must stay 3, got %d (%v)", len(ordered), ordered)
+	}
+	seen := map[uint]int{}
+	for _, id := range ordered {
+		seen[id]++
+	}
+	if seen[2] != 1 {
+		t.Fatalf("promoted id must appear exactly once: %v", ordered)
+	}
+	if !promoted[2] {
+		t.Fatal("2 must be marked promoted")
+	}
+}
+
+func TestMergePromotedIDs_RespectsDensityBetweenPromoted(t *testing.T) {
+	ranked := []uint{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+	ordered, _ := MergePromotedIDs(ranked, []uint{90, 91}, 5)
+
+	positions := []int{}
+	for i, id := range ordered {
+		if id == 90 || id == 91 {
+			positions = append(positions, i+1)
+		}
+	}
+	if len(positions) != 2 {
+		t.Fatalf("both promoted ids must appear: %v", ordered)
+	}
+	if positions[1]-positions[0] < 5 {
+		t.Fatalf("promoted items must be >= density apart: %v", positions)
+	}
+}

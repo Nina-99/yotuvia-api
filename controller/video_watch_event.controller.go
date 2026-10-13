@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/Nina-99/yottu-api/data/request"
 	"github.com/Nina-99/yottu-api/data/response"
@@ -9,15 +10,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// boostSlotDensity is how many organic items sit between two promoted slots:
+// one promoted item per N positions (an ad-density cap so the feed never turns
+// into a billboard).
+const boostSlotDensity = 5
+
 type VideoWatchEventController struct {
 	watchEventService service.VideoWatchEventService
 	feedPostService   service.FeedPostService
+	boostService      service.BoostService
 }
 
-func NewVideoWatchEventController(watchSvc service.VideoWatchEventService, feedSvc service.FeedPostService) *VideoWatchEventController {
+func NewVideoWatchEventController(watchSvc service.VideoWatchEventService, feedSvc service.FeedPostService, boostSvc service.BoostService) *VideoWatchEventController {
 	return &VideoWatchEventController{
 		watchEventService: watchSvc,
 		feedPostService:   feedSvc,
+		boostService:      boostSvc,
 	}
 }
 
@@ -72,13 +80,48 @@ func (c *VideoWatchEventController) GetPersonalizedFeed(ctx *gin.Context) {
 		return
 	}
 
-	// Collect posts in ranked order
-	var posts []response.FeedPostResponse
-	for _, id := range ids {
+	// Promoted slots: auction over eligible campaigns, capped at one per
+	// boostSlotDensity positions. Only posts on this page (active) can win, and
+	// each served slot is settled against its campaign's budget.
+	promotedIDs := c.servePromotedPosts(ids, postMap)
+
+	ordered, promotedSet := service.MergePromotedIDs(ids, promotedIDs, boostSlotDensity)
+
+	// Collect posts in ranked order, labelling the promoted ones.
+	posts := make([]response.FeedPostResponse, 0, len(ordered))
+	for _, id := range ordered {
 		if p, ok := postMap[id]; ok {
+			p.IsBoosted = promotedSet[id]
 			posts = append(posts, p)
 		}
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"posts": posts, "total": len(posts)})
+}
+
+// servePromotedPosts runs the boost auction for one page and returns the
+// promoted post ids that are actually renderable here (present in `postMap`).
+// Settlement of one impression per served slot is a best-effort side effect; a
+// nil boost service (feature off) yields no promoted slots.
+func (c *VideoWatchEventController) servePromotedPosts(ids []uint, postMap map[uint]response.FeedPostResponse) []uint {
+	if c.boostService == nil {
+		return nil
+	}
+	slots := len(ids) / boostSlotDensity
+	if slots <= 0 {
+		return nil
+	}
+	winners, err := c.boostService.SelectWinners(time.Now(), slots, 0)
+	if err != nil {
+		return nil
+	}
+	promoted := make([]uint, 0, len(winners))
+	for _, winner := range winners {
+		if _, ok := postMap[winner.PostID]; !ok {
+			continue
+		}
+		promoted = append(promoted, winner.PostID)
+		_ = c.boostService.SettleImpressions(winner.CampaignID, 1, winner.PriceCPMMilli)
+	}
+	return promoted
 }

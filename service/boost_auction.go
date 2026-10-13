@@ -85,3 +85,53 @@ func CostPerImpressionMilli(priceCPMMilli int64) int64 {
 	}
 	return (priceCPMMilli + 999) / 1000
 }
+
+// MergePromotedIDs weaves promoted post ids into a ranked feed so that at most
+// one promoted item appears every `density` positions, preserving the organic
+// order otherwise. A promoted id that also occurs organically is MOVED to its
+// promoted slot (never duplicated). When every organic item is exhausted any
+// remaining promoted ids are appended, so a paid slot is never silently
+// dropped. Returns the new order plus the set of ids that are promoted (for the
+// caller to label).
+func MergePromotedIDs(ranked, promoted []uint, density int) ([]uint, map[uint]bool) {
+	if density <= 0 {
+		density = 5
+	}
+
+	promotedSet := make(map[uint]bool, len(promoted))
+	queue := make([]uint, 0, len(promoted))
+	for _, id := range promoted {
+		if promotedSet[id] {
+			continue
+		}
+		promotedSet[id] = true
+		queue = append(queue, id)
+	}
+
+	organic := make([]uint, 0, len(ranked))
+	for _, id := range ranked {
+		if promotedSet[id] {
+			continue
+		}
+		organic = append(organic, id)
+	}
+
+	ordered := make([]uint, 0, len(ranked)+len(queue))
+	organicIndex, promotedIndex := 0, 0
+	for organicIndex < len(organic) || promotedIndex < len(queue) {
+		// A promoted slot opens at every `density`-th position (5th, 10th, ...).
+		if promotedIndex < len(queue) && (len(ordered)+1)%density == 0 {
+			ordered = append(ordered, queue[promotedIndex])
+			promotedIndex++
+			continue
+		}
+		if organicIndex < len(organic) {
+			ordered = append(ordered, organic[organicIndex])
+			organicIndex++
+			continue
+		}
+		ordered = append(ordered, queue[promotedIndex])
+		promotedIndex++
+	}
+	return ordered, promotedSet
+}
