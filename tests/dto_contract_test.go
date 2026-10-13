@@ -1,9 +1,9 @@
 package tests
 
 // Wire-contract guard: proves the JSON the Go API emits still matches the
-// TypeScript DTOs the mobile app declares.
+// TypeScript DTOs the client apps declare.
 //
-// Why this exists: the mobile wire types live in a SEPARATE git repo and drift
+// Why this exists: the client wire types live in a SEPARATE git repo and drift
 // silently. Go encoding/json happily emits a key the client interface never
 // declares, and TypeScript happily reads a field the interface never declared
 // (the value is `any` at the axios boundary). Six fields were lost this way in
@@ -13,8 +13,10 @@ package tests
 // accident. This test turns that class of bug into a red build.
 //
 // Scope: a curated, documented table of Go response structs that have a TS
-// counterpart. It is a DEV-TIME guard, not a CI guard: the sibling repo lives
-// at ../yotuvia-mobile (override with YOTUVIA_MOBILE_DIR). When that repo is absent
+// counterpart. It is a DEV-TIME guard, not a CI guard. The DTOs were moved out
+// of the mobile app into the shared framework-agnostic core during the
+// yotuvia-core dedup migration, so the sibling repo it reads is now
+// ../yotuvia-core (override with YOTUVIA_CORE_DIR). When that repo is absent
 // the test SKIPS with a clear message instead of failing.
 //
 // Direction: BOTH. A Go key missing from its TS interface fails ("Go emits a
@@ -49,7 +51,7 @@ type dtoBinding struct {
 	Label string
 	// GoType is the reflected response (or model) struct.
 	GoType reflect.Type
-	// TSFile is relative to the mobile repo root.
+	// TSFile is relative to the shared core repo root (../yotuvia-core).
 	TSFile string
 	// TSInterface is the interface that must declare the same keys.
 	TSInterface string
@@ -213,9 +215,12 @@ func dtoBindings() []dtoBinding {
 			TSInterface: "AvailableSlot",
 		},
 		{
-			Label:       "RankingResponse -> RankingItem",
-			GoType:      reflect.TypeOf(response.RankingResponse{}),
-			TSFile:      "src/data/sources/api.ts",
+			Label:  "RankingResponse -> RankingItem",
+			GoType: reflect.TypeOf(response.RankingResponse{}),
+			// RankingItem is declared in the core ENTITY and only re-exported
+			// (as a type) from data/sources/api.ts, so the parser must read the
+			// declaring file.
+			TSFile:      "src/core/entities/BeautyCenter.ts",
 			TSInterface: "RankingItem",
 		},
 	}
@@ -488,22 +493,22 @@ func tsKeysFromMembers(body string) tsParseResult {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  MOBILE REPO RESOLUTION
+//  CORE REPO RESOLUTION
 // ─────────────────────────────────────────────────────────────
 
-// mobileRepoDir resolves the sibling mobile checkout. YOTUVIA_MOBILE_DIR wins;
-// otherwise it defaults to ../../yotuvia-mobile relative to this test file, which
-// is where the two repos sit side by side.
-func mobileRepoDir(t *testing.T) string {
+// coreRepoDir resolves the sibling core checkout that now owns the TS DTOs.
+// YOTUVIA_CORE_DIR wins; otherwise it defaults to ../../yotuvia-core relative to
+// this test file, which is where the two repos sit side by side.
+func coreRepoDir(t *testing.T) string {
 	t.Helper()
-	if dir := os.Getenv("YOTUVIA_MOBILE_DIR"); dir != "" {
+	if dir := os.Getenv("YOTUVIA_CORE_DIR"); dir != "" {
 		return dir
 	}
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("cannot resolve test file path to locate the mobile repo")
+		t.Fatal("cannot resolve test file path to locate the core repo")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "yotuvia-mobile"))
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "yotuvia-core"))
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -511,13 +516,13 @@ func mobileRepoDir(t *testing.T) string {
 // ─────────────────────────────────────────────────────────────
 
 // TestWireDTOContract is the guard. It is skipped, not failed, when the sibling
-// mobile checkout is absent: it protects local/branch work against silent DTO
+// core checkout is absent: it protects local/branch work against silent DTO
 // drift and is not meant to gate a CI image that only carries the Go repo.
 func TestWireDTOContract(t *testing.T) {
-	root := mobileRepoDir(t)
+	root := coreRepoDir(t)
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
-		t.Skipf("SKIP: mobile repo not found at %s (set YOTUVIA_MOBILE_DIR to override). "+
-			"This dev-time wire guard needs ../yotuvia-mobile to compare against the TS DTOs.", root)
+		t.Skipf("SKIP: core repo not found at %s (set YOTUVIA_CORE_DIR to override). "+
+			"This dev-time wire guard needs ../yotuvia-core to compare against the TS DTOs.", root)
 	}
 
 	cache := map[string]string{}
