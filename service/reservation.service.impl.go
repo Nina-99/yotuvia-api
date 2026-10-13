@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nina-99/yottu-api/apperrors"
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
 )
@@ -186,7 +186,11 @@ func (s *ReservationServiceImpl) resolveSourcePostID(sourcePostID *uint) *uint {
 // persisted in serviceIDs order with their own professional, and the overlap
 // check validates the reservation's DERIVED SEGMENTS per professional (a bundle
 // may not double-book any of its professionals).
-func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID, personnelID uint, serviceIDs []uint, dateStr, startTimeStr string, sourcePostID *uint, linePersonnel map[uint]uint) (uint, error) {
+//
+// applyLoyalty is the OPTIONAL earn/redeem choice from the booking confirm
+// step: nil/absent = legacy auto-apply (walk-in, admin, old mobile); explicit
+// false = skip loyalty earn AND redeem for this booking; true = auto-apply.
+func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID, personnelID uint, serviceIDs []uint, dateStr, startTimeStr string, sourcePostID *uint, linePersonnel map[uint]uint, applyLoyalty *bool) (uint, error) {
 	// Parse date string into time.Time
 	parsedDate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
@@ -253,8 +257,10 @@ func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID,
 	var loyaltyDiscount float64
 
 	loyaltyEnabled := false
-	if s.LoyaltyService != nil {
-		settings, settingsErr := s.LoyaltyService.GetCenterSettings(beautyCenterID)
+	if s.LoyaltyService != nil && (applyLoyalty == nil || *applyLoyalty) {
+		// Internal read for the reservation's own center: the actor is the
+		// center itself, so owner == target.
+		settings, settingsErr := s.LoyaltyService.GetCenterSettings(beautyCenterID, beautyCenterID)
 		if settingsErr == nil {
 			loyaltyEnabled = settings.LoyaltyEnabled
 		}
@@ -478,7 +484,7 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 	} else if err := s.validateClientServiceCapability(req.PersonnelID, req.ServiceIDs); err != nil {
 		return err
 	}
-	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, personnelID, req.ServiceIDs, req.Date, req.StartTime, s.resolveSourcePostID(req.SourcePostID), linePersonnel)
+	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, personnelID, req.ServiceIDs, req.Date, req.StartTime, s.resolveSourcePostID(req.SourcePostID), linePersonnel, req.ApplyLoyalty)
 	if err != nil {
 		return err
 	}
@@ -627,7 +633,7 @@ func (s *ReservationServiceImpl) CreateAdminReservation(req request.CreateAdminR
 		return nil, apperrors.ErrBadRequest
 	}
 
-	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime, nil, nil)
+	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime, nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1976,13 +1982,25 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 	}
 
 	// ── Loyalty stamps (only if center has loyalty enabled) ──
-	settings, settingsErr := s.LoyaltyService.GetCenterSettings(authBeautyCenterID)
+	// Internal read for the acting center (already ownership-verified above).
+	// ONE notification per verification (batched across services): the loop
+	// mints punches, then a single stamp_earned / reward_ready notify covers
+	// the whole scan. Reward carries the richest earn outcome for the envelope.
+	settings, settingsErr := s.LoyaltyService.GetCenterSettings(authBeautyCenterID, authBeautyCenterID)
+	var reward *response.RewardLineResponse
 	if settingsErr == nil && settings.LoyaltyEnabled {
+		punched := 0
 		for _, svc := range reservation.ReservationServices {
 			err = s.LoyaltyService.AddPunch(reservation.ID, reservation.ClientID, reservation.BeautyCenterID, svc.ServiceID)
 			if err != nil {
 				utils.Log.Errorf("[Loyalty Error] failed to add punch for service %d via QR for Client %d; %v", svc.ServiceID, reservation.ClientID, err)
+				continue
 			}
+			punched++
+		}
+		if punched > 0 {
+			reward = s.buildVerifyReward(reservation)
+			s.notifyLoyaltyScan(reservation, reward, punched)
 		}
 	}
 
@@ -1996,6 +2014,80 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 	utils.Log.Infof("[QR VERIFIED] Reservation ID %d marked as COMPLETED. Charged %.2f YOTTUs. Added stamps for %d services",
 		reservation.ID, charge, len(reservation.ReservationServices))
 	return reservation, false, nil
+}
+
+// buildVerifyReward derives the verify-qr reward line from the client's cards
+// AFTER this scan's punches landed: the richest outcome wins (a freshly
+// completed card beats mere progress). Nil when no card exists.
+func (s *ReservationServiceImpl) buildVerifyReward(reservation *models.Reservation) *response.RewardLineResponse {
+	cards, err := s.LoyaltyService.GetClientsCards(reservation.ClientID, reservation.ClientID, "beauty_center")
+	if err != nil || len(cards) == 0 {
+		return nil
+	}
+	best := cards[0]
+	for _, c := range cards[1:] {
+		if c.Status == "completed" && best.Status != "completed" {
+			best = c
+		}
+	}
+	completed := best.Status == "completed"
+	return &response.RewardLineResponse{
+		CardID:            best.ID,
+		ProgramID:         best.LoyaltyProgram.ID,
+		Stamps:            best.CurrentSteps,
+		Required:          best.LoyaltyProgram.RequiredSteps,
+		Completed:         completed,
+		RewardDescription: rewardDescription(best.LoyaltyProgram.RewardType, best.LoyaltyProgram.ServiceName, best.LoyaltyProgram.DiscountValue),
+	}
+}
+
+// notifyLoyaltyScan emits ONE batched notification per verification (plus push).
+// reward_ready fires when the scan completed a card; otherwise stamp_earned.
+// Best-effort: notification failures never fail check-in.
+func (s *ReservationServiceImpl) notifyLoyaltyScan(reservation *models.Reservation, reward *response.RewardLineResponse, punched int) {
+	if s.NotificationService == nil {
+		return
+	}
+	notifType := "stamp_earned"
+	title := "Stamp earned"
+	message := fmt.Sprintf("You earned %d stamp(s) at your visit.", punched)
+	if reward != nil && reward.Completed {
+		notifType = "reward_ready"
+		title = "Reward ready"
+		message = "Your loyalty card is complete — a reward is waiting for you."
+	}
+	data := fmt.Sprintf(`{"reservation_id":%d}`, reservation.ID)
+	if err := s.NotificationService.Create(reservation.ClientID, notifType, title, message, data); err != nil {
+		utils.Log.Errorf("[LOYALTY] Failed to create %s notification for client %d: %v", notifType, reservation.ClientID, err)
+	}
+	if err := s.NotificationService.SendPushToClient(reservation.ClientID, title, message, data); err != nil {
+		utils.Log.Errorf("[LOYALTY] Failed to push %s notification for client %d: %v", notifType, reservation.ClientID, err)
+	}
+}
+
+// VerifyQRWithReward is VerifyQR plus the batched earn outcome for the
+// verify-qr envelope. The punch + single batched notification already happened
+// inside VerifyQR; this rebuilds the reward line from post-scan state.
+// Re-scans mint nothing — no reward line.
+func (s *ReservationServiceImpl) VerifyQRWithReward(token string, authBeautyCenterID uint) (*models.Reservation, bool, *response.RewardLineResponse, error) {
+	reservation, already, err := s.VerifyQR(token, authBeautyCenterID)
+	if err != nil || reservation == nil {
+		return nil, already, nil, err
+	}
+	if already {
+		return reservation, true, nil, nil
+	}
+	return reservation, false, s.lastScanReward(reservation), nil
+}
+
+// lastScanReward rebuilds the reward line for the just-completed scan. It is
+// split from buildVerifyReward so the envelope path stays readable; both share
+// the same richest-outcome rule.
+func (s *ReservationServiceImpl) lastScanReward(reservation *models.Reservation) *response.RewardLineResponse {
+	if s.LoyaltyService == nil {
+		return nil
+	}
+	return s.buildVerifyReward(reservation)
 }
 
 // ComputeChargeMilli resolves the token charge for a reservation in integer

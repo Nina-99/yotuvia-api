@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/utils"
 )
 
 // Dialect identifies the SQL engine the migration runs against.

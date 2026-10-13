@@ -1,6 +1,6 @@
 package service
 
-import "github.com/Nina-99/yottu-api/models"
+import "github.com/Nina-99/yotuvia-api/models"
 
 type TokenTransactionService interface {
 	GetHistory(beautyCenterID uint, page, limit int) ([]models.TokenTransaction, int64, error)

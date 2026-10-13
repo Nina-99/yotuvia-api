@@ -1,6 +1,6 @@
 package service
 
-import "github.com/Nina-99/yottu-api/models"
+import "github.com/Nina-99/yotuvia-api/models"
 
 type TokenAccountService interface {
 	GetOrCreate(beautyCenterID uint, currency string) (*models.TokenAccount, error)
@@ -14,6 +14,11 @@ type TokenAccountService interface {
 	// transaction). Errors — including ErrInsufficientBalance — propagate as-is.
 	Consume(beautyCenterID uint, amountMilli int64, referenceID uint, description string) error
 	ProcessTopUp(topUpID, adminID uint, status string) error
+	// ProcessTopUpAsPlatform applies the SAME approve/reject decision to ANY
+	// centre's pending top-up. It is the platform admin's entry point: the
+	// ownership check of ProcessTopUp does not apply, because a platform admin
+	// oversees every centre. adminID is recorded as the validator.
+	ProcessTopUpAsPlatform(topUpID, adminID uint, status string) error
 	// AddTokens credits amountMilli atomically. TotalPurchased accumulates only
 	// for "topup" transactions.
 	AddTokens(beautyCenterID uint, amountMilli int64, txType string, referenceID uint, description string) error

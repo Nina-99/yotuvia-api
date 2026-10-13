@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/utils"
 )
 
 func SeedDefaultMissions() {
@@ -134,10 +134,10 @@ func SeedMarketConfigs() {
 		// Bolivia — launch market. 1 YOTTU = 1 BOB; commission 3.5%;
 		// floor 0.35 YOTTU (= commission of a 10 BOB reference ticket).
 		{
-			Currency:        "BOB",
-			YottuToFiatRate: 1.0,
-			CommissionPct:   3.5,
-			MinChargeMilli:  350,
+			Currency:          "BOB",
+			YotuviaToFiatRate: 1.0,
+			CommissionPct:     3.5,
+			MinChargeMilli:    350,
 		},
 	}
 
@@ -151,13 +151,13 @@ func SeedMarketConfigs() {
 				utils.Log.Infof("[SEED] Created market config %s: %.2f%% / floor %.2f YOTTUs",
 					cfg.Currency, cfg.CommissionPct, utils.FromMilli(cfg.MinChargeMilli))
 			}
-		} else if existing.YottuToFiatRate != cfg.YottuToFiatRate ||
+		} else if existing.YotuviaToFiatRate != cfg.YotuviaToFiatRate ||
 			existing.CommissionPct != cfg.CommissionPct ||
 			existing.MinChargeMilli != cfg.MinChargeMilli {
 			if err := DB.Model(&existing).Updates(map[string]interface{}{
-				"yottu_to_fiat_rate": cfg.YottuToFiatRate,
-				"commission_pct":     cfg.CommissionPct,
-				"min_charge_milli":   cfg.MinChargeMilli,
+				"yotuvia_to_fiat_rate": cfg.YotuviaToFiatRate,
+				"commission_pct":       cfg.CommissionPct,
+				"min_charge_milli":     cfg.MinChargeMilli,
 			}).Error; err != nil {
 				utils.Log.Errorf("[SEED] Failed to heal market config %s: %v", cfg.Currency, err)
 			} else {
@@ -408,7 +408,7 @@ func SeedDemoCenters() {
 				LastName:  c.Last,
 				Username:  "demo_" + c.User,
 				Phone:     fmt.Sprintf("591-7%d%04d", i%10, 1000+i),
-				Email:     fmt.Sprintf("demo_%s@demo.yottu.bo", c.User),
+				Email:     fmt.Sprintf("demo_%s@demo.yotuvia.bo", c.User),
 				Password:  hashedPwd,
 				IsActive:  true,
 			}
@@ -495,9 +495,9 @@ func SeedDemoCenters() {
 		center := models.BeautyCenter{
 			Name:         def.Name,
 			Address:      fmt.Sprintf("%s, %s, Oruro", def.Address, def.Neighborhood),
-			Email:        fmt.Sprintf("%s@demo.yottu.bo", slugify(def.Name)),
+			Email:        fmt.Sprintf("%s@demo.yotuvia.bo", slugify(def.Name)),
 			Phone:        fmt.Sprintf("591-4-%d", 5000000+i),
-			Url:          fmt.Sprintf("https://yottu.bo/center/%d", i+1),
+			Url:          fmt.Sprintf("https://yotuvia.bo/center/%d", i+1),
 			Description:  fmt.Sprintf("Salón de belleza en %s, Oruro. Servicios de peluquería, manicuría y estética.", def.Neighborhood),
 			Latitude:     def.Lat,
 			Longitude:    def.Lng,
@@ -528,7 +528,7 @@ func SeedDemoCenters() {
 				BeautyCenterID: centerID,
 				FirstName:      []string{"Carlos", "María"}[p],
 				LastName:       []string{"Mamani", "Condori"}[p],
-				Email:          fmt.Sprintf("staff%d_%d@demo.yottu.bo", centerID, p+1),
+				Email:          fmt.Sprintf("staff%d_%d@demo.yotuvia.bo", centerID, p+1),
 				Phone:          fmt.Sprintf("591-7-%d", 60000+int(centerID)*10+p),
 				Password:       hashedPwd,
 				IsActive:       true,

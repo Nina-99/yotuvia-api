@@ -4,11 +4,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/service"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/service"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/crypto/bcrypt"
@@ -17,7 +17,7 @@ import (
 )
 
 func setupAuthServiceTestDB(t *testing.T) *gorm.DB {
-	os.Setenv("JWT_SECRET", "suoer-secret-key-for-the-test-units-of-yottu")
+	os.Setenv("JWT_SECRET", "suoer-secret-key-for-the-test-units-of-yotuvia")
 
 	utils.InitLogger(utils.LoggerConfig{
 		Level:  "error",
@@ -64,6 +64,7 @@ func TestAuthService_Login(t *testing.T) {
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	// Instanciamos el servicio unificado
 	authService := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo,
+		repository.NewPlatformAdminRepositoryImpl(db),
 		repository.NewUserSessionRepositoryImpl(db), repository.NewAuthTokenRepositoryImpl(db),
 		utils.NewFakeMailer(), nil, validate)
 	t.Run("Classic Login Success (Client)", func(t *testing.T) {

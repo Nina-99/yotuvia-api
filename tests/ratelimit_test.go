@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/middleware"
-	"github.com/Nina-99/yottu-api/router"
+	"github.com/Nina-99/yotuvia-api/middleware"
+	"github.com/Nina-99/yotuvia-api/router"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/time/rate"

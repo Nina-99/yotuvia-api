@@ -5,6 +5,7 @@
 *.so
 *.dylib
 yottu-api
+yotuvia-api
 
 # Test binary, built with `go test -c`
 *.test

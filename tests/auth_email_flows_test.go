@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/router"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/router"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -110,7 +110,7 @@ func TestRegister_SendsVerificationEmail(t *testing.T) {
 	msg := msgs[0]
 	assert.Equal(t, "verify.me@test.com", msg.To)
 	assert.Contains(t, msg.Subject, "Verifica")
-	assert.Contains(t, msg.Text, "yottu://verify-email", "the link must be the app deep link")
+	assert.Contains(t, msg.Text, "yotuvia://verify-email", "the link must be the app deep link")
 	assert.Contains(t, msg.HTML, "#CFB53B", "HTML must carry the Yottu gold accent")
 	assert.NotEmpty(t, msg.HTML, "an HTML alternative must be present")
 
@@ -250,7 +250,7 @@ func TestForgotPassword_Always200SendsOnlyWhenExists(t *testing.T) {
 	last := mustLastMessage(t, mailer)
 	assert.Equal(t, "reset.me@test.com", last.To)
 	assert.Contains(t, last.Subject, "Restablece")
-	assert.Contains(t, last.Text, "yottu://reset-password")
+	assert.Contains(t, last.Text, "yotuvia://reset-password")
 
 	token := tokenFromMessage(t, last)
 	var stored models.AuthToken
@@ -357,14 +357,14 @@ func TestMailerFactory_DevFallbackAndConfig(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "dev (log-only)", m.Mode())
 		assert.NoError(t, m.Send(context.Background(), utils.Message{
-			To: "anyone@test.com", Subject: "Prueba", Text: "yottu://verify-email?token=abc",
+			To: "anyone@test.com", Subject: "Prueba", Text: "yotuvia://verify-email?token=abc",
 		}), "the dev mailer must log, not fail")
 	})
 
 	t.Run("configured host → smtp", func(t *testing.T) {
 		t.Setenv("SMTP_HOST", "smtp.example.com")
 		t.Setenv("SMTP_PORT", "465")
-		t.Setenv("SMTP_FROM", "no-reply@yottu.app")
+		t.Setenv("SMTP_FROM", "no-reply@yotuvia.app")
 		t.Setenv("SMTP_TLS_MODE", "tls")
 		m, err := utils.MailerFromEnv()
 		assert.NoError(t, err)
@@ -373,7 +373,7 @@ func TestMailerFactory_DevFallbackAndConfig(t *testing.T) {
 
 	t.Run("invalid TLS mode errors", func(t *testing.T) {
 		t.Setenv("SMTP_HOST", "smtp.example.com")
-		t.Setenv("SMTP_FROM", "no-reply@yottu.app")
+		t.Setenv("SMTP_FROM", "no-reply@yotuvia.app")
 		t.Setenv("SMTP_TLS_MODE", "bogus")
 		_, err := utils.MailerFromEnv()
 		assert.Error(t, err)
@@ -381,7 +381,7 @@ func TestMailerFactory_DevFallbackAndConfig(t *testing.T) {
 
 	t.Run("invalid port errors", func(t *testing.T) {
 		t.Setenv("SMTP_HOST", "smtp.example.com")
-		t.Setenv("SMTP_FROM", "no-reply@yottu.app")
+		t.Setenv("SMTP_FROM", "no-reply@yotuvia.app")
 		t.Setenv("SMTP_PORT", "not-a-port")
 		_, err := utils.MailerFromEnv()
 		assert.Error(t, err)

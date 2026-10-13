@@ -14,9 +14,9 @@ type MarketConfig struct {
 	// Currency ISO code, e.g. "BOB", "CLP". Unique: one economy per currency.
 	Currency string `gorm:"size:3;not null;uniqueIndex" json:"currency"`
 
-	// YottuToFiatRate is the display/reference rate (1 YOTTU = X fiat).
+	// YotuviaToFiatRate is the display/reference rate (1 YOTUVIA = X fiat).
 	// Accounting never uses it — balances live in milli-YOTTU.
-	YottuToFiatRate float64 `gorm:"default:1.0" json:"yottu_to_fiat_rate"`
+	YotuviaToFiatRate float64 `gorm:"default:1.0" json:"yotuvia_to_fiat_rate"`
 
 	// CommissionPct percent of the reservation total charged as tokens
 	// (3.5 means 3.5%).

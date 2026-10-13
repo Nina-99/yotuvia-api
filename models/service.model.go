@@ -18,6 +18,10 @@ type Service struct {
 
 	Name        string  `gorm:"size:100;not null" json:"name"`
 	Description string  `gorm:"not null" json:"description"`
+	// Per-locale overrides ({"es": "...", "en": "..."}). Name/Description stay
+	// the canonical fallback; reads resolve by the requested `lang`.
+	NameI18n        map[string]string `gorm:"serializer:json" json:"name_i18n,omitempty"`
+	DescriptionI18n map[string]string `gorm:"serializer:json" json:"description_i18n,omitempty"`
 	Duration    int     `gorm:"not null" json:"duration"`
 	Price       float64 `json:"price"`
 	ImageURL    string  `json:"image_url"`

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -141,4 +141,60 @@ func (r *UserSessionRepositoryImpl) RevokeAllForUser(ctx context.Context, userID
 	return r.db.WithContext(ctx).Model(&models.UserSession{}).
 		Where("user_id = ? AND role = ?", userID, role).
 		Update("is_revoked", true).Error
+}
+
+// EnforceActiveLimit keeps at most `limit` live sessions of one (userID, role)
+// pair and reports how many it revoked. See the interface docblock for the
+// semantics (live = not revoked AND not expired; oldest evicted first).
+//
+// The count and the eviction run in ONE transaction and the live rows are
+// selected FOR UPDATE, so two concurrent logins of the same account serialize
+// against each other on the rows that already exist.
+//
+// Residual window: a fully concurrent pair of logins can still each miss the
+// sibling's not-yet-committed INSERT (row locks do not block a new row). The
+// cap is a UX guard, not a security control: `logout-all`, password reset and
+// token-family reuse detection remain the authoritative kill switches, and an
+// over-cap account is only ever visible to its own owner.
+func (r *UserSessionRepositoryImpl) EnforceActiveLimit(ctx context.Context, userID uint, role string, limit int, now time.Time) (int, error) {
+	if limit < 1 {
+		return 0, nil
+	}
+
+	revoked := 0
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var live []models.UserSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND role = ? AND is_revoked = ? AND expires_at > ?", userID, role, false, now).
+			// created_at breaks ties for sessions minted in the same clock tick
+			// (SQLite's datetime resolution in tests); id is monotonic, so it
+			// always preserves login order.
+			Order("created_at ASC, id ASC").
+			Find(&live).Error; err != nil {
+			return err
+		}
+
+		excess := len(live) - limit
+		if excess <= 0 {
+			return nil
+		}
+
+		oldest := make([]uint, 0, excess)
+		for _, session := range live[:excess] {
+			oldest = append(oldest, session.ID)
+		}
+
+		res := tx.Model(&models.UserSession{}).
+			Where("id IN ?", oldest).
+			Update("is_revoked", true)
+		if res.Error != nil {
+			return res.Error
+		}
+		revoked = int(res.RowsAffected)
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return revoked, nil
 }

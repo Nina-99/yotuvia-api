@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 )
 
 // ErrAuthTokenNotFound signals a hash matching no token row.

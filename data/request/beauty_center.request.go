@@ -8,6 +8,8 @@ type CreateBeautyCenterRequest struct {
 	Phone       string                     `json:"phone" validate:"required,max=20"`
 	Url         string                     `json:"url"`
 	Description string                     `json:"description" validate:"max=255"`
+	NameI18n        map[string]string `json:"name_i18n"`
+	DescriptionI18n map[string]string `json:"description_i18n"`
 	Password    string                     `json:"password" validate:"required,min=8"`
 	Images      []BeautyCenterImageRequest `json:"images"`
 	Schedules   []WorkingHourRequest       `json:"schedules"`
@@ -21,6 +23,8 @@ type UpdateBeautyCenterRequest struct {
 	Phone       string                     `json:"phone" validate:"omitempty,max=20"`
 	Url         string                     `json:"url"`
 	Description string                     `json:"description" validate:"omitempty,max=255"`
+	NameI18n        map[string]string `json:"name_i18n"`
+	DescriptionI18n map[string]string `json:"description_i18n"`
 	Password    string                     `json:"password" validate:"omitempty,min=8"`
 	Latitude    *float64                   `json:"latitude" validate:"omitempty"`
 	Longitude   *float64                   `json:"longitude" validate:"omitempty"`

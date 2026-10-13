@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/router"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/router"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -148,7 +148,7 @@ func TestPersonnelMetrics_OccupancyCountsOnlyOwnSegments(t *testing.T) {
 		{serviceID: 2, personnelID: 2, price: 50, duration: 30},
 	})
 
-	query := "?from=2026-10-05&to=2026-10-05"
+	query := "?from=" + mpDay.Format("2006-01-02") + "&to=" + mpDay.Format("2006-01-02")
 
 	pro2 := getMetricsExt(t, r, roleToken(t, 2, 1, "personnel"), query)
 	assert.Equal(t, 30, pro2.Occupancy.BookedMinutes, "pro 2 counts only their own 30-minute segment")
@@ -171,10 +171,12 @@ func TestPersonnelMetrics_OccupancyAvailableFollowsWeekdayHours(t *testing.T) {
 	seedDashboardCenter(t, db, 1, "Hours Center", "hours@test.com", true)
 	seedDashboardPersonnel(t, db, 2, 1, true)
 	seedDashboardClient(t, db, 1, "Hours", "Client")
-	seedWorkingHour(t, db, 1, int(time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC).Weekday()), "08:00", "12:00")
-	seedWorkingHour(t, db, 1, int(time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC).Weekday()), "09:00", "18:00")
+	seedWorkingHour(t, db, 1, int(mpDay.Weekday()), "08:00", "12:00")
+	nextDay := mpDay.AddDate(0, 0, 1)
+	seedWorkingHour(t, db, 1, int(nextDay.Weekday()), "09:00", "18:00")
 
-	body := getMetricsExt(t, r, roleToken(t, 2, 1, "personnel"), "?from=2026-10-05&to=2026-10-06")
+	body := getMetricsExt(t, r, roleToken(t, 2, 1, "personnel"),
+		"?from="+mpDay.Format("2006-01-02")+"&to="+nextDay.Format("2006-01-02"))
 	assert.Equal(t, 780, body.Occupancy.AvailableMinutes, "240 (Mon) + 540 (Tue)")
 	assert.Equal(t, 0, body.Occupancy.BookedMinutes)
 	assert.Equal(t, 0.0, body.Occupancy.RatePct)
@@ -198,7 +200,8 @@ func TestPersonnelMetrics_OccupancyZeroHoursIsSane(t *testing.T) {
 		{serviceID: 1, personnelID: 2, price: 50, duration: 30},
 	})
 
-	body := getMetricsExt(t, r, roleToken(t, 2, 1, "personnel"), "?from=2026-10-05&to=2026-10-05")
+	body := getMetricsExt(t, r, roleToken(t, 2, 1, "personnel"),
+		"?from="+mpDay.Format("2006-01-02")+"&to="+mpDay.Format("2006-01-02"))
 	assert.Equal(t, 0, body.Occupancy.AvailableMinutes)
 	assert.Equal(t, 30, body.Occupancy.BookedMinutes, "the booking is still reported")
 	assert.Equal(t, 0.0, body.Occupancy.RatePct, "no denominator → 0, never NaN/Inf")

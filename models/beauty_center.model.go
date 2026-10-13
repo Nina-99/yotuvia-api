@@ -18,6 +18,9 @@ type BeautyCenter struct {
 	Phone        string  `gorm:"size:20;not null" json:"phone"`
 	Url          string  `gorm:"unique_index" json:"url"`
 	Description  string  `gorm:"size:255" json:"description"`
+	// Per-locale overrides; reads resolve by `lang` with fallback to the base.
+	NameI18n        map[string]string `gorm:"serializer:json" json:"name_i18n,omitempty"`
+	DescriptionI18n map[string]string `gorm:"serializer:json" json:"description_i18n,omitempty"`
 	Latitude     float64 `gorm:"default:0;index:idx_bc_location" json:"latitude"`
 	Longitude    float64 `gorm:"default:0;index:idx_bc_location,priority:2" json:"longitude"`
 	Password     string  `gorm:"size:255" json:"-"`
@@ -61,8 +64,14 @@ type BeautyCenter struct {
 	// 0 = no policy (opt-in, consistent with deposits).
 	CancelDeadlineHours int `gorm:"default:0" json:"cancel_deadline_hours"`
 
-	AvgRating   float64 `gorm:"-" json:"avg_rating"`
-	ReviewCount int64   `gorm:"-" json:"review_count"`
+	// AvgRating/ReviewCount are read-only projections computed by the
+	// beauty-center repository's rating aggregate. "-:migration" keeps them out
+	// of the beauty_centers schema, and "<-:false" keeps Create/Save from
+	// emitting columns that do not exist. A plain gorm:"-" would hide the
+	// SELECT aliases from scanning, which is what silently zeroed every value
+	// (list AND detail) before this fix.
+	AvgRating   float64 `gorm:"-:migration;<-:false" json:"avg_rating"`
+	ReviewCount int64   `gorm:"-:migration;<-:false" json:"review_count"`
 
 	BeautyCenterImage []BeautyCenterImage `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 	Personnel         []Personnel         `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`

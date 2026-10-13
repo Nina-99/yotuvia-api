@@ -1,11 +1,13 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/service"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,6 +19,18 @@ func NewBeautyCenterImageController(beautyCenterImageService service.BeautyCente
 	return &BeautyCenterImageController{
 		BeautyCenterImageService: beautyCenterImageService,
 	}
+}
+
+// writeError maps the ownership sentinels through apperrors.MapToHTTP so a
+// foreign centre gets 403 {"error":"forbidden"} and a missing row 404. Any
+// other error keeps the pre-existing 400 contract for this controller.
+func (c *BeautyCenterImageController) writeError(ctx *gin.Context, err error) {
+	if errors.Is(err, apperrors.ErrForbidden) || errors.Is(err, apperrors.ErrNotFound) {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+	ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 }
 
 func (c *BeautyCenterImageController) Upload(ctx *gin.Context) {
@@ -51,6 +65,18 @@ func (c *BeautyCenterImageController) Create(ctx *gin.Context) {
 		return
 	}
 
+	// The image's owner is the caller's centre from the token, never the body:
+	// a center-A admin must not add a center-B image by sending
+	// `beauty_center_id`. Same contract as loyalty/promotion creation. A
+	// beauty_center token with no centerID claim (0) cannot own an image, so it
+	// is rejected rather than persisting a zero-centre orphan.
+	centerID := ctx.GetUint("centerID")
+	if centerID == 0 {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	req.BeautyCenterID = centerID
+
 	res, err := c.BeautyCenterImageService.Create(req)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -74,9 +100,10 @@ func (c *BeautyCenterImageController) Update(ctx *gin.Context) {
 		return
 	}
 
-	res, err := c.BeautyCenterImageService.Update(uint(id), req)
+	// The service enforces row.BeautyCenterID == the caller's centerID claim.
+	res, err := c.BeautyCenterImageService.Update(uint(id), ctx.GetUint("centerID"), req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -129,9 +156,9 @@ func (c *BeautyCenterImageController) Delete(ctx *gin.Context) {
 		return
 	}
 
-	err = c.BeautyCenterImageService.Delete(uint(id))
+	err = c.BeautyCenterImageService.Delete(uint(id), ctx.GetUint("centerID"))
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 

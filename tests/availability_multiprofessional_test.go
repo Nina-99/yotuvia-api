@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/router"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/router"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -21,7 +21,7 @@ import (
 // ──────────────────────────────────────────────
 
 // mpDay is the Monday used by every multi-professional fixture.
-var mpDay = time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+var mpDay = bookingTestDate
 
 // mpLine is one service line of a hand-built multi-professional reservation.
 type mpLine struct {
@@ -110,7 +110,7 @@ func TestAvailabilitySearch_MultiProfessionalAgreement(t *testing.T) {
 		{serviceID: 11, personnelID: 2, duration: 30},
 	})
 
-	const date = "2026-10-05"
+	date := bookingTestDateKey
 
 	cases := []struct {
 		name            string
@@ -206,7 +206,7 @@ func TestBookingOverlap_MultiProfessionalPerSegment(t *testing.T) {
 
 	admin := roleToken(t, 7, 1, "beauty_center")
 	bodyFor := func(personnelID uint) string {
-		return fmt.Sprintf(`{"beauty_center_id":1,"client_id":1,"personnel_id":%d,"service_ids":[10],"date":"2026-10-05","start_time":"10:00"}`, personnelID)
+		return fmt.Sprintf(`{"beauty_center_id":1,"client_id":1,"personnel_id":%d,"service_ids":[10],"date":"`+bookingTestDateKey+`","start_time":"10:00"}`, personnelID)
 	}
 
 	// Pro 1 is working 10:00–10:30 → conflict.

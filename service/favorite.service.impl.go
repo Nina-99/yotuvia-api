@@ -3,10 +3,11 @@ package service
 import (
 	"errors"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -43,11 +44,32 @@ func (s *FavoriteServiceImpl) Create(req request.CreateFavoriteRequest) error {
 	return s.FavoriteRepo.Create(favorite)
 }
 
-func (s *FavoriteServiceImpl) Delete(id uint) error {
+func (s *FavoriteServiceImpl) Delete(id uint, actorClientID uint) error {
+	favorite, err := s.FavoriteRepo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	// A missing row follows the codebase's not-found convention (404), not the
+	// no-op 200 a bare GORM Delete would produce.
+	if favorite == nil {
+		return apperrors.ErrNotFound
+	}
+	// Ownership: only the favorite's own client may remove it.
+	if favorite.ClientID != actorClientID {
+		return apperrors.ErrForbidden
+	}
 	return s.FavoriteRepo.Delete(id)
 }
 
-func (s *FavoriteServiceImpl) FindByClientID(clientID uint) ([]response.FavoriteResponse, error) {
+func (s *FavoriteServiceImpl) FindByClientID(clientID uint, actorClientID uint) ([]response.FavoriteResponse, error) {
+	// Ownership: a caller may only read its OWN favorites. Favorites are a
+	// private client surface with no staff consumer, so a mismatch is ErrForbidden
+	// (independent of role: the JWT user_id claim is polymorphic per role, so a
+	// staff id could otherwise collide with a client id).
+	if clientID != actorClientID {
+		return nil, apperrors.ErrForbidden
+	}
+
 	favorites, err := s.FavoriteRepo.FindByClientID(clientID)
 	if err != nil {
 		return nil, err

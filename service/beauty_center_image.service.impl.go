@@ -9,11 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -113,10 +114,15 @@ func (s *BeautyCenterImageServiceImpl) Create(req request.BeautyCenterImageReque
 	return mapImageToResp(personnelImage), nil
 }
 
-func (s *BeautyCenterImageServiceImpl) Update(id uint, req request.UpdateBeautyCenterImageRequest) (response.BeautyCenterImageResp, error) {
+func (s *BeautyCenterImageServiceImpl) Update(id, actorCenterID uint, req request.UpdateBeautyCenterImageRequest) (response.BeautyCenterImageResp, error) {
 	img, err := s.BeautyCenterImageRepository.FindByID(id)
 	if err != nil {
-		return response.BeautyCenterImageResp{}, err
+		return response.BeautyCenterImageResp{}, apperrors.ErrNotFound
+	}
+	// Ownership: the image must belong to the acting centre (centerID claim),
+	// exactly like the Reorder guard below. A token without a claim owns nothing.
+	if actorCenterID == 0 || img.BeautyCenterID != actorCenterID {
+		return response.BeautyCenterImageResp{}, apperrors.ErrForbidden
 	}
 
 	if req.IsCover != nil {
@@ -183,10 +189,14 @@ func (s *BeautyCenterImageServiceImpl) GetByBeautyCenterID(beauterCenterID uint)
 	return res, nil
 }
 
-func (s *BeautyCenterImageServiceImpl) Delete(id uint) error {
-	_, err := s.BeautyCenterImageRepository.FindByID(id)
+func (s *BeautyCenterImageServiceImpl) Delete(id, actorCenterID uint) error {
+	img, err := s.BeautyCenterImageRepository.FindByID(id)
 	if err != nil {
-		return err
+		return apperrors.ErrNotFound
+	}
+	// Ownership: only the owning centre may delete its gallery row.
+	if actorCenterID == 0 || img.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
 	}
 	return s.BeautyCenterImageRepository.Delete(id)
 }

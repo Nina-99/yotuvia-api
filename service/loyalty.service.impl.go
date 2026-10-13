@@ -2,12 +2,16 @@ package service
 
 import (
 	"errors"
+	"strconv"
+	"strings"
+	"time"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -50,6 +54,7 @@ func (s *LoyaltyServiceImpl) CreateProgram(req request.CreateLoyaltyProgrmaReque
 		RequiredSteps:   req.RequiredSteps,
 		RewardType:      req.RewardType,
 		DiscountValue:   req.DiscountValue,
+		DurationDays:    req.DurationDays,
 		IsActive:        true,
 	}
 
@@ -72,17 +77,53 @@ func (s *LoyaltyServiceImpl) CreateProgram(req request.CreateLoyaltyProgrmaReque
 	}
 
 	return response.LoyaltyProgramResponse{
-		ID:                program.ID,
-		ServiceID:         program.ServiceID,
-		RewardServiceID:   program.RewardServiceID,
-		RequiredSteps:     program.RequiredSteps,
-		RewardType:        program.RewardType,
-		DiscountValue:     program.DiscountValue,
-		IsActive:          program.IsActive,
-		CreatedAt:         program.CreatedAt,
+		ID:              program.ID,
+		BeautyCenterID:  program.BeautyCenterID,
+		ServiceID:       program.ServiceID,
+		RewardServiceID: program.RewardServiceID,
+		RequiredSteps:   program.RequiredSteps,
+		RewardType:      program.RewardType,
+		DiscountValue:   program.DiscountValue,
+		DurationDays:    program.DurationDays,
+		IsActive:        program.IsActive,
+		CreatedAt:       program.CreatedAt,
 	}, nil
 }
 
+// deriveExpiresAt computes the card expiry from a base time + the program's
+// nullable duration policy. Nil policy → nil (no expiry). Slice 1 derives and
+// persists WITHOUT enforcement.
+func deriveExpiresAt(base time.Time, durationDays *int) *time.Time {
+	if durationDays == nil || *durationDays <= 0 {
+		return nil
+	}
+	t := base.AddDate(0, 0, *durationDays)
+	return &t
+}
+
+// cardExpired reports whether a card's derived expiry has passed. Nil expiry
+// (no policy) never expires. Slice 2 enforcement: an expired card neither
+// accrues stamps nor redeems its reward, and is excluded from pending reads.
+func cardExpired(card *models.CustomerPunchCard, now time.Time) bool {
+	if card == nil || card.ExpiresAt == nil {
+		return false
+	}
+	return now.After(*card.ExpiresAt)
+}
+
+// isDuplicateKey reports whether err is a UNIQUE-constraint violation across
+// postgres (pgx) and sqlite drivers, so the double-punch guard degrades to a
+// no-op success instead of a 500 under concurrent scans.
+func isDuplicateKey(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate") ||
+		strings.Contains(msg, "unique constraint") ||
+		strings.Contains(msg, "unique_constraint") ||
+		strings.Contains(msg, "23505")
+}
 func (s *LoyaltyServiceImpl) AddPunch(reservationID, clientID, beautyCenterID, serviceID uint) error {
 	// 1. We check if there is an active loyalty program
 	program, err := s.repo.FindProgramByService(beautyCenterID, serviceID)
@@ -98,6 +139,16 @@ func (s *LoyaltyServiceImpl) AddPunch(reservationID, clientID, beautyCenterID, s
 	if err != nil {
 		return err
 	}
+	// Slice 2: an EXPIRED active card must not accrue more stamps. Retire it
+	// (status "expired") so the client restarts a fresh cycle below, instead of
+	// silently dying forever or accruing on a dead card.
+	if card != nil && cardExpired(card, time.Now()) {
+		card.Status = "expired"
+		if err := s.repo.UpdatePunchCard(card); err != nil {
+			return err
+		}
+		card = nil
+	}
 	// 3. If there is no active, we create one
 	if card == nil {
 		card = &models.CustomerPunchCard{
@@ -105,10 +156,22 @@ func (s *LoyaltyServiceImpl) AddPunch(reservationID, clientID, beautyCenterID, s
 			LoyaltyProgramID: program.ID,
 			CurrentSteps:     0,
 			Status:           "active",
+			ExpiresAt:        deriveExpiresAt(time.Now(), program.DurationDays),
 		}
 		if err := s.repo.CreatePunchCard(card); err != nil {
 			return err
 		}
+	}
+
+	// Double-punch guard: the (reservation, card) UNIQUE pair means a
+	// concurrent re-scan (or retry) of the same reservation must not mint a
+	// second stamp. Procedural check first; the DB constraint + duplicate
+	// tolerance below covers the race window.
+	if existing, err := s.repo.FindPunchHistoryByReservationCard(reservationID, card.ID); err != nil {
+		return err
+	} else if existing != nil {
+		utils.Log.Infof("[LOYALTY] Duplicate punch ignored for reservation %d card %d", reservationID, card.ID)
+		return nil
 	}
 
 	card.CurrentSteps++
@@ -119,6 +182,10 @@ func (s *LoyaltyServiceImpl) AddPunch(reservationID, clientID, beautyCenterID, s
 		ReservationID:       reservationID,
 	}
 	if err := s.repo.CreatePunchHistory(&history); err != nil {
+		if isDuplicateKey(err) {
+			utils.Log.Infof("[LOYALTY] Concurrent duplicate punch absorbed for reservation %d card %d", reservationID, card.ID)
+			return nil
+		}
 		return err
 	}
 
@@ -136,7 +203,14 @@ func (s *LoyaltyServiceImpl) AddPunch(reservationID, clientID, beautyCenterID, s
 	return nil
 }
 
-func (s *LoyaltyServiceImpl) GetClientsCards(clientID uint) ([]response.PunchCardResponse, error) {
+func (s *LoyaltyServiceImpl) GetClientsCards(clientID, actorClientID uint, role string) ([]response.PunchCardResponse, error) {
+	// Ownership: a `client` may read only its own cards. beauty_center and
+	// personnel keep inspecting any client's cards — that is a legitimate
+	// staff-facing view, not an IDOR.
+	if role == "client" && actorClientID != clientID {
+		return nil, apperrors.ErrForbidden
+	}
+
 	cards, err := s.repo.FindCardsByClient(clientID)
 	if err != nil {
 		return nil, err
@@ -148,18 +222,160 @@ func (s *LoyaltyServiceImpl) GetClientsCards(clientID uint) ([]response.PunchCar
 			ID:           c.ID,
 			CurrentSteps: c.CurrentSteps,
 			Status:       c.Status,
+			ExpiresAt:    c.ExpiresAt,
 			LoyaltyProgram: response.LoyaltyProgramResponse{
-				ID:            c.LoyaltyProgram.ID,
-				ServiceID:     c.LoyaltyProgram.ServiceID,
-				RequiredSteps: c.LoyaltyProgram.RequiredSteps,
-				RewardType:    c.LoyaltyProgram.RewardType,
-				DiscountValue: c.LoyaltyProgram.DiscountValue,
-				IsActive:      c.LoyaltyProgram.IsActive,
-				CreatedAt:     c.LoyaltyProgram.CreatedAt,
+				ID:             c.LoyaltyProgram.ID,
+				BeautyCenterID: c.LoyaltyProgram.BeautyCenterID,
+				ServiceID:      c.LoyaltyProgram.ServiceID,
+				ServiceName:    c.LoyaltyProgram.Service.Name,
+				RequiredSteps:  c.LoyaltyProgram.RequiredSteps,
+				RewardType:     c.LoyaltyProgram.RewardType,
+				DiscountValue:  c.LoyaltyProgram.DiscountValue,
+				DurationDays:   c.LoyaltyProgram.DurationDays,
+				IsActive:       c.LoyaltyProgram.IsActive,
+				CreatedAt:      c.LoyaltyProgram.CreatedAt,
 			},
 		})
 	}
+	s.enrichCardsCenter(res, cards)
 
+	return res, nil
+}
+
+// enrichCardsCenter fills BeautyCenterID/Name on card + program responses from
+// the REAL center rows (never hardcoded). Missing centers degrade to zero/empty
+// rather than failing the read.
+func (s *LoyaltyServiceImpl) enrichCardsCenter(res []response.PunchCardResponse, cards []models.CustomerPunchCard) {
+	if s.centerRepo == nil {
+		return
+	}
+	names := map[uint]string{}
+	for i, c := range cards {
+		bcID := c.LoyaltyProgram.BeautyCenterID
+		res[i].BeautyCenterID = bcID
+		res[i].LoyaltyProgram.BeautyCenterID = bcID
+		name, ok := names[bcID]
+		if !ok {
+			if center, err := s.centerRepo.FindByID(bcID); err == nil && center != nil {
+				name = center.Name
+			}
+			names[bcID] = name
+		}
+		res[i].BeautyCenterName = name
+		res[i].LoyaltyProgram.BeautyCenterName = name
+	}
+}
+
+// rewardDescription renders the human-readable reward summary shared by the
+// pending, public, and verify-qr payloads.
+func rewardDescription(rewardType, serviceName string, discountValue float64) string {
+	switch rewardType {
+	case "free":
+		if serviceName != "" {
+			return "Free " + serviceName
+		}
+		return "Free service"
+	case "percentage_discount":
+		return "Discount of " + strconv.FormatFloat(discountValue, 'f', -1, 64) + "%"
+	default:
+		return rewardType
+	}
+}
+
+// checkCardOwnership enforces the client-owns-cards contract shared by the
+// client loyalty reads.
+func checkCardOwnership(clientID, actorClientID uint, role string) error {
+	if role == "client" && actorClientID != clientID {
+		return apperrors.ErrForbidden
+	}
+	return nil
+}
+
+// GetHistory returns the client's punch timeline, newest first.
+func (s *LoyaltyServiceImpl) GetHistory(clientID, actorClientID uint, role string) ([]response.PunchHistoryItemResponse, error) {
+	if err := checkCardOwnership(clientID, actorClientID, role); err != nil {
+		return nil, err
+	}
+	rows, err := s.repo.FindPunchHistoryByClient(clientID)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]response.PunchHistoryItemResponse, 0, len(rows))
+	for _, r := range rows {
+		item := response.PunchHistoryItemResponse{
+			ID:        r.ID,
+			CardID:    r.CustomerPunchCardID,
+			ProgramID: r.CustomerPunchCard.LoyaltyProgramID,
+			CreatedAt: r.CreatedAt,
+		}
+		if r.CustomerPunchCard.LoyaltyProgram.ID != 0 {
+			item.Required = r.CustomerPunchCard.LoyaltyProgram.RequiredSteps
+			item.ServiceName = r.CustomerPunchCard.LoyaltyProgram.Service.Name
+		}
+		res = append(res, item)
+	}
+	// Stamps = position of this punch within its card (1-based order by time).
+	// Cheap derivation: count rows per card in timeline order (oldest first).
+	seen := map[uint]int{}
+	for i := len(res) - 1; i >= 0; i-- {
+		seen[res[i].CardID]++
+		res[i].Stamps = seen[res[i].CardID]
+	}
+	return res, nil
+}
+
+// GetPendingRewards returns completed-but-unredeemed cards for the client.
+func (s *LoyaltyServiceImpl) GetPendingRewards(clientID, actorClientID uint, role string) ([]response.PendingRewardResponse, error) {
+	if err := checkCardOwnership(clientID, actorClientID, role); err != nil {
+		return nil, err
+	}
+	cards, err := s.repo.FindCompletedCardsByClient(clientID)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]response.PendingRewardResponse, 0, len(cards))
+	for _, c := range cards {
+		// Slice 2: an expired completed card can no longer be redeemed.
+		if cardExpired(&c, time.Now()) {
+			continue
+		}
+		redemption, err := s.repo.FindRedemptionByCard(c.ID)
+		if err != nil {
+			return nil, err
+		}
+		if redemption != nil {
+			continue
+		}
+		res = append(res, response.PendingRewardResponse{
+			CardID:            c.ID,
+			ProgramID:         c.LoyaltyProgramID,
+			ServiceName:       c.LoyaltyProgram.Service.Name,
+			RewardDescription: rewardDescription(c.LoyaltyProgram.RewardType, c.LoyaltyProgram.Service.Name, c.LoyaltyProgram.DiscountValue),
+			RewardType:        c.LoyaltyProgram.RewardType,
+			DiscountValue:     c.LoyaltyProgram.DiscountValue,
+		})
+	}
+	return res, nil
+}
+
+// GetPublicPrograms returns anonymous-safe active program summaries.
+func (s *LoyaltyServiceImpl) GetPublicPrograms(beautyCenterID uint) ([]response.PublicProgramResponse, error) {
+	programs, err := s.repo.FindPublicProgramsByCenter(beautyCenterID)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]response.PublicProgramResponse, 0, len(programs))
+	for _, p := range programs {
+		res = append(res, response.PublicProgramResponse{
+			ID:                p.ID,
+			ServiceName:       p.Service.Name,
+			RequiredSteps:     p.RequiredSteps,
+			RewardType:        p.RewardType,
+			RewardDescription: rewardDescription(p.RewardType, p.Service.Name, p.DiscountValue),
+			DiscountValue:     p.DiscountValue,
+			IsActive:          p.IsActive,
+		})
+	}
 	return res, nil
 }
 
@@ -172,6 +388,10 @@ func (s *LoyaltyServiceImpl) HasPendingRedemption(clientID, serviceID, beautyCen
 	}
 	card, err := s.repo.FindCompletedCard(clientID, program.ID)
 	if err != nil || card == nil {
+		return false
+	}
+	// Slice 2: an expired card is not redeemable.
+	if cardExpired(card, time.Now()) {
 		return false
 	}
 	// Ensure it hasn't been redeemed yet
@@ -193,6 +413,11 @@ func (s *LoyaltyServiceImpl) CalculateRedemption(clientID, serviceID, beautyCent
 
 	card, err := s.repo.FindCompletedCard(clientID, program.ID)
 	if err != nil || card == nil {
+		return 0, 0, nil
+	}
+
+	// Slice 2: an expired card redeems nothing.
+	if cardExpired(card, time.Now()) {
 		return 0, 0, nil
 	}
 
@@ -235,6 +460,11 @@ func (s *LoyaltyServiceImpl) FinalizeRedemption(cardID, reservationID uint) erro
 		return err
 	}
 
+	// Slice 2 defense: never finalize a redemption on an expired card.
+	if cardExpired(cardPtr, time.Now()) {
+		return nil
+	}
+
 	// Get the program to calculate the discount
 	var programPtr *models.LoyaltyProgram
 	if cardPtr.LoyaltyProgram.ServiceID != nil {
@@ -273,9 +503,11 @@ func (s *LoyaltyServiceImpl) FinalizeRedemption(cardID, reservationID uint) erro
 		return err
 	}
 
-	// Reset the card for next cycle
+	// Reset the card for next cycle (expires_at re-derived from the program's
+	// duration policy; nil policy = no expiry).
 	cardPtr.CurrentSteps = 0
 	cardPtr.Status = "active"
+	cardPtr.ExpiresAt = deriveExpiresAt(time.Now(), programPtr.DurationDays)
 	if err := s.repo.UpdatePunchCard(cardPtr); err != nil {
 		return err
 	}
@@ -296,7 +528,12 @@ func (s *LoyaltyServiceImpl) FindRedemptionByReservation(reservationID uint) boo
 
 // ── Center program management ────────────────────────────────
 
-func (s *LoyaltyServiceImpl) FindProgramsByCenter(beautyCenterID uint) ([]response.LoyaltyProgramResponse, error) {
+func (s *LoyaltyServiceImpl) FindProgramsByCenter(beautyCenterID, actorCenterID uint) ([]response.LoyaltyProgramResponse, error) {
+	// Reject a :centerId path value that does not match the caller's claim.
+	if actorCenterID == 0 || actorCenterID != beautyCenterID {
+		return nil, apperrors.ErrForbidden
+	}
+
 	programs, err := s.repo.FindProgramsByCenter(beautyCenterID)
 	if err != nil {
 		return nil, err
@@ -304,14 +541,14 @@ func (s *LoyaltyServiceImpl) FindProgramsByCenter(beautyCenterID uint) ([]respon
 	var res []response.LoyaltyProgramResponse
 	for _, p := range programs {
 		resp := response.LoyaltyProgramResponse{
-			ID:                p.ID,
-			ServiceID:         p.ServiceID,
-			RewardServiceID:   p.RewardServiceID,
-			RequiredSteps:     p.RequiredSteps,
-			RewardType:        p.RewardType,
-			DiscountValue:     p.DiscountValue,
-			IsActive:          p.IsActive,
-			CreatedAt:         p.CreatedAt,
+			ID:              p.ID,
+			ServiceID:       p.ServiceID,
+			RewardServiceID: p.RewardServiceID,
+			RequiredSteps:   p.RequiredSteps,
+			RewardType:      p.RewardType,
+			DiscountValue:   p.DiscountValue,
+			IsActive:        p.IsActive,
+			CreatedAt:       p.CreatedAt,
 		}
 		if p.Service.Name != "" {
 			resp.ServiceName = p.Service.Name
@@ -324,10 +561,17 @@ func (s *LoyaltyServiceImpl) FindProgramsByCenter(beautyCenterID uint) ([]respon
 	return res, nil
 }
 
-func (s *LoyaltyServiceImpl) UpdateProgram(id uint, req request.UpdateLoyaltyProgramRequest) (response.LoyaltyProgramResponse, error) {
+func (s *LoyaltyServiceImpl) UpdateProgram(id, actorCenterID uint, req request.UpdateLoyaltyProgramRequest) (response.LoyaltyProgramResponse, error) {
 	program, err := s.repo.FindProgramByID(id)
-	if err != nil || program == nil {
-		return response.LoyaltyProgramResponse{}, errors.New("program not found")
+	if err != nil {
+		return response.LoyaltyProgramResponse{}, err
+	}
+	if program == nil {
+		return response.LoyaltyProgramResponse{}, apperrors.ErrNotFound
+	}
+	// Ownership: the program must belong to the acting center (centerID claim).
+	if actorCenterID == 0 || program.BeautyCenterID != actorCenterID {
+		return response.LoyaltyProgramResponse{}, apperrors.ErrForbidden
 	}
 
 	if req.ServiceID != nil {
@@ -345,44 +589,66 @@ func (s *LoyaltyServiceImpl) UpdateProgram(id uint, req request.UpdateLoyaltyPro
 	if req.DiscountValue != nil {
 		program.DiscountValue = *req.DiscountValue
 	}
+	if req.DurationDays != nil {
+		program.DurationDays = req.DurationDays
+	}
 
 	if err := s.repo.UpdateProgram(program); err != nil {
 		return response.LoyaltyProgramResponse{}, err
 	}
 
 	return response.LoyaltyProgramResponse{
-		ID:                program.ID,
-		ServiceID:         program.ServiceID,
-		RewardServiceID:   program.RewardServiceID,
-		RequiredSteps:     program.RequiredSteps,
-		RewardType:        program.RewardType,
-		DiscountValue:     program.DiscountValue,
-		IsActive:          program.IsActive,
-		CreatedAt:         program.CreatedAt,
+		ID:              program.ID,
+		ServiceID:       program.ServiceID,
+		RewardServiceID: program.RewardServiceID,
+		RequiredSteps:   program.RequiredSteps,
+		RewardType:      program.RewardType,
+		DiscountValue:   program.DiscountValue,
+		IsActive:        program.IsActive,
+		CreatedAt:       program.CreatedAt,
 	}, nil
 }
 
-func (s *LoyaltyServiceImpl) DeleteProgram(id uint) error {
+func (s *LoyaltyServiceImpl) DeleteProgram(id, actorCenterID uint) error {
 	program, err := s.repo.FindProgramByID(id)
-	if err != nil || program == nil {
-		return errors.New("program not found")
+	if err != nil {
+		return err
+	}
+	if program == nil {
+		return apperrors.ErrNotFound
+	}
+	if actorCenterID == 0 || program.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
 	}
 	return s.repo.DeleteProgram(program)
 }
 
-func (s *LoyaltyServiceImpl) ToggleProgram(id uint, isActive bool) error {
+func (s *LoyaltyServiceImpl) ToggleProgram(id, actorCenterID uint, isActive bool) error {
 	program, err := s.repo.FindProgramByID(id)
-	if err != nil || program == nil {
-		return errors.New("program not found")
+	if err != nil {
+		return err
+	}
+	if program == nil {
+		return apperrors.ErrNotFound
+	}
+	if actorCenterID == 0 || program.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
 	}
 	program.IsActive = isActive
 	return s.repo.UpdateProgram(program)
 }
 
-func (s *LoyaltyServiceImpl) GetCenterSettings(beautyCenterID uint) (response.LoyaltySettingsResponse, error) {
+func (s *LoyaltyServiceImpl) GetCenterSettings(beautyCenterID, actorCenterID uint) (response.LoyaltySettingsResponse, error) {
+	// Reject a :centerId path value that does not match the caller's claim.
+	if actorCenterID == 0 || actorCenterID != beautyCenterID {
+		return response.LoyaltySettingsResponse{}, apperrors.ErrForbidden
+	}
+
+	// FindByID reports a missing/soft-deleted center as ErrRecordNotFound, so
+	// both branches collapse to the same sentinel (no raw DB error leaks).
 	center, err := s.centerRepo.FindByID(beautyCenterID)
 	if err != nil || center == nil {
-		return response.LoyaltySettingsResponse{}, errors.New("center not found")
+		return response.LoyaltySettingsResponse{}, apperrors.ErrNotFound
 	}
 	return response.LoyaltySettingsResponse{
 		LoyaltyEnabled:      center.LoyaltyEnabled,
@@ -390,10 +656,17 @@ func (s *LoyaltyServiceImpl) GetCenterSettings(beautyCenterID uint) (response.Lo
 	}, nil
 }
 
-func (s *LoyaltyServiceImpl) UpdateCenterSettings(beautyCenterID uint, req request.UpdateLoyaltySettingsRequest) error {
+func (s *LoyaltyServiceImpl) UpdateCenterSettings(beautyCenterID, actorCenterID uint, req request.UpdateLoyaltySettingsRequest) error {
+	// Reject a :centerId path value that does not match the caller's claim.
+	if actorCenterID == 0 || actorCenterID != beautyCenterID {
+		return apperrors.ErrForbidden
+	}
+
+	// FindByID reports a missing/soft-deleted center as ErrRecordNotFound, so
+	// both branches collapse to the same sentinel (no raw DB error leaks).
 	center, err := s.centerRepo.FindByID(beautyCenterID)
 	if err != nil || center == nil {
-		return errors.New("center not found")
+		return apperrors.ErrNotFound
 	}
 	if req.LoyaltyEnabled != nil {
 		center.LoyaltyEnabled = *req.LoyaltyEnabled
@@ -406,4 +679,45 @@ func (s *LoyaltyServiceImpl) UpdateCenterSettings(beautyCenterID uint, req reque
 		center.LoyaltyPerPersonnel = *req.LoyaltyPerPersonnel
 	}
 	return s.centerRepo.Update(center)
+}
+
+// GetMetrics returns per-program issued-vs-redeemed counts for a center.
+// Ownership: actorCenterID must equal beautyCenterID (403 otherwise), same
+// contract as the other center-scoped loyalty reads.
+func (s *LoyaltyServiceImpl) GetMetrics(beautyCenterID, actorCenterID uint) ([]response.LoyaltyMetricsResponse, error) {
+	if actorCenterID == 0 || actorCenterID != beautyCenterID {
+		return nil, apperrors.ErrForbidden
+	}
+
+	programs, err := s.repo.FindProgramsByCenter(beautyCenterID)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]response.LoyaltyMetricsResponse, 0, len(programs))
+	for _, p := range programs {
+		active, completed, err := s.repo.CountCardsByProgramStatus(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		redeemed, err := s.repo.CountRedemptionsByProgram(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		issued := active + completed
+		rate := 0.0
+		if issued > 0 {
+			rate = float64(redeemed) / float64(issued)
+		}
+		res = append(res, response.LoyaltyMetricsResponse{
+			ProgramID:      p.ID,
+			ServiceName:    p.Service.Name,
+			RequiredSteps:  p.RequiredSteps,
+			ActiveCards:    active,
+			CompletedCards: completed,
+			Redemptions:    redeemed,
+			RedemptionRate: rate,
+		})
+	}
+	return res, nil
 }

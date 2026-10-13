@@ -1,7 +1,7 @@
 package service
 
 import (
-	"github.com/Nina-99/yottu-api/data/response"
+	"github.com/Nina-99/yotuvia-api/data/response"
 )
 
 type PersonnelInvitationService interface {

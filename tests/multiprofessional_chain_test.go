@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/router"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/router"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -23,7 +23,7 @@ import (
 // assignmentBody builds a client booking body with a two-professional plan.
 func assignmentBody(serviceIDs [2]uint, personnelIDs [2]uint, start string) string {
 	return fmt.Sprintf(
-		`{"beauty_center_id":1,"service_ids":[%d,%d],"assignments":[{"service_id":%d,"personnel_id":%d},{"service_id":%d,"personnel_id":%d}],"date":"2026-10-05","start_time":%q}`,
+		`{"beauty_center_id":1,"service_ids":[%d,%d],"assignments":[{"service_id":%d,"personnel_id":%d},{"service_id":%d,"personnel_id":%d}],"date":"`+bookingTestDateKey+`","start_time":%q}`,
 		serviceIDs[0], serviceIDs[1],
 		serviceIDs[0], personnelIDs[0], serviceIDs[1], personnelIDs[1],
 		start,
@@ -84,7 +84,7 @@ func TestCreateReservation_LeadFollowsServiceIDsOrder(t *testing.T) {
 
 	// service_ids = [11,10] but the plan still binds 10→1 and 11→2. The lead is
 	// the professional of service 11 (first requested) = 2.
-	body := `{"beauty_center_id":1,"service_ids":[11,10],"assignments":[{"service_id":10,"personnel_id":1},{"service_id":11,"personnel_id":2}],"date":"2026-10-05","start_time":"09:00"}`
+	body := `{"beauty_center_id":1,"service_ids":[11,10],"assignments":[{"service_id":10,"personnel_id":1},{"service_id":11,"personnel_id":2}],"date":"` + bookingTestDateKey + `","start_time":"09:00"}`
 	w := do(r, http.MethodPost, "/api/reservation/", roleToken(t, 1, 0, "client"), body)
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 
@@ -168,23 +168,23 @@ func TestCreateReservation_AssignmentPlanValidation(t *testing.T) {
 	}{
 		{
 			name: "missing a requested service",
-			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1}],"date":"2026-10-05","start_time":"09:00"}`,
+			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1}],"date":"` + bookingTestDateKey + `","start_time":"09:00"}`,
 		},
 		{
 			name: "duplicate service",
-			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1},{"service_id":10,"personnel_id":2}],"date":"2026-10-05","start_time":"09:00"}`,
+			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1},{"service_id":10,"personnel_id":2}],"date":"` + bookingTestDateKey + `","start_time":"09:00"}`,
 		},
 		{
 			name: "unknown service (not requested)",
-			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1},{"service_id":99,"personnel_id":2}],"date":"2026-10-05","start_time":"09:00"}`,
+			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1},{"service_id":99,"personnel_id":2}],"date":"` + bookingTestDateKey + `","start_time":"09:00"}`,
 		},
 		{
 			name: "zero professional",
-			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":0},{"service_id":11,"personnel_id":1}],"date":"2026-10-05","start_time":"09:00"}`,
+			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":0},{"service_id":11,"personnel_id":1}],"date":"` + bookingTestDateKey + `","start_time":"09:00"}`,
 		},
 		{
 			name: "zero service",
-			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":0,"personnel_id":1},{"service_id":11,"personnel_id":1}],"date":"2026-10-05","start_time":"09:00"}`,
+			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":0,"personnel_id":1},{"service_id":11,"personnel_id":1}],"date":"` + bookingTestDateKey + `","start_time":"09:00"}`,
 		},
 	}
 
@@ -236,7 +236,7 @@ func TestAvailabilitySearch_Chain_Agreement(t *testing.T) {
 	seedReservationRow(t, db, 1, 1, mpDay, "10:00", "10:30")
 	seedReservationRow(t, db, 1, 2, mpDay, "11:00", "11:30")
 
-	const chainQuery = "service_ids=10,11&assignments=10:1,11:2&from=2026-10-05&to=2026-10-05&center_id=1&limit=50"
+	chainQuery := "service_ids=10,11&assignments=10:1,11:2&from=" + bookingTestDateKey + "&to=" + bookingTestDateKey + "&center_id=1&limit=50"
 	times := searchStartTimes(getSearch(t, r, chainQuery))
 	assert.NotContains(t, times, "10:00", "pro 1 is busy at the candidate start")
 	assert.NotContains(t, times, "10:30", "pro 2 is busy at its chained segment")
@@ -267,12 +267,12 @@ func TestAvailabilitySearch_Chain_SingleProfessionalControl(t *testing.T) {
 	seedReservationRow(t, db, 1, 5, mpDay, "10:00", "11:00")
 
 	perCenter := getPerCenterAvailable(t, r,
-		"/api/beauty-centers/1/available-slots?date=2026-10-05&duration=30&personnel_id=5")
+		"/api/beauty-centers/1/available-slots?date="+bookingTestDateKey+"&duration=30&personnel_id=5")
 
-	chain := getSearch(t, r, "service_ids=10&assignments=10:5&from=2026-10-05&to=2026-10-05&center_id=1&limit=50")
+	chain := getSearch(t, r, "service_ids=10&assignments=10:5&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&center_id=1&limit=50")
 	assert.Equal(t, perCenter, searchStartTimes(chain), "a single-step chain equals the per-center path")
 
-	legacy := getSearch(t, r, "service_ids=10&personnel_id=5&from=2026-10-05&to=2026-10-05&center_id=1&limit=50")
+	legacy := getSearch(t, r, "service_ids=10&personnel_id=5&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&center_id=1&limit=50")
 	assert.Equal(t, perCenter, searchStartTimes(legacy), "the assignment-free legacy path is untouched")
 }
 
@@ -291,13 +291,13 @@ func TestAvailabilitySearch_Chain_Validation(t *testing.T) {
 		name  string
 		query string
 	}{
-		{"missing coverage", "service_ids=10,11&assignments=10:1&from=2026-10-05&to=2026-10-05"},
-		{"duplicate service", "service_ids=10,11&assignments=10:1,10:2&from=2026-10-05&to=2026-10-05"},
-		{"unknown service", "service_ids=10,11&assignments=10:1,99:2&from=2026-10-05&to=2026-10-05"},
-		{"unknown personnel", "service_ids=10,11&assignments=10:1,11:999&from=2026-10-05&to=2026-10-05"},
-		{"zero personnel", "service_ids=10,11&assignments=10:0,11:1&from=2026-10-05&to=2026-10-05"},
-		{"malformed pair", "service_ids=10,11&assignments=10-1,11:2&from=2026-10-05&to=2026-10-05"},
-		{"chain with treatment_ids", "service_ids=10&treatment_ids=5&assignments=10:1&from=2026-10-05&to=2026-10-05"},
+		{"missing coverage", "service_ids=10,11&assignments=10:1&from=" + bookingTestDateKey + "&to=" + bookingTestDateKey + ""},
+		{"duplicate service", "service_ids=10,11&assignments=10:1,10:2&from=" + bookingTestDateKey + "&to=" + bookingTestDateKey + ""},
+		{"unknown service", "service_ids=10,11&assignments=10:1,99:2&from=" + bookingTestDateKey + "&to=" + bookingTestDateKey + ""},
+		{"unknown personnel", "service_ids=10,11&assignments=10:1,11:999&from=" + bookingTestDateKey + "&to=" + bookingTestDateKey + ""},
+		{"zero personnel", "service_ids=10,11&assignments=10:0,11:1&from=" + bookingTestDateKey + "&to=" + bookingTestDateKey + ""},
+		{"malformed pair", "service_ids=10,11&assignments=10-1,11:2&from=" + bookingTestDateKey + "&to=" + bookingTestDateKey + ""},
+		{"chain with treatment_ids", "service_ids=10&treatment_ids=5&assignments=10:1&from=" + bookingTestDateKey + "&to=" + bookingTestDateKey + ""},
 	}
 
 	for _, tc := range cases {
@@ -309,7 +309,7 @@ func TestAvailabilitySearch_Chain_Validation(t *testing.T) {
 
 	// An absent plan keeps the legacy contract intact.
 	w := do(r, http.MethodGet,
-		"/api/availability/search?service_ids=10&from=2026-10-05&to=2026-10-05&center_id=1", "", "")
+		"/api/availability/search?service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&center_id=1", "", "")
 	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
@@ -347,7 +347,7 @@ func TestAvailabilitySearch_Chain_QueryBudget(t *testing.T) {
 	}
 
 	w := do(r, http.MethodGet,
-		"/api/availability/search?service_ids=10,11&assignments=10:1,11:2&from=2026-10-05&to=2026-10-11&limit=50", "", "")
+		"/api/availability/search?service_ids=10,11&assignments=10:1,11:2&from="+bookingTestDateKey+"&to="+bookingTestDatePlus(6)+"&limit=50", "", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	queries := atomic.LoadInt64(counter)
 	t.Logf("chained availability search SELECTs — %d centers x %d days: %d", centers, days, queries)

@@ -4,9 +4,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/service"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/service"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -160,6 +162,8 @@ func (c *ServiceController) FindAll(ctx *gin.Context) {
 		limit = 20
 	}
 
+	lang := ctx.DefaultQuery("lang", "")
+
 	services, total, err := c.serviceService.FindAll(beautyCenterID, categoryID, isActive, page, limit)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -168,24 +172,7 @@ func (c *ServiceController) FindAll(ctx *gin.Context) {
 
 	var res []response.ServiceResponse
 	for _, s := range services {
-		res = append(res, response.ServiceResponse{
-			ID:             s.ID,
-			BeautyCenterID: s.BeautyCenterID,
-			CategoryID:     s.CategoryID,
-			Name:           s.Name,
-			Description:    s.Description,
-			Duration:       s.Duration,
-			Price:          s.Price,
-			ImageURL:       s.ImageURL,
-			IsActive:       s.IsActive,
-			TreatmentID:    s.TreatmentID,
-			Category: response.CategoryResponse{
-				ID:             s.Category.ID,
-				BeautyCenterID: s.Category.BeautyCenterID,
-				Name:           s.Category.Name,
-				Description:    s.Category.Description,
-			},
-		})
+		res = append(res, serviceToResponse(s, lang))
 	}
 
 	ctx.JSON(http.StatusOK, response.PaginatedResponse{
@@ -194,6 +181,34 @@ func (c *ServiceController) FindAll(ctx *gin.Context) {
 		Page:  page,
 		Limit: limit,
 	})
+}
+
+// serviceToResponse maps a service (and its category) to the wire shape,
+// resolving translatable fields for `lang` with the base value as fallback.
+func serviceToResponse(s models.Service, lang string) response.ServiceResponse {
+	return response.ServiceResponse{
+		ID:              s.ID,
+		BeautyCenterID:  s.BeautyCenterID,
+		CategoryID:      s.CategoryID,
+		Name:            utils.LocalizedValue(s.Name, s.NameI18n, lang),
+		Description:     utils.LocalizedValue(s.Description, s.DescriptionI18n, lang),
+		NameI18n:        s.NameI18n,
+		DescriptionI18n: s.DescriptionI18n,
+		Duration:        s.Duration,
+		Price:           s.Price,
+		ImageURL:        s.ImageURL,
+		IsActive:        s.IsActive,
+		TreatmentID:     s.TreatmentID,
+		Category: response.CategoryResponse{
+			ID:              s.Category.ID,
+			BeautyCenterID:  s.Category.BeautyCenterID,
+			Name:            utils.LocalizedValue(s.Category.Name, s.Category.NameI18n, lang),
+			Description:     utils.LocalizedValue(s.Category.Description, s.Category.DescriptionI18n, lang),
+			NameI18n:        s.Category.NameI18n,
+			DescriptionI18n: s.Category.DescriptionI18n,
+			Icon:            s.Category.Icon,
+		},
+	}
 }
 
 // FindById godoc
@@ -220,24 +235,7 @@ func (c *ServiceController) FindById(ctx *gin.Context) {
 		return
 	}
 
-	res := response.ServiceResponse{
-		ID:             s.ID,
-		BeautyCenterID: s.BeautyCenterID,
-		CategoryID:     s.CategoryID,
-		Name:           s.Name,
-		Description:    s.Description,
-		Duration:       s.Duration,
-		Price:          s.Price,
-		ImageURL:       s.ImageURL,
-		IsActive:       s.IsActive,
-		TreatmentID:    s.TreatmentID,
-		Category: response.CategoryResponse{
-			ID:             s.Category.ID,
-			BeautyCenterID: s.Category.BeautyCenterID,
-			Name:           s.Category.Name,
-			Description:    s.Category.Description,
-		},
-	}
+	res := serviceToResponse(*s, ctx.DefaultQuery("lang", ""))
 
 	ctx.JSON(http.StatusOK, res)
 }

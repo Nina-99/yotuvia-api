@@ -1,8 +1,8 @@
 package service
 
 import (
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
 )
 
 type TokenTransactionServiceImpl struct {

@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nina-99/yottu-api/apperrors"
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/service"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/service"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -512,7 +512,7 @@ func (c *ReservationController) VerifyQR(ctx *gin.Context) {
 
 	beautyCenterID := ctx.GetUint("centerID")
 
-	reservation, alreadyCompleted, err := c.reservationService.VerifyQR(token, beautyCenterID)
+	reservation, alreadyCompleted, reward, err := c.reservationService.VerifyQRWithReward(token, beautyCenterID)
 	if err != nil {
 		c.writeError(ctx, err)
 		return
@@ -521,6 +521,7 @@ func (c *ReservationController) VerifyQR(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, response.VerifyQRResponse{
 		Reservation:      mapToReservationResponse(reservation),
 		AlreadyCompleted: alreadyCompleted,
+		Reward:           reward,
 	})
 }
 

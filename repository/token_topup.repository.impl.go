@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
 )
 
@@ -64,6 +64,29 @@ func (r *TokenTopUpRepositoryImpl) FindByCenterIDWithStatus(beautyCenterID uint,
 	}
 
 	query.Count(&total)
+	offset := (page - 1) * limit
+	err := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&topups).Error
+	return topups, total, err
+}
+
+// FindAllWithFilters is the platform-wide queue read. Both filters are honoured
+// by the query itself (never faked in the handler): a nil pointer means "every
+// centre", an empty status means "every status".
+func (r *TokenTopUpRepositoryImpl) FindAllWithFilters(page, limit int, beautyCenterID *uint, status string) ([]models.TokenTopUp, int64, error) {
+	var topups []models.TokenTopUp
+	var total int64
+
+	query := r.db.Model(&models.TokenTopUp{})
+	if beautyCenterID != nil {
+		query = query.Where("beauty_center_id = ?", *beautyCenterID)
+	}
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 	offset := (page - 1) * limit
 	err := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&topups).Error
 	return topups, total, err

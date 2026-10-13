@@ -1,6 +1,6 @@
 package repository
 
-import "github.com/Nina-99/yottu-api/models"
+import "github.com/Nina-99/yotuvia-api/models"
 
 // TreatmentRepository is the read side of the GLOBAL treatment vocabulary.
 type TreatmentRepository interface {

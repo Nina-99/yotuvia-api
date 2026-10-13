@@ -1,8 +1,8 @@
 package service
 
 import (
-	"github.com/Nina-99/yottu-api/apperrors"
-	"github.com/Nina-99/yottu-api/data/request"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
 )
 
 // This file holds the single definition of "a multi-professional assignment

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -68,6 +68,8 @@ func DBConnection() {
 		&models.SavedVideo{},
 		&models.VideoWatchEvent{},
 		&models.WaitlistEntry{},
+		&models.PlatformAdmin{},
+		&models.BoostCampaign{},
 	}
 
 	for _, model := range list_models {
@@ -91,4 +93,14 @@ func DBConnection() {
 	// ReservationService.PersonnelID existed. Idempotent (only NULL rows) and
 	// never fatal on a bad row.
 	BackfillReservationServicePersonnel()
+	// Copies the legacy platform-wide payment config into one row per centre so
+	// the per-centre economy keeps its existing QR/phone/tiers. Non-destructive
+	// and idempotent: an already-configured centre is never overwritten and a
+	// re-run creates nothing. The legacy singleton row is kept for rollback.
+	BackfillPaymentConfigs()
+	// Creates the platform-level super_admin from SUPER_ADMIN_EMAIL /
+	// SUPER_ADMIN_PASSWORD. Idempotent and non-destructive (an existing hash is
+	// never overwritten); a half-configured or unset env is a logged no-op. This
+	// is the ONLY way the role comes to exist — registration cannot mint it.
+	SeedPlatformAdmin()
 }

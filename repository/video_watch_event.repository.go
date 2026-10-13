@@ -1,6 +1,6 @@
 package repository
 
-import "github.com/Nina-99/yottu-api/models"
+import "github.com/Nina-99/yotuvia-api/models"
 
 type VideoWatchEventRepository interface {
 	Create(event *models.VideoWatchEvent) error

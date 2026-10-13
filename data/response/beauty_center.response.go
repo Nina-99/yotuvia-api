@@ -1,6 +1,10 @@
 package response
 
-import "time"
+import (
+	"time"
+
+	"github.com/Nina-99/yotuvia-api/utils"
+)
 
 type BeautyCenterResponse struct {
 	Currency              string                  `json:"currency"`
@@ -11,6 +15,8 @@ type BeautyCenterResponse struct {
 	Phone                 string                  `json:"phone"`
 	Url                   string                  `json:"url"`
 	Description           string                  `json:"description"`
+	NameI18n              map[string]string       `json:"name_i18n,omitempty"`
+	DescriptionI18n       map[string]string       `json:"description_i18n,omitempty"`
 	IsActive              bool                    `json:"is_active"`
 	Latitude              float64                 `json:"latitude"`
 	Longitude             float64                 `json:"longitude"`
@@ -25,6 +31,14 @@ type BeautyCenterResponse struct {
 	Images                []BeautyCenterImageResp `json:"images"`
 	Schedules             []WorkingHourResp       `json:"schedules"`
 	SocialMedia           *SocialMediaResp        `json:"social_media,omitempty"`
+}
+
+// Localize swaps Name/Description for the requested language using the stored
+// per-locale maps, falling back to the base value. Raw maps are kept so owner
+// edit forms can prefill every language.
+func (r *BeautyCenterResponse) Localize(lang string) {
+	r.Name = utils.LocalizedValue(r.Name, r.NameI18n, lang)
+	r.Description = utils.LocalizedValue(r.Description, r.DescriptionI18n, lang)
 }
 
 type BeautyCenterImageResp struct {

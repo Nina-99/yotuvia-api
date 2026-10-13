@@ -1,6 +1,6 @@
 package service
 
-import "github.com/Nina-99/yottu-api/data/response"
+import "github.com/Nina-99/yotuvia-api/data/response"
 
 // TreatmentService exposes the GLOBAL treatment vocabulary to clients and to
 // the center's service editor.

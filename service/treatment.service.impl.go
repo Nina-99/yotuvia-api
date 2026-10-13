@@ -1,8 +1,8 @@
 package service
 
 import (
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/repository"
 )
 
 type TreatmentServiceImpl struct {

@@ -3,10 +3,11 @@ package service
 import (
 	"errors"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
 )
@@ -49,13 +50,18 @@ func (s *SocialMediaServiceImpl) Create(req request.CreateSocialMediaRequest) er
 	return s.SocialMediaRepository.Create(&socialMedia)
 }
 
-func (s *SocialMediaServiceImpl) Update(id uint, req request.UpdateSocialMediaRequest) error {
-	if err := s.Validate.Struct(req); err != nil {
-		return err
-	}
-
+func (s *SocialMediaServiceImpl) Update(id, actorCenterID uint, req request.UpdateSocialMediaRequest) error {
 	socialMedia, err := s.SocialMediaRepository.FindByID(id)
 	if err != nil {
+		return apperrors.ErrNotFound
+	}
+	// Ownership first so a foreign admin always gets 403, never a validation
+	// hint about a row it does not own.
+	if actorCenterID == 0 || socialMedia.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
+	}
+
+	if err := s.Validate.Struct(req); err != nil {
 		return err
 	}
 
@@ -68,10 +74,14 @@ func (s *SocialMediaServiceImpl) Update(id uint, req request.UpdateSocialMediaRe
 	return s.SocialMediaRepository.Update(socialMedia)
 }
 
-func (s *SocialMediaServiceImpl) Delete(id uint) error {
+func (s *SocialMediaServiceImpl) Delete(id, actorCenterID uint) error {
 	socialMedia, err := s.SocialMediaRepository.FindByID(id)
 	if err != nil {
-		return err
+		return apperrors.ErrNotFound
+	}
+	// Ownership: only the owning centre may delete its links.
+	if actorCenterID == 0 || socialMedia.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
 	}
 	return s.SocialMediaRepository.Delete(socialMedia)
 }

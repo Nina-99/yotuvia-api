@@ -1,6 +1,6 @@
 package service
 
-import "github.com/Nina-99/yottu-api/models"
+import "github.com/Nina-99/yotuvia-api/models"
 
 type TokenMissionService interface {
 	TriggerCheck(beautyCenterID uint, triggerType string) error

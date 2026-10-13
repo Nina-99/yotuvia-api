@@ -1,6 +1,6 @@
 package service
 
-import "github.com/Nina-99/yottu-api/data/request"
+import "github.com/Nina-99/yotuvia-api/data/request"
 
 type VideoWatchEventService interface {
 	/** Record a watch event for a client. */

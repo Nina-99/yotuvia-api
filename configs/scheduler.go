@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/service"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/service"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
 )

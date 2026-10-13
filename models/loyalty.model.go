@@ -1,6 +1,10 @@
 package models
 
-import "gorm.io/gorm"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type LoyaltyProgram struct {
 	gorm.Model
@@ -15,6 +19,11 @@ type LoyaltyProgram struct {
 	RewardType    string  `gorm:"not null;size:50" json:"reward_type"`
 	DiscountValue float64 `gorm:"type:decimal(5,2);default:0.0" json:"discount_value"`
 	IsActive      bool    `gorm:"default:true" json:"is_active"`
+
+	// DurationDays is the NULLABLE card-lifetime policy in days (slice 1:
+	// persisted only, NOT enforced — enforcement lands in slice 2). NULL means
+	// the card never expires. NEVER use absolute valid_until semantics.
+	DurationDays *int `json:"duration_days,omitempty"`
 }
 
 type CustomerPunchCard struct {
@@ -27,6 +36,11 @@ type CustomerPunchCard struct {
 	CurrentSteps int    `gorm:"not null;default:0" json:"current_steps"`
 	Status       string `gorm:"size:20;default:'active'" json:"status"`
 
+	// ExpiresAt is the DERIVED per-card expiry (created/reset + program
+	// duration_days). Nullable; NULL = no expiry. Slice 1 persists it WITHOUT
+	// enforcement (slice 2 enforces).
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
 	// PersonnelID is set when LoyaltyPerPersonnel is enabled. The card is
 	// scoped to a specific staff member — the client gets a separate card per
 	// stylist.
@@ -36,9 +50,9 @@ type CustomerPunchCard struct {
 
 type PunchHistory struct {
 	gorm.Model
-	CustomerPunchCardID uint              `gorm:"not null" json:"customer_punch_card_id"`
+	CustomerPunchCardID uint              `gorm:"not null;uniqueIndex:idx_punch_reservation_card" json:"customer_punch_card_id"`
 	CustomerPunchCard   CustomerPunchCard `json:"-"`
-	ReservationID       uint              `gorm:"not null" json:"reservation_id"`
+	ReservationID       uint              `gorm:"not null;uniqueIndex:idx_punch_reservation_card" json:"reservation_id"`
 	Reservation         Reservation       `json:"-"`
 	// PersonnelID is set when LoyaltyPerPersonnel is enabled on the beauty
 	// center. It tracks which staff member performed the service for the stamp.

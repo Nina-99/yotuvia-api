@@ -1,25 +1,25 @@
 package service
 
 import (
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 )
 
 // EconomyConfig is the resolved token-economy parameter set for a currency.
 type EconomyConfig struct {
-	Currency        string
-	YottuToFiatRate float64
-	CommissionPct   float64
-	MinChargeMilli  int64
+	Currency          string
+	YotuviaToFiatRate float64
+	CommissionPct     float64
+	MinChargeMilli    int64
 }
 
 // Canonical defaults applied when a currency has no market_config row — the
 // Bolivia launch values (feat-token-economy-config D2).
 var defaultEconomy = EconomyConfig{
-	Currency:        "BOB",
-	YottuToFiatRate: 1.0,
-	CommissionPct:   3.5,
-	MinChargeMilli:  350,
+	Currency:          "BOB",
+	YotuviaToFiatRate: 1.0,
+	CommissionPct:     3.5,
+	MinChargeMilli:    350,
 }
 
 type MarketConfigService interface {
@@ -47,9 +47,9 @@ func (s *MarketConfigServiceImpl) GetEconomyForCurrency(currency string) Economy
 		return defaultEconomy
 	}
 	return EconomyConfig{
-		Currency:        row.Currency,
-		YottuToFiatRate: row.YottuToFiatRate,
-		CommissionPct:   row.CommissionPct,
-		MinChargeMilli:  row.MinChargeMilli,
+		Currency:          row.Currency,
+		YotuviaToFiatRate: row.YotuviaToFiatRate,
+		CommissionPct:     row.CommissionPct,
+		MinChargeMilli:    row.MinChargeMilli,
 	}
 }

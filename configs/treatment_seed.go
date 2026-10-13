@@ -3,8 +3,8 @@ package configs
 import (
 	"sort"
 
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/utils"
 )
 
 // treatmentCategoryDef is one entry of the BASE global treatment vocabulary:

@@ -4,8 +4,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/service"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,6 +16,14 @@ type ReviewController struct {
 
 func NewReviewController(service service.ReviewService) *ReviewController {
 	return &ReviewController{service: service}
+}
+
+// writeError maps a service error through apperrors.MapToHTTP so ownership
+// mismatches surface as 403 {"error":"forbidden"} and unknown errors stay a
+// leak-free 500.
+func (c *ReviewController) writeError(ctx *gin.Context, err error) {
+	status, msg := apperrors.MapToHTTP(err)
+	ctx.JSON(status, gin.H{"error": msg})
 }
 
 func (c *ReviewController) Create(ctx *gin.Context) {
@@ -59,7 +68,7 @@ func (c *ReviewController) Update(ctx *gin.Context) {
 	}
 
 	if err := c.service.Update(clientID.(uint), uint(reviewID), req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -81,7 +90,7 @@ func (c *ReviewController) Delete(ctx *gin.Context) {
 	}
 
 	if err := c.service.Delete(clientID.(uint), uint(reviewID)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -153,9 +162,9 @@ func (c *ReviewController) FindByClient(ctx *gin.Context) {
 		return
 	}
 
-	reviews, err := c.service.FindByClientID(uint(clientID))
+	reviews, err := c.service.FindByClientID(uint(clientID), ctx.GetUint("clientID"), ctx.GetString("role"))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 

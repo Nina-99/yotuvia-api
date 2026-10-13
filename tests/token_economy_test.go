@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/apperrors"
-	"github.com/Nina-99/yottu-api/configs"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/service"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/configs"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/service"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -38,7 +38,7 @@ func TestMarketConfig_FallbackOnMissing(t *testing.T) {
 	cfg := svc.GetEconomyForCurrency("USD")
 	assert.Equal(t, 3.5, cfg.CommissionPct)
 	assert.Equal(t, int64(350), cfg.MinChargeMilli)
-	assert.Equal(t, 1.0, cfg.YottuToFiatRate)
+	assert.Equal(t, 1.0, cfg.YotuviaToFiatRate)
 }
 
 // TestMarketConfig_HitReturnsRow covers the configured path.
@@ -47,10 +47,10 @@ func TestMarketConfig_HitReturnsRow(t *testing.T) {
 	svc, db := newMarketConfigSUT(t)
 
 	assert.NoError(t, db.Create(&models.MarketConfig{
-		Currency:        "BOB",
-		YottuToFiatRate: 1.0,
-		CommissionPct:   3.5,
-		MinChargeMilli:  350,
+		Currency:          "BOB",
+		YotuviaToFiatRate: 1.0,
+		CommissionPct:     3.5,
+		MinChargeMilli:    350,
 	}).Error)
 
 	cfg := svc.GetEconomyForCurrency("BOB")
@@ -210,10 +210,10 @@ func TestEconomy_ChargeFollowsConfigAndFloor(t *testing.T) {
 	db, svc := newEconomyVerifySUT(t)
 
 	assert.NoError(t, db.Create(&models.MarketConfig{
-		Currency:        "BOB",
-		YottuToFiatRate: 1.0,
-		CommissionPct:   3.5,
-		MinChargeMilli:  350,
+		Currency:          "BOB",
+		YotuviaToFiatRate: 1.0,
+		CommissionPct:     3.5,
+		MinChargeMilli:    350,
 	}).Error)
 
 	// Big ticket: 200 Bs -> pct charge 7 YOTTU.

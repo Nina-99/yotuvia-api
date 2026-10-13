@@ -3,7 +3,7 @@ package repository
 import (
 	"time"
 
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 )
 
 // WaitlistSlot identifies one concrete queue slot (center + date + start).

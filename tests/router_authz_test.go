@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/router"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/router"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -43,14 +43,14 @@ func setupRouterAuthzDB(t *testing.T) *gorm.DB {
 		&models.TreatmentCategory{}, &models.Treatment{},
 		&models.TokenTransaction{}, &models.TokenMission{}, &models.TokenMissionProgress{},
 		&models.Referral{}, &models.Client{}, &models.CustomerPunchCard{},
-		&models.Favorite{}, &models.PersonnelFollow{}, &models.FeedPost{}, &models.LoyaltyProgram{},		&models.Personnel{}, &models.PersonnelImage{}, &models.PersonnelService{},
+		&models.Favorite{}, &models.PersonnelFollow{}, &models.FeedPost{}, &models.LoyaltyProgram{}, &models.Personnel{}, &models.PersonnelImage{}, &models.PersonnelService{},
 		&models.PostLike{}, &models.PunchHistory{}, &models.Reservation{},
 		&models.ReservationService{}, &models.Review{}, &models.Service{},
 		&models.SocialMedia{}, &models.WorkingHour{}, &models.PersonnelInvitation{}, &models.Notification{}, &models.PushDevice{},
 		&models.MarketConfig{}, &models.VideoComment{}, &models.SavedVideo{}, &models.VideoWatchEvent{},
 		&models.LoyaltyRedemption{}, &models.UserSession{}, &models.Promotion{},
 		&models.PromotionRedemption{}, &models.PaymentConfig{}, &models.WaitlistEntry{},
-		&models.AuthToken{},
+		&models.AuthToken{}, &models.PlatformAdmin{},
 	}
 	for _, m := range modelsToMigrate {
 		if err := db.AutoMigrate(m); err != nil {
@@ -77,6 +77,7 @@ func authzTestRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 	router.ServiceRoutes(rg, db, validate)
 	router.NotificationRoutes(rg, db)
 	router.TokenRoutes(rg, db, validate)
+	router.FavoriteRoutes(rg, db, validate)
 	return r, db
 }
 

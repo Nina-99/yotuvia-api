@@ -3,9 +3,10 @@ package service
 import (
 	"errors"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -27,10 +28,12 @@ func (s *CategoryServiceImpl) Create(req request.CreateCategoryRequest) error {
 	}
 
 	category := models.Category{
-		BeautyCenterID: req.BeautyCenterID,
-		Name:           req.Name,
-		Description:    req.Description,
-		Icon:        req.Icon,
+		BeautyCenterID:  req.BeautyCenterID,
+		Name:            req.Name,
+		Description:     req.Description,
+		NameI18n:        utils.NormalizeI18n(req.NameI18n),
+		DescriptionI18n: utils.NormalizeI18n(req.DescriptionI18n),
+		Icon:            req.Icon,
 	}
 
 	return s.CategoryRepository.Create(&category)
@@ -49,6 +52,8 @@ func (s *CategoryServiceImpl) Update(categoryID uint, req request.CreateCategory
 	category.BeautyCenterID = req.BeautyCenterID
 	category.Name = req.Name
 	category.Description = req.Description
+	category.NameI18n = utils.NormalizeI18n(req.NameI18n)
+	category.DescriptionI18n = utils.NormalizeI18n(req.DescriptionI18n)
 	category.Icon = req.Icon
 
 	return s.CategoryRepository.Update(category)

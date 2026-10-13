@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/router"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/router"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -62,11 +62,11 @@ func TestAvailabilitySearch_TreatmentDriven_ExcludesAndIncludes(t *testing.T) {
 	seedTreatmentRow(t, db, 100, 1, "Corte de cabello")
 	seedTreatmentService(t, db, 10, 1, 100, 30, true)
 
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC) // Monday
+	date := bookingTestDate // Monday
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 	seedWorkingHour(t, db, 2, int(date.Weekday()), "09:00", "18:00")
 
-	env := getSearch(t, r, "treatment_ids=100&from=2026-10-05&to=2026-10-05&limit=50")
+	env := getSearch(t, r, "treatment_ids=100&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&limit=50")
 	require.NotEmpty(t, env.Results)
 	for _, res := range env.Results {
 		assert.Equal(t, uint(1), res.CenterID, "center without the treatment must be excluded")
@@ -84,10 +84,10 @@ func TestAvailabilitySearch_TreatmentDriven_ActiveOnly(t *testing.T) {
 	seedTreatmentRow(t, db, 100, 1, "Corte de cabello")
 	seedTreatmentService(t, db, 10, 1, 100, 30, false) // inactive
 
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	date := bookingTestDate
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 
-	env := getSearch(t, r, "treatment_ids=100&from=2026-10-05&to=2026-10-05&limit=50")
+	env := getSearch(t, r, "treatment_ids=100&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&limit=50")
 	assert.Empty(t, env.Results)
 	assert.Equal(t, 0, env.Total)
 }
@@ -104,10 +104,10 @@ func TestAvailabilitySearch_TreatmentDriven_MultipleMatchesUsesMin(t *testing.T)
 	seedTreatmentService(t, db, 10, 1, 100, 45, true)
 	seedTreatmentService(t, db, 11, 1, 100, 20, true)
 
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	date := bookingTestDate
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 
-	env := getSearch(t, r, "treatment_ids=100&from=2026-10-05&to=2026-10-05&limit=50")
+	env := getSearch(t, r, "treatment_ids=100&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&limit=50")
 	require.NotEmpty(t, env.Results)
 	assert.Equal(t, 20, env.Results[0].Duration, "minimum matching duration wins")
 }
@@ -130,12 +130,12 @@ func TestAvailabilitySearch_TreatmentDriven_MultipleTreatmentsSumsAndRequiresAll
 	seedTreatmentService(t, db, 12, 2, 100, 60, true)
 	seedTreatmentService(t, db, 13, 3, 200, 60, true)
 
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	date := bookingTestDate
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 	seedWorkingHour(t, db, 2, int(date.Weekday()), "09:00", "18:00")
 	seedWorkingHour(t, db, 3, int(date.Weekday()), "09:00", "18:00")
 
-	env := getSearch(t, r, "treatment_ids=100,200&from=2026-10-05&to=2026-10-05&limit=50")
+	env := getSearch(t, r, "treatment_ids=100,200&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&limit=50")
 	require.NotEmpty(t, env.Results)
 
 	seen := map[uint]bool{}
@@ -163,11 +163,11 @@ func TestAvailabilitySearch_TreatmentPrecedenceOverServiceIDs(t *testing.T) {
 	seedServiceRow(t, db, 11, 1, 40)
 	seedServiceRow(t, db, 12, 2, 40)
 
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	date := bookingTestDate
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 	seedWorkingHour(t, db, 2, int(date.Weekday()), "09:00", "18:00")
 
-	env := getSearch(t, r, "service_ids=11,12&treatment_ids=100&from=2026-10-05&to=2026-10-05&limit=50")
+	env := getSearch(t, r, "service_ids=11,12&treatment_ids=100&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&limit=50")
 	require.NotEmpty(t, env.Results)
 	for _, res := range env.Results {
 		assert.Equal(t, uint(1), res.CenterID, "service_ids must NOT widen the candidate set")
@@ -187,16 +187,16 @@ func TestAvailabilitySearch_TreatmentDriven_ConsistentWithPerCenter(t *testing.T
 	seedTreatmentRow(t, db, 100, 1, "Corte de cabello")
 	seedTreatmentService(t, db, 10, 1, 100, 45, true)
 
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC) // Monday
+	date := bookingTestDate // Monday
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 	seedReservationRow(t, db, 1, 5, date, "10:00", "11:00")
 	seedReservationRow(t, db, 1, 7, date, "14:00", "15:00")
 
 	for _, personnelID := range []uint{5, 0, 9} {
-		query := fmt.Sprintf("treatment_ids=100&from=2026-10-05&to=2026-10-05&center_id=1&limit=50&personnel_id=%d", personnelID)
+		query := fmt.Sprintf("treatment_ids=100&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&center_id=1&limit=50&personnel_id=%d", personnelID)
 		env := getSearch(t, r, query)
 		perCenter := getPerCenterAvailable(t, r,
-			fmt.Sprintf("/api/beauty-centers/1/available-slots?date=2026-10-05&duration=45&personnel_id=%d", personnelID))
+			fmt.Sprintf("/api/beauty-centers/1/available-slots?date="+bookingTestDateKey+"&duration=45&personnel_id=%d", personnelID))
 		assert.Equal(t, perCenter, searchStartTimes(env),
 			"treatment-driven search must equal per-center slots (personnel=%d)", personnelID)
 	}
@@ -208,15 +208,15 @@ func TestAvailabilitySearch_TreatmentDriven_UnknownTreatment(t *testing.T) {
 	r, db := availabilityTestRouter(t)
 	seedDashboardCenter(t, db, 1, "Salon X", "salonx@test.com", true)
 
-	w := do(r, http.MethodGet, "/api/availability/search?treatment_ids=999&from=2026-10-05&to=2026-10-05", "", "")
+	w := do(r, http.MethodGet, "/api/availability/search?treatment_ids=999&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"", "", "")
 	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 
 	// Neither param is still a 400.
-	w = do(r, http.MethodGet, "/api/availability/search?from=2026-10-05&to=2026-10-05", "", "")
+	w = do(r, http.MethodGet, "/api/availability/search?from="+bookingTestDateKey+"&to="+bookingTestDateKey+"", "", "")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	// Malformed treatment_ids is a 400.
-	w = do(r, http.MethodGet, "/api/availability/search?treatment_ids=abc&from=2026-10-05&to=2026-10-05", "", "")
+	w = do(r, http.MethodGet, "/api/availability/search?treatment_ids=abc&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"", "", "")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
@@ -231,10 +231,10 @@ func TestAvailabilitySearch_TreatmentDriven_ReportsOwnServiceIDs(t *testing.T) {
 	seedTreatmentRow(t, db, 100, 1, "Corte de cabello")
 	seedTreatmentService(t, db, 10, 1, 100, 30, true)
 
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC) // Monday
+	date := bookingTestDate // Monday
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 
-	env := getSearch(t, r, "treatment_ids=100&from=2026-10-05&to=2026-10-05&limit=50")
+	env := getSearch(t, r, "treatment_ids=100&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&limit=50")
 	require.NotEmpty(t, env.Results)
 	for _, res := range env.Results {
 		assert.Equal(t, uint(1), res.CenterID)
@@ -258,10 +258,10 @@ func TestAvailabilitySearch_TreatmentDriven_MultipleMatchesReportsSizingService(
 	seedTreatmentService(t, db, 10, 1, 100, 45, true)
 	seedTreatmentService(t, db, 11, 1, 100, 20, true) // shorter → sizes the window
 
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	date := bookingTestDate
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 
-	env := getSearch(t, r, "treatment_ids=100&from=2026-10-05&to=2026-10-05&limit=50")
+	env := getSearch(t, r, "treatment_ids=100&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&limit=50")
 	require.NotEmpty(t, env.Results)
 	assert.Equal(t, 20, env.Results[0].Duration, "minimum matching duration wins")
 	assert.Equal(t, []uint{11}, env.Results[0].ServiceIDs,
@@ -282,10 +282,10 @@ func TestAvailabilitySearch_TreatmentDriven_ServiceIDsUnionAndSum(t *testing.T) 
 	seedTreatmentService(t, db, 10, 1, 100, 30, true)
 	seedTreatmentService(t, db, 11, 1, 200, 45, true)
 
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	date := bookingTestDate
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 
-	env := getSearch(t, r, "treatment_ids=100,200&from=2026-10-05&to=2026-10-05&limit=50")
+	env := getSearch(t, r, "treatment_ids=100,200&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&limit=50")
 	require.NotEmpty(t, env.Results)
 	for _, res := range env.Results {
 		assert.Equal(t, []uint{10, 11}, res.ServiceIDs,
@@ -303,11 +303,11 @@ func TestAvailabilitySearch_LegacyPathOmitsServiceIDs(t *testing.T) {
 	seedDashboardCenter(t, db, 1, "Salon X", "salonx@test.com", true)
 	seedServiceRow(t, db, 10, 1, 30)
 
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	date := bookingTestDate
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 
 	w := do(r, http.MethodGet,
-		"/api/availability/search?service_ids=10&from=2026-10-05&to=2026-10-05&limit=50", "", "")
+		"/api/availability/search?service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&limit=50", "", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.NotContains(t, w.Body.String(), "service_ids",
 		"legacy path must omit service_ids from the JSON")
@@ -346,7 +346,7 @@ func TestAvailabilitySearch_TreatmentDriven_QueryCountIsBounded(t *testing.T) {
 
 	atomic.StoreInt64(counter, 0)
 	w := do(r, http.MethodGet,
-		"/api/availability/search?treatment_ids=100&from=2026-10-05&to=2026-10-11&limit=50", "", "")
+		"/api/availability/search?treatment_ids=100&from="+bookingTestDateKey+"&to="+bookingTestDatePlus(6)+"&limit=50", "", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	queries := atomic.LoadInt64(counter)
 	t.Logf("treatment-driven search SELECTs — %d centers x %d days: %d", centers, days, queries)

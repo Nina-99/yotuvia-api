@@ -4,11 +4,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/service"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/service"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
@@ -136,7 +136,7 @@ func TestTrigger_ProfileCompleted(t *testing.T) {
 		Description: "A full-service salon",
 		Address:     "Av. Siempre Viva 742",
 	}
-	_, err := svc.Update(1, req)
+	_, err := svc.Update(1, 1, req)
 	assert.NoError(t, err)
 
 	p := missionProgress(t, db, 1, mission.ID)
@@ -145,7 +145,7 @@ func TestTrigger_ProfileCompleted(t *testing.T) {
 
 	// Repeated updates never re-fire.
 	req.Name = "Trigger Center Renamed"
-	_, err = svc.Update(1, req)
+	_, err = svc.Update(1, 1, req)
 	assert.NoError(t, err)
 	p = missionProgress(t, db, 1, mission.ID)
 	assert.Equal(t, 1, p.CurrentCount, "completed mission frozen")

@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 )
 
 type MarketConfigRepository interface {

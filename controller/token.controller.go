@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
-	"github.com/Nina-99/yottu-api/apperrors"
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/service"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/service"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -116,8 +117,11 @@ func (c *TokenController) CreateTopUp(ctx *gin.Context) {
 
 	contentType := ctx.GetHeader("Content-Type")
 
-	// Handle multipart/form-data (file upload)
-	if len(contentType) > 0 && contentType[:30] == "multipart/form-data" {
+	// Handle multipart/form-data (file upload). HasPrefix, not a fixed-width
+	// slice: a real header is "multipart/form-data; boundary=..." and
+	// "application/json" is shorter than any hardcoded length, which made the
+	// old contentType[:30] comparison panic on JSON and never match multipart.
+	if strings.HasPrefix(contentType, "multipart/form-data") {
 		c.createTopUpMultipart(ctx, centerID.(uint), center.Currency)
 		return
 	}

@@ -2,9 +2,10 @@ package controller
 
 import (
 	"net/http"
+	"strconv"
 
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/service"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,43 +24,89 @@ func NewPaymentConfigController(
 	}
 }
 
-// GetPaymentConfig returns the public payment configuration (QR URL, phone, tiers).
-// GET /config/payment
+// resolvePublicCenterID reads the REQUIRED `beauty_center_id` query param used
+// by the public payment reads. A missing or malformed value (including 0 and
+// negatives) is a 400: the client paying must name the centre whose QR it wants,
+// and the endpoint must never silently fall back to another centre's QR.
+func resolvePublicCenterID(ctx *gin.Context) (uint, bool) {
+	raw := ctx.Query("beauty_center_id")
+	if raw == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "beauty_center_id is required"})
+		return 0, false
+	}
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || id == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "beauty_center_id is invalid"})
+		return 0, false
+	}
+	return uint(id), true
+}
+
+// callerCenterID reads the admin's own centre from the token claim. A
+// beauty_center token without a centreID claim (0) cannot own a config row, so
+// it is rejected with 403 — the same guard loyalty/promotion create use. The
+// body/params are never consulted for the owner.
+func callerCenterID(ctx *gin.Context) (uint, bool) {
+	centerID := ctx.GetUint("centerID")
+	if centerID == 0 {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return 0, false
+	}
+	return centerID, true
+}
+
+// GetPaymentConfig returns the PUBLIC payment configuration of one centre
+// (QR URL, phone, tiers).
+//
+// GET /config/payment?beauty_center_id=<id>
 func (c *PaymentConfigController) GetPaymentConfig(ctx *gin.Context) {
-	config, err := c.paymentSvc.Get()
+	centerID, ok := resolvePublicCenterID(ctx)
+	if !ok {
+		return
+	}
+
+	config, err := c.paymentSvc.Get(centerID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	tiers, err := c.paymentSvc.GetTiers()
+	tiers, err := c.paymentSvc.GetTiers(centerID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"payment_qr_url": config.PaymentQRURL,
-		"payment_phone":  config.PaymentPhone,
-		"tiers":          tiers,
+		"beauty_center_id": centerID,
+		"payment_qr_url":   config.PaymentQRURL,
+		"payment_phone":    config.PaymentPhone,
+		"tiers":            tiers,
 	})
 }
 
 type updatePaymentConfigRequest struct {
-	PaymentPhone string                       `json:"payment_phone"`
-	Tiers        models.PaymentConfigTiers    `json:"tiers"`
+	PaymentPhone string                    `json:"payment_phone"`
+	Tiers        models.PaymentConfigTiers `json:"tiers"`
 }
 
-// UpdatePaymentConfig updates the payment configuration (admin only).
+// UpdatePaymentConfig updates the CALLER'S OWN centre payment configuration
+// (admin only). The owner comes from the token claim, never the body.
+//
 // PUT /admin/config/payment
 func (c *PaymentConfigController) UpdatePaymentConfig(ctx *gin.Context) {
+	centerID, ok := callerCenterID(ctx)
+	if !ok {
+		return
+	}
+
 	var req updatePaymentConfigRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := c.paymentSvc.Update("", req.PaymentPhone, req.Tiers); err != nil {
+	if err := c.paymentSvc.Update(centerID, "", req.PaymentPhone, req.Tiers); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -67,9 +114,16 @@ func (c *PaymentConfigController) UpdatePaymentConfig(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "payment config updated"})
 }
 
-// UploadPaymentQR handles the QR image upload (multipart).
+// UploadPaymentQR handles the QR image upload (multipart) for the CALLER'S OWN
+// centre. The owner comes from the token claim, never the body.
+//
 // POST /admin/config/payment/qr
 func (c *PaymentConfigController) UploadPaymentQR(ctx *gin.Context) {
+	centerID, ok := callerCenterID(ctx)
+	if !ok {
+		return
+	}
+
 	file, err := ctx.FormFile("file")
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
@@ -82,8 +136,8 @@ func (c *PaymentConfigController) UploadPaymentQR(ctx *gin.Context) {
 		return
 	}
 
-	// Persist the URL in the config
-	if err := c.paymentSvc.Update(url, "", nil); err != nil {
+	// Persist the URL against the caller's centre.
+	if err := c.paymentSvc.Update(centerID, url, "", nil); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -91,13 +145,19 @@ func (c *PaymentConfigController) UploadPaymentQR(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"url": url})
 }
 
-// GetTierConfig returns tier config for a specific currency (public).
-// This replaces the old file-based tier endpoint.
-// GET /config/tiers?currency=USD
+// GetTierConfig returns the requested centre's tier ladder for a currency
+// (public).
+//
+// GET /config/tiers?beauty_center_id=<id>&currency=USD
 func (c *PaymentConfigController) GetTierConfig(ctx *gin.Context) {
+	centerID, ok := resolvePublicCenterID(ctx)
+	if !ok {
+		return
+	}
+
 	currency := ctx.DefaultQuery("currency", "USD")
 
-	tiers, err := c.paymentSvc.GetTiers()
+	tiers, err := c.paymentSvc.GetTiers(centerID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -122,5 +182,5 @@ func (c *PaymentConfigController) GetTierConfig(ctx *gin.Context) {
 		resp = append(resp, tierResp{Min: t.Min, BonusPct: t.BonusPct})
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"tiers": resp})
+	ctx.JSON(http.StatusOK, gin.H{"beauty_center_id": centerID, "tiers": resp})
 }

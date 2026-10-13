@@ -1,4 +1,4 @@
-module github.com/Nina-99/yottu-api
+module github.com/Nina-99/yotuvia-api
 
 go 1.25.0
 

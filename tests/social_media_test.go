@@ -7,11 +7,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Nina-99/yottu-api/controller"
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/service"
+	"github.com/Nina-99/yotuvia-api/controller"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -34,6 +34,10 @@ func TestSocialMediaCRUD(t *testing.T) {
 	ctrl := controller.NewSocialMediaController(svc)
 
 	r := gin.Default()
+	// The controller now scopes writes to the token's centerID claim. These
+	// routes bypass the JWT middleware, so inject the actor centre directly —
+	// the CRUD contract below is unchanged.
+	r.Use(func(ctx *gin.Context) { ctx.Set("centerID", uint(1)) })
 	r.POST("/social-media", ctrl.Create)
 	r.GET("/social-media/:id", ctrl.FindByID)
 	r.PUT("/social-media/:id", ctrl.Update)
@@ -90,7 +94,7 @@ func TestSocialMediaCRUD(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		
+
 		// Verify update
 		reqGet, _ := http.NewRequest("GET", "/social-media/1", nil)
 		wGet := httptest.NewRecorder()

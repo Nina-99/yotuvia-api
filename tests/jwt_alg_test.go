@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/middleware"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/middleware"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -18,7 +18,7 @@ import (
 
 // testJWTSecret is deliberately longer than any HMAC output size so the test
 // focuses on the signing-METHOD guard, not key length.
-const testJWTSecret = "yottu-test-secret-0123456789abcdef0123456789abcdef"
+const testJWTSecret = "yotuvia-test-secret-0123456789abcdef0123456789abcdef"
 
 // validTestClaims mirrors what utils.GenerateJWT encodes.
 func validTestClaims() *utils.JWTClaim {

@@ -3,7 +3,7 @@ package configs
 import (
 	"context"
 
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"gorm.io/gorm"
 )
 

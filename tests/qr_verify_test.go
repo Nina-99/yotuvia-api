@@ -4,13 +4,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/apperrors"
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/service"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/service"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -36,32 +36,44 @@ func (s *stubLoyalty) AddPunch(uint, uint, uint, uint) error {
 	s.punchCalls++
 	return nil
 }
-func (s *stubLoyalty) GetClientsCards(uint) ([]response.PunchCardResponse, error) {
+func (s *stubLoyalty) GetClientsCards(uint, uint, string) ([]response.PunchCardResponse, error) {
+	return nil, nil
+}
+func (s *stubLoyalty) GetHistory(uint, uint, string) ([]response.PunchHistoryItemResponse, error) {
+	return nil, nil
+}
+func (s *stubLoyalty) GetPendingRewards(uint, uint, string) ([]response.PendingRewardResponse, error) {
+	return nil, nil
+}
+func (s *stubLoyalty) GetPublicPrograms(uint) ([]response.PublicProgramResponse, error) {
 	return nil, nil
 }
 func (s *stubLoyalty) HasPendingRedemption(uint, uint, uint) bool { return false }
 func (s *stubLoyalty) CalculateRedemption(uint, uint, uint) (float64, uint, error) {
 	return 0, 0, nil
 }
-func (s *stubLoyalty) FinalizeRedemption(uint, uint) error { return nil }
+func (s *stubLoyalty) FinalizeRedemption(uint, uint) error   { return nil }
 func (s *stubLoyalty) FindRedemptionByReservation(uint) bool { return false }
-func (s *stubLoyalty) FindProgramsByCenter(uint) ([]response.LoyaltyProgramResponse, error) {
+func (s *stubLoyalty) FindProgramsByCenter(uint, uint) ([]response.LoyaltyProgramResponse, error) {
 	return nil, nil
 }
-func (s *stubLoyalty) UpdateProgram(uint, request.UpdateLoyaltyProgramRequest) (response.LoyaltyProgramResponse, error) {
+func (s *stubLoyalty) UpdateProgram(uint, uint, request.UpdateLoyaltyProgramRequest) (response.LoyaltyProgramResponse, error) {
 	return response.LoyaltyProgramResponse{}, nil
 }
-func (s *stubLoyalty) DeleteProgram(uint) error             { return nil }
-func (s *stubLoyalty) ToggleProgram(uint, bool) error       { return nil }
-func (s *stubLoyalty) GetCenterSettings(uint) (response.LoyaltySettingsResponse, error) {
+func (s *stubLoyalty) DeleteProgram(uint, uint) error       { return nil }
+func (s *stubLoyalty) ToggleProgram(uint, uint, bool) error { return nil }
+func (s *stubLoyalty) GetCenterSettings(uint, uint) (response.LoyaltySettingsResponse, error) {
 	// VerifyQR gates punching on the center's loyalty setting. The zero value
 	// reports loyalty DISABLED, which would silently skip the punch block; this
 	// stub stands in for an opted-in center so the stamp path is exercised.
 	// Idempotent re-scans return before this call (no-op), so they still punch 0.
 	return response.LoyaltySettingsResponse{LoyaltyEnabled: true}, nil
 }
-func (s *stubLoyalty) UpdateCenterSettings(uint, request.UpdateLoyaltySettingsRequest) error {
+func (s *stubLoyalty) UpdateCenterSettings(uint, uint, request.UpdateLoyaltySettingsRequest) error {
 	return nil
+}
+func (s *stubLoyalty) GetMetrics(uint, uint) ([]response.LoyaltyMetricsResponse, error) {
+	return []response.LoyaltyMetricsResponse{}, nil
 }
 
 type stubMission struct {

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/apperrors"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -21,7 +21,7 @@ func TestMain(m *testing.M) {
 	utils.InitLogger(utils.LoggerConfig{Level: "fatal", Format: "console"})
 	// Set tier config path for tests
 	_, filename, _, _ := runtime.Caller(0)
-	projectRoot := filepath.Dir(filepath.Dir(filename)) // service/ -> yottu-api/
+	projectRoot := filepath.Dir(filepath.Dir(filename)) // service/ -> yotuvia-api/
 	os.Setenv("TIERS_CONFIG_PATH", filepath.Join(projectRoot, "configs", "tiers.json"))
 	os.Exit(m.Run())
 }

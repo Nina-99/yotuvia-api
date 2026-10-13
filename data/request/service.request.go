@@ -5,6 +5,8 @@ type CreateServiceRequest struct {
 	CategoryID     uint    `json:"category_id" validate:"required"`
 	Name           string  `json:"name" validate:"required,min=2,max=100"`
 	Description    string  `json:"description" validate:"required"`
+	NameI18n        map[string]string `json:"name_i18n"`
+	DescriptionI18n map[string]string `json:"description_i18n"`
 	Duration       int     `json:"duration" validate:"required,gt=0"`
 	Price          float64 `json:"price" validate:"required,gte=0"`
 	ImageURL       string  `json:"image_url"`
@@ -20,6 +22,8 @@ type UpdateServiceRequest struct {
 	CategoryID     uint    `json:"category_id"`
 	Name           string  `json:"name" validate:"omitempty,min=2,max=100"`
 	Description    string  `json:"description"`
+	NameI18n        map[string]string `json:"name_i18n"`
+	DescriptionI18n map[string]string `json:"description_i18n"`
 	Duration       int     `json:"duration" validate:"omitempty,gt=0"`
 	Price          float64 `json:"price" validate:"omitempty,gte=0"`
 	ImageURL       string  `json:"image_url"`

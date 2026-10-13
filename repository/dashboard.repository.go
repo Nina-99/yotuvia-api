@@ -3,7 +3,7 @@ package repository
 import (
 	"time"
 
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 )
 
 // TopServiceRow is the aggregated leaderboard row returned by TopServices: a

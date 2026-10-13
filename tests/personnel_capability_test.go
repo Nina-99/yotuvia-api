@@ -6,11 +6,10 @@ import (
 	"net/http"
 	"sort"
 	"testing"
-	"time"
 
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/router"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/router"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -156,7 +155,7 @@ func TestClientBooking_CapabilityRule(t *testing.T) {
 			for _, c := range tt.capability {
 				seedCapability(t, db, c[0], c[1])
 			}
-			date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+			date := bookingTestDate
 			seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 
 			code := bookingIDs(t, r, roleToken(t, 1, 0, "client"),
@@ -251,7 +250,7 @@ func TestPersonnelPicker_AgreesWithBooking(t *testing.T) {
 		seedCapability(t, db, 2, 1)
 		seedCapability(t, db, 2, 2)
 		seedCapability(t, db, 3, 1)
-		date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+		date := bookingTestDate
 		seedWorkingHour(t, db, 1, int(date.Weekday()), "08:00", "18:00")
 		return r, db, date.Format("2006-01-02"), roleToken(t, 1, 0, "client")
 	}

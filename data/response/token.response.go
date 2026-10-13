@@ -3,8 +3,8 @@ package response
 import (
 	"time"
 
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/utils"
 )
 
 type TokenBalanceResponse struct {
@@ -34,6 +34,7 @@ type TokenHistoryResponse struct {
 
 type TokenTopUpResponse struct {
 	ID             uint       `json:"id"`
+	BeautyCenterID uint       `json:"beauty_center_id"`
 	AmountBs       float64    `json:"amount_bs"`
 	TokensReceived float64    `json:"tokens_received"`
 	BonusTokens    float64    `json:"bonus_tokens"`
@@ -89,10 +90,12 @@ func NewTokenTransactionResponse(tx models.TokenTransaction) TokenTransactionRes
 }
 
 // NewTokenTopUpResponse converts tokens to decimal; AmountBs is bolivares, not
-// part of the YOTTU ledger, and stays untouched.
+// part of the YOTTU ledger, and stays untouched. BeautyCenterID is carried so
+// the platform-wide queue can tell one centre's row from another's.
 func NewTokenTopUpResponse(topup models.TokenTopUp) TokenTopUpResponse {
 	return TokenTopUpResponse{
 		ID:             topup.ID,
+		BeautyCenterID: topup.BeautyCenterID,
 		AmountBs:       topup.AmountBs,
 		TokensReceived: utils.FromMilli(topup.TokensReceived),
 		BonusTokens:    utils.FromMilli(topup.BonusTokens),

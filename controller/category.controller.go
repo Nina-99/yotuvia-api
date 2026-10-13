@@ -4,10 +4,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/service"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/service"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -101,31 +102,7 @@ func (c *CategoryController) FindAll(ctx *gin.Context) {
 
 	var res []response.CategoryResponse
 	for _, category := range categories {
-		name := category.Name
-		desc := category.Description
-		icon := category.Icon
-
-		// Fill icon from templates if not set in DB
-		if icon == "" {
-			icon = utils.CategoryIcon(category.Name)
-		}
-
-		// Localize name if lang is specified and name matches a known template
-		if lang != "" && lang != "es" {
-			localized, localizedDesc := utils.LocalizeCategoryName(category.Name, lang)
-			name = localized
-			if localizedDesc != "" {
-				desc = localizedDesc
-			}
-		}
-
-		res = append(res, response.CategoryResponse{
-			ID:             category.ID,
-			BeautyCenterID: category.BeautyCenterID,
-			Name:           name,
-			Description:    desc,
-			Icon:           icon,
-		})
+		res = append(res, categoryToResponse(category, lang))
 	}
 	ctx.JSON(http.StatusOK, response.PaginatedResponse{
 		Data:  res,
@@ -150,32 +127,42 @@ func (c *CategoryController) FindById(ctx *gin.Context) {
 	}
 
 	lang := ctx.DefaultQuery("lang", "")
-	name := s.Name
-	desc := s.Description
-	icon := s.Icon
+	res := categoryToResponse(*s, lang)
 
-	// Fill icon from templates if not set in DB
-	if icon == "" {
-		icon = utils.CategoryIcon(s.Name)
-	}
+	ctx.JSON(http.StatusOK, res)
+}
 
-	if lang != "" && lang != "es" {
-		localized, localizedDesc := utils.LocalizeCategoryName(s.Name, lang)
+// categoryToResponse resolves a category's translatable fields for `lang`:
+// stored per-locale overrides win, then the legacy template localization, then
+// the base value. The raw maps ride along for owner edit forms.
+func categoryToResponse(category models.Category, lang string) response.CategoryResponse {
+	name := utils.LocalizedValue(category.Name, category.NameI18n, lang)
+	desc := utils.LocalizedValue(category.Description, category.DescriptionI18n, lang)
+
+	// Legacy fallback: no stored translation for this category, but the name is
+	// a known template → localize it (existing behavior preserved).
+	if category.NameI18n == nil && lang != "" && lang != "es" {
+		localized, localizedDesc := utils.LocalizeCategoryName(category.Name, lang)
 		name = localized
 		if localizedDesc != "" {
 			desc = localizedDesc
 		}
 	}
 
-	res := response.CategoryResponse{
-		ID:             s.ID,
-		BeautyCenterID: s.BeautyCenterID,
-		Name:           name,
-		Description:    desc,
-		Icon:           icon,
+	icon := category.Icon
+	if icon == "" {
+		icon = utils.CategoryIcon(category.Name)
 	}
 
-	ctx.JSON(http.StatusOK, res)
+	return response.CategoryResponse{
+		ID:              category.ID,
+		BeautyCenterID:  category.BeautyCenterID,
+		Name:            name,
+		Description:     desc,
+		NameI18n:        category.NameI18n,
+		DescriptionI18n: category.DescriptionI18n,
+		Icon:            icon,
+	}
 }
 
 // Templates godoc

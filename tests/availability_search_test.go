@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/router"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/router"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -126,7 +126,7 @@ func TestAvailabilitySearch_ConsistentWithPerCenter(t *testing.T) {
 	seedServiceRow(t, db, 10, 1, 15)
 	seedServiceRow(t, db, 11, 1, 30)
 
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC) // Monday
+	date := bookingTestDate // Monday
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 	// One booking for personnel 5 and one for personnel 7.
 	seedReservationRow(t, db, 1, 5, date, "10:00", "11:00")
@@ -143,15 +143,15 @@ func TestAvailabilitySearch_ConsistentWithPerCenter(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			query := fmt.Sprintf("service_ids=10,11&from=2026-10-05&to=2026-10-05&center_id=1&limit=50&personnel_id=%d", tc.personnelID)
+			query := fmt.Sprintf("service_ids=10,11&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&center_id=1&limit=50&personnel_id=%d", tc.personnelID)
 			env := getSearch(t, r, query)
 
 			perCenter := getPerCenterAvailable(t, r,
-				fmt.Sprintf("/api/beauty-centers/1/available-slots?date=2026-10-05&duration=45&personnel_id=%d", tc.personnelID))
+				fmt.Sprintf("/api/beauty-centers/1/available-slots?date="+bookingTestDateKey+"&duration=45&personnel_id=%d", tc.personnelID))
 
 			search := searchStartTimes(env)
 			assert.Equal(t, perCenter, search,
-				"search slots must equal per-center slots for (center=1, date=2026-10-05, duration=45, personnel=%d)", tc.personnelID)
+				"search slots must equal per-center slots for (center=1, date="+bookingTestDateKey+", duration=45, personnel=%d)", tc.personnelID)
 			assert.Equal(t, len(perCenter), env.Total)
 		})
 	}
@@ -163,15 +163,15 @@ func TestAvailabilitySearch_EchoesPersonnelOnlyWhenSupplied(t *testing.T) {
 	r, db := availabilityTestRouter(t)
 	seedDashboardCenter(t, db, 1, "Salon X", "salonx@test.com", true)
 	seedServiceRow(t, db, 10, 1, 30)
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	date := bookingTestDate
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "09:00", "18:00")
 
-	withPersonnel := getSearch(t, r, "service_ids=10&from=2026-10-05&to=2026-10-05&personnel_id=5")
+	withPersonnel := getSearch(t, r, "service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&personnel_id=5")
 	require.NotEmpty(t, withPersonnel.Results)
 	require.NotNil(t, withPersonnel.Results[0].PersonnelID)
 	assert.Equal(t, uint(5), *withPersonnel.Results[0].PersonnelID)
 
-	withoutPersonnel := getSearch(t, r, "service_ids=10&from=2026-10-05&to=2026-10-05")
+	withoutPersonnel := getSearch(t, r, "service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"")
 	require.NotEmpty(t, withoutPersonnel.Results)
 	assert.Nil(t, withoutPersonnel.Results[0].PersonnelID)
 }
@@ -187,18 +187,18 @@ func TestAvailabilitySearch_Validation(t *testing.T) {
 		query string
 		want  int
 	}{
-		{"missing service_ids", "from=2026-10-01&to=2026-10-02", http.StatusBadRequest},
-		{"malformed service_ids", "service_ids=abc&from=2026-10-01&to=2026-10-02", http.StatusBadRequest},
-		{"unknown service", "service_ids=999&from=2026-10-01&to=2026-10-02", http.StatusBadRequest},
-		{"missing from", "service_ids=10&to=2026-10-02", http.StatusBadRequest},
-		{"missing to", "service_ids=10&from=2026-10-01", http.StatusBadRequest},
-		{"bad from date", "service_ids=10&from=2026-13-01&to=2026-10-02", http.StatusBadRequest},
-		{"bad to date", "service_ids=10&from=2026-10-01&to=nope", http.StatusBadRequest},
-		{"reversed range", "service_ids=10&from=2026-10-05&to=2026-10-01", http.StatusBadRequest},
-		{"range over 14 days", "service_ids=10&from=2026-10-01&to=2026-10-16", http.StatusBadRequest},
-		{"bad period", "service_ids=10&from=2026-10-01&to=2026-10-02&period=dawn", http.StatusBadRequest},
-		{"range exactly 14 days", "service_ids=10&from=2026-10-01&to=2026-10-15", http.StatusOK},
-		{"bad center_id", "service_ids=10&from=2026-10-01&to=2026-10-02&center_id=-1", http.StatusBadRequest},
+		{"missing service_ids", "from=" + bookingTestDatePlus(-4) + "&to=" + bookingTestDatePlus(-3) + "", http.StatusBadRequest},
+		{"malformed service_ids", "service_ids=abc&from=" + bookingTestDatePlus(-4) + "&to=" + bookingTestDatePlus(-3) + "", http.StatusBadRequest},
+		{"unknown service", "service_ids=999&from=" + bookingTestDatePlus(-4) + "&to=" + bookingTestDatePlus(-3) + "", http.StatusBadRequest},
+		{"missing from", "service_ids=10&to=" + bookingTestDatePlus(-3) + "", http.StatusBadRequest},
+		{"missing to", "service_ids=10&from=" + bookingTestDatePlus(-4) + "", http.StatusBadRequest},
+		{"bad from date", "service_ids=10&from=2026-13-01&to=" + bookingTestDatePlus(-3) + "", http.StatusBadRequest},
+		{"bad to date", "service_ids=10&from=" + bookingTestDatePlus(-4) + "&to=nope", http.StatusBadRequest},
+		{"reversed range", "service_ids=10&from=" + bookingTestDateKey + "&to=" + bookingTestDatePlus(-4) + "", http.StatusBadRequest},
+		{"range over 14 days", "service_ids=10&from=" + bookingTestDatePlus(-4) + "&to=" + bookingTestDatePlus(11) + "", http.StatusBadRequest},
+		{"bad period", "service_ids=10&from=" + bookingTestDatePlus(-4) + "&to=" + bookingTestDatePlus(-3) + "&period=dawn", http.StatusBadRequest},
+		{"range exactly 14 days", "service_ids=10&from=" + bookingTestDatePlus(-4) + "&to=" + bookingTestDatePlus(10) + "", http.StatusOK},
+		{"bad center_id", "service_ids=10&from=" + bookingTestDatePlus(-4) + "&to=" + bookingTestDatePlus(-3) + "&center_id=-1", http.StatusBadRequest},
 	}
 
 	for _, tc := range cases {
@@ -215,27 +215,27 @@ func TestAvailabilitySearch_PeriodFilter(t *testing.T) {
 	r, db := availabilityTestRouter(t)
 	seedDashboardCenter(t, db, 1, "Salon X", "salonx@test.com", true)
 	seedServiceRow(t, db, 10, 1, 30)
-	date := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	date := bookingTestDate
 	seedWorkingHour(t, db, 1, int(date.Weekday()), "08:00", "22:00")
 
-	morning := getSearch(t, r, "service_ids=10&from=2026-10-05&to=2026-10-05&period=morning")
+	morning := getSearch(t, r, "service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&period=morning")
 	for _, res := range morning.Results {
 		assert.Less(t, res.StartTime, "12:00")
 	}
-	afternoon := getSearch(t, r, "service_ids=10&from=2026-10-05&to=2026-10-05&period=afternoon")
+	afternoon := getSearch(t, r, "service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&period=afternoon")
 	require.NotEmpty(t, afternoon.Results)
 	for _, res := range afternoon.Results {
 		assert.GreaterOrEqual(t, res.StartTime, "12:00")
 		assert.Less(t, res.StartTime, "18:00")
 	}
-	evening := getSearch(t, r, "service_ids=10&from=2026-10-05&to=2026-10-05&period=evening")
+	evening := getSearch(t, r, "service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&period=evening")
 	require.NotEmpty(t, evening.Results)
 	for _, res := range evening.Results {
 		assert.GreaterOrEqual(t, res.StartTime, "18:00")
 	}
 
 	// Every unbounded slot must be partitioned across the three periods.
-	all := getSearch(t, r, "service_ids=10&from=2026-10-05&to=2026-10-05&limit=50")
+	all := getSearch(t, r, "service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDateKey+"&limit=50")
 	assert.Equal(t, all.Total, morning.Total+afternoon.Total+evening.Total)
 }
 
@@ -254,15 +254,15 @@ func TestAvailabilitySearch_LimitClamp(t *testing.T) {
 	seedWorkingHour(t, db, 1, 5, "08:00", "20:00")
 	seedWorkingHour(t, db, 1, 6, "08:00", "20:00")
 
-	defaultLimit := getSearch(t, r, "service_ids=10&from=2026-10-05&to=2026-10-11")
+	defaultLimit := getSearch(t, r, "service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDatePlus(6)+"")
 	assert.Len(t, defaultLimit.Results, 20)
 	assert.Greater(t, defaultLimit.Total, 20)
 
-	maxLimit := getSearch(t, r, "service_ids=10&from=2026-10-05&to=2026-10-11&limit=999")
+	maxLimit := getSearch(t, r, "service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDatePlus(6)+"&limit=999")
 	assert.Len(t, maxLimit.Results, 50)
 	assert.Equal(t, defaultLimit.Total, maxLimit.Total, "Total is independent of limit")
 
-	small := getSearch(t, r, "service_ids=10&from=2026-10-05&to=2026-10-11&limit=5")
+	small := getSearch(t, r, "service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDatePlus(6)+"&limit=5")
 	assert.Len(t, small.Results, 5)
 }
 
@@ -276,7 +276,7 @@ func measureSearchQueries(t *testing.T, r *gin.Engine, counter *int64) int64 {
 	t.Helper()
 	atomic.StoreInt64(counter, 0)
 	w := do(r, http.MethodGet,
-		"/api/availability/search?service_ids=10&from=2026-10-05&to=2026-10-11&limit=50", "", "")
+		"/api/availability/search?service_ids=10&from="+bookingTestDateKey+"&to="+bookingTestDatePlus(6)+"&limit=50", "", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	return atomic.LoadInt64(counter)
 }
@@ -314,7 +314,7 @@ func TestAvailabilitySearch_QueryCountIsBounded(t *testing.T) {
 	atomic.StoreInt64(counter, 0)
 	for c := uint(1); c <= centers; c++ {
 		for d := 0; d < days; d++ {
-			date := time.Date(2026, 10, 5+d, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
+			date := bookingTestDatePlus(d)
 			w := do(r, http.MethodGet,
 				fmt.Sprintf("/api/beauty-centers/%d/available-slots?date=%s&duration=30", c, date), "", "")
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())

@@ -3,8 +3,9 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 )
 
 // Session sentinel errors. The service maps all of them to 401 at the HTTP
@@ -47,4 +48,18 @@ type UserSessionRepository interface {
 	// share the numeric id, and a password reset must only kill the resetting
 	// account's sessions, never another type's.
 	RevokeAllForUser(ctx context.Context, userID uint, role string) error
+
+	// EnforceActiveLimit keeps at most `limit` LIVE sessions for one
+	// (userID, role) pair and returns how many were revoked to get there. A
+	// session is live when it is not revoked AND not past ExpiresAt — an
+	// expired-but-unrevoked row is lifecycle debris, not a live session.
+	//
+	// The OLDEST live sessions (by creation time) are revoked first, so the
+	// newest `limit` survive. Eviction is a plain revocation, exactly like
+	// RevokeAllForUser: the row stays findable and its refresh token hits the
+	// reuse path (401), it is never physically deleted.
+	//
+	// role is part of the key for the same polymorphic-id reason as
+	// RevokeAllForUser: a client login must never evict a personnel session.
+	EnforceActiveLimit(ctx context.Context, userID uint, role string, limit int, now time.Time) (int, error)
 }

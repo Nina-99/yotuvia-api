@@ -1,8 +1,8 @@
 package service
 
 import (
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/models"
 )
 
 type ServiceTemplate struct {

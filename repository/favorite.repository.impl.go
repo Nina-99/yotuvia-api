@@ -1,8 +1,9 @@
 package repository
 
 import (
+	"errors"
 
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
 )
 
@@ -16,6 +17,21 @@ func NewFavoriteRepositoryImpl(db *gorm.DB) FavoriteRepository {
 
 func (r *FavoriteRepositoryImpl) Create(favorite *models.Favorite) error {
 	return r.Db.Create(favorite).Error
+}
+
+// FindByID returns a single favorite by ID, or (nil, nil) when it does not
+// exist (including soft-deleted rows), mirroring the other FindByID repositories
+// so the service can distinguish "missing" (404) from a real DB failure.
+func (r *FavoriteRepositoryImpl) FindByID(id uint) (*models.Favorite, error) {
+	var favorite models.Favorite
+	err := r.Db.First(&favorite, id).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &favorite, nil
 }
 
 func (r *FavoriteRepositoryImpl) Delete(id uint) error {

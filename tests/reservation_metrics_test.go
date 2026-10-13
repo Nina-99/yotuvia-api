@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Nina-99/yottu-api/router"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/router"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -107,11 +107,18 @@ func TestPersonnelMetrics_ShapePerLineRevenueAndRange(t *testing.T) {
 		{serviceID: 1, personnelID: 2, price: 999, duration: 30},
 	})
 
-	body := getMetrics(t, r, roleToken(t, 2, 1, "personnel"), "?from=2026-10-01&to=2026-10-31")
+	// Range anchored to mpDay so the seeded bookings are always in-range and
+	// the +46-day "outside" booking is always excluded, regardless of the day
+	// the suite runs.
+	from := mpDay.Format("2006-01-02")
+	to := mpDay.AddDate(0, 0, 30).Format("2006-01-02")
+	rangeQuery := "?from=" + from + "&to=" + to
+
+	body := getMetrics(t, r, roleToken(t, 2, 1, "personnel"), rangeQuery)
 
 	// range
-	assert.Equal(t, "2026-10-01", body.Range.From)
-	assert.Equal(t, "2026-10-31", body.Range.To)
+	assert.Equal(t, from, body.Range.From)
+	assert.Equal(t, to, body.Range.To)
 
 	// totals: 2 non-cancelled in range, 1 completed, per-LINE revenue 100 (not 300).
 	assert.Equal(t, 2, body.Totals.Appointments)
@@ -124,20 +131,22 @@ func TestPersonnelMetrics_ShapePerLineRevenueAndRange(t *testing.T) {
 	// zero-filled series across the 31-day range
 	require.Len(t, body.RevenueSeries, 31)
 	require.Len(t, body.AppointmentsSeries, 31)
-	assert.Equal(t, "2026-10-01", body.RevenueSeries[0].Date)
-	assert.Equal(t, "2026-10-31", body.RevenueSeries[30].Date)
+	assert.Equal(t, from, body.RevenueSeries[0].Date)
+	assert.Equal(t, to, body.RevenueSeries[30].Date)
 
-	v, ok := seriesValue(body.RevenueSeries, "2026-10-05")
+	v, ok := seriesValue(body.RevenueSeries, from)
 	require.True(t, ok)
 	assert.Equal(t, 100.0, v)
-	zero, ok := seriesValue(body.RevenueSeries, "2026-10-06")
+	nextDay := mpDay.AddDate(0, 0, 1).Format("2006-01-02")
+	zero, ok := seriesValue(body.RevenueSeries, nextDay)
 	require.True(t, ok)
 	assert.Equal(t, 0.0, zero, "gaps are zero-filled, never omitted")
 
-	a, ok := seriesValue(body.AppointmentsSeries, "2026-10-05")
+	a, ok := seriesValue(body.AppointmentsSeries, from)
 	require.True(t, ok)
 	assert.Equal(t, 2.0, a, "both non-cancelled bookings count as appointments")
-	az, ok := seriesValue(body.AppointmentsSeries, "2026-10-07")
+	day2 := mpDay.AddDate(0, 0, 2).Format("2006-01-02")
+	az, ok := seriesValue(body.AppointmentsSeries, day2)
 	require.True(t, ok)
 	assert.Equal(t, 0.0, az)
 
@@ -148,7 +157,7 @@ func TestPersonnelMetrics_ShapePerLineRevenueAndRange(t *testing.T) {
 	assert.Equal(t, 1, body.TopServices[0].Count)
 
 	// Per-line proof on the other side: the lead reports 200, not 300.
-	lead := getMetrics(t, r, roleToken(t, 1, 1, "personnel"), "?from=2026-10-01&to=2026-10-31")
+	lead := getMetrics(t, r, roleToken(t, 1, 1, "personnel"), rangeQuery)
 	assert.Equal(t, 200.0, lead.Totals.Revenue, "the lead earns only their own line")
 }
 

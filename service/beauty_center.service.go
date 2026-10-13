@@ -1,13 +1,16 @@
 package service
 
 import (
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
 )
 
 type BeautyCenterService interface {
-	Update(id uint, req request.UpdateBeautyCenterRequest) (response.BeautyCenterResponse, error)
-	Delete(id uint) error
+	// Update/Delete take the caller's centerID claim and reject a path id that
+	// does not match it (apperrors.ErrForbidden), so a center-A admin cannot
+	// rewrite or delete center B.
+	Update(id, actorCenterID uint, req request.UpdateBeautyCenterRequest) (response.BeautyCenterResponse, error)
+	Delete(id, actorCenterID uint) error
 	FindByID(id uint) (response.BeautyCenterResponse, error)
 	FindAll(page, limit int) ([]response.BeautyCenterResponse, int64, error)
 	GetAvailableSlots(centerID uint, date string, duration int, personnelID uint) (response.AvailableSlotsResponse, error)

@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	"github.com/Nina-99/yottu-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/request"
 )
 
 // AuthResult is the outcome of login/register/social. D4: it gains the raw
@@ -16,6 +16,10 @@ type AuthResult struct {
 	FirstName    string
 	LastName     string
 	Role         string
+	// SessionsEvicted counts the older sessions revoked to keep this (user,
+	// role) inside its concurrent-session cap. 0 is the normal case; >0 means
+	// another signed-in session was ended, so the client can tell the user.
+	SessionsEvicted int
 }
 
 // RefreshResult is the response of POST /auth-accounts/refresh: a fresh access

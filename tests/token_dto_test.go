@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
 	"github.com/stretchr/testify/assert"
 )
 

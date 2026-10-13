@@ -41,6 +41,12 @@ type CreateReservationRequest struct {
 	// not resolve to an existing post is ignored and the booking still lands
 	// with a nil attribution.
 	SourcePostID *uint `json:"source_post_id"`
+
+	// ApplyLoyalty is the OPTIONAL earn/redeem choice from the booking confirm
+	// step. nil/absent = legacy auto-apply (back-compat with walk-in, admin,
+	// and old mobile); explicit false = skip loyalty earn AND redeem for this
+	// booking; true = auto-apply (same as nil).
+	ApplyLoyalty *bool `json:"apply_loyalty"`
 }
 
 // UpdateReservationRequest is the PUT /api/reservation/:id body. It mirrors the

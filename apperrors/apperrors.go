@@ -7,7 +7,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/utils"
 )
 
 var (

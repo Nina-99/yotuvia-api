@@ -3,7 +3,7 @@ package repository
 import (
 	"time"
 
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 )
 
 // RankingRow is one rank of the beauty-center leaderboard. Score is the
@@ -30,6 +30,10 @@ type BeautyCenterRepository interface {
 	FindByID(id uint) (*models.BeautyCenter, error)
 	FindAll(page, limit int) ([]models.BeautyCenter, int64, error)
 	FindAllActiveForClients() ([]models.BeautyCenter, error)
+	// FindAllSummaries returns id + name for EVERY centre (active or not), ordered
+	// by name. It backs the platform admin's centre picker, which must be able to
+	// name a centre even after that centre was deactivated.
+	FindAllSummaries() ([]models.BeautyCenter, error)
 	FindByEmail(email string) (*models.BeautyCenter, error)
 	ReplaceSchedules(centerID uint, schedules []models.WorkingHour) error
 	ReplaceImages(centerID uint, images []models.BeautyCenterImage) error

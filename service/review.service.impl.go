@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
 )
 
 type ReviewServiceImpl struct {
@@ -101,11 +103,14 @@ func (s *ReviewServiceImpl) Update(clientID uint, reviewID uint, req request.Upd
 	}
 	review, err := s.repo.FindByID(reviewID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperrors.ErrNotFound
+		}
 		return err
 	}
 
 	if review.ClientID != clientID {
-		return errors.New("unauthorized: you can only update your own reviews")
+		return apperrors.ErrForbidden
 	}
 
 	if req.Rating != nil {
@@ -121,11 +126,14 @@ func (s *ReviewServiceImpl) Update(clientID uint, reviewID uint, req request.Upd
 func (s *ReviewServiceImpl) Delete(clientID uint, reviewID uint) error {
 	review, err := s.repo.FindByID(reviewID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperrors.ErrNotFound
+		}
 		return err
 	}
 
 	if review.ClientID != clientID {
-		return errors.New("unauthorized: you can only delete your own reviews")
+		return apperrors.ErrForbidden
 	}
 
 	return s.repo.Delete(reviewID)
@@ -139,13 +147,11 @@ func mapToResponse(review *models.Review) response.ReviewResponse {
 		CreatedAt:      review.CreatedAt,
 		BeautyCenterID: review.BeautyCenterID,
 		ClientID:       review.ClientID,
-		Client: response.ClientResponse{
+		Client: response.ReviewClientResponse{
 			ID:        review.Client.ID,
 			FirstName: review.Client.FirstName,
 			LastName:  review.Client.LastName,
-			Username:  review.Client.Username,
-			Email:     review.Client.Email,
-			Phone:     review.Client.Phone,
+			AvatarURL: review.Client.AvatarURL,
 		},
 		BeautyCenter: response.BeautyCenterResponse{
 			ID:          review.BeautyCenter.ID,
@@ -182,7 +188,14 @@ func (s *ReviewServiceImpl) FindByBeautyCenterID(beautyCenterID uint) ([]respons
 	return res, nil
 }
 
-func (s *ReviewServiceImpl) FindByClientID(clientID uint) ([]response.ReviewResponse, error) {
+func (s *ReviewServiceImpl) FindByClientID(clientID, actorClientID uint, role string) ([]response.ReviewResponse, error) {
+	// Ownership: a `client` may read only its own reviews. beauty_center and
+	// personnel keep inspecting any client's reviews — that is a legitimate
+	// staff-facing view, not an IDOR. Mirrors the loyalty punch-card rule.
+	if role == "client" && actorClientID != clientID {
+		return nil, apperrors.ErrForbidden
+	}
+
 	reviews, err := s.repo.FindByClientID(clientID)
 	if err != nil {
 		return nil, err

@@ -1,11 +1,9 @@
 package repository
 
 import (
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
 )
-
-const paymentConfigSingletonID uint = 1
 
 type PaymentConfigRepositoryImpl struct {
 	db *gorm.DB
@@ -15,12 +13,15 @@ func NewPaymentConfigRepositoryImpl(db *gorm.DB) *PaymentConfigRepositoryImpl {
 	return &PaymentConfigRepositoryImpl{db: db}
 }
 
-// Get returns the singleton PaymentConfig row, creating it on first call.
-func (r *PaymentConfigRepositoryImpl) Get() (*models.PaymentConfig, error) {
+// GetByCenter returns the payment config owned by centerID, creating an empty
+// row on first call. The previous implementation forced every read/write to the
+// platform-wide singleton (ID = 1); the row is now keyed by beauty_center_id,
+// which is what closes the cross-tenant hijack.
+func (r *PaymentConfigRepositoryImpl) GetByCenter(centerID uint) (*models.PaymentConfig, error) {
 	var config models.PaymentConfig
-	err := r.db.First(&config, paymentConfigSingletonID).Error
+	err := r.db.Where("beauty_center_id = ?", centerID).First(&config).Error
 	if err == gorm.ErrRecordNotFound {
-		config = models.PaymentConfig{ID: paymentConfigSingletonID}
+		config = models.PaymentConfig{BeautyCenterID: centerID}
 		if err := r.db.Create(&config).Error; err != nil {
 			return nil, err
 		}
@@ -32,8 +33,8 @@ func (r *PaymentConfigRepositoryImpl) Get() (*models.PaymentConfig, error) {
 	return &config, nil
 }
 
-// Save persists the singleton PaymentConfig row.
+// Save persists the row. The row's BeautyCenterID is the storage key and is
+// never rewritten here (the old Save forced ID = 1).
 func (r *PaymentConfigRepositoryImpl) Save(config *models.PaymentConfig) error {
-	config.ID = paymentConfigSingletonID
 	return r.db.Save(config).Error
 }

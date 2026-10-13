@@ -14,7 +14,7 @@ package tests
 //
 // Scope: a curated, documented table of Go response structs that have a TS
 // counterpart. It is a DEV-TIME guard, not a CI guard: the sibling repo lives
-// at ../yottu-mobile (override with YOTTU_MOBILE_DIR). When that repo is absent
+// at ../yotuvia-mobile (override with YOTUVIA_MOBILE_DIR). When that repo is absent
 // the test SKIPS with a clear message instead of failing.
 //
 // Direction: BOTH. A Go key missing from its TS interface fails ("Go emits a
@@ -34,8 +34,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -491,19 +491,19 @@ func tsKeysFromMembers(body string) tsParseResult {
 //  MOBILE REPO RESOLUTION
 // ─────────────────────────────────────────────────────────────
 
-// mobileRepoDir resolves the sibling mobile checkout. YOTTU_MOBILE_DIR wins;
-// otherwise it defaults to ../../yottu-mobile relative to this test file, which
+// mobileRepoDir resolves the sibling mobile checkout. YOTUVIA_MOBILE_DIR wins;
+// otherwise it defaults to ../../yotuvia-mobile relative to this test file, which
 // is where the two repos sit side by side.
 func mobileRepoDir(t *testing.T) string {
 	t.Helper()
-	if dir := os.Getenv("YOTTU_MOBILE_DIR"); dir != "" {
+	if dir := os.Getenv("YOTUVIA_MOBILE_DIR"); dir != "" {
 		return dir
 	}
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("cannot resolve test file path to locate the mobile repo")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "yottu-mobile"))
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "yotuvia-mobile"))
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -516,8 +516,8 @@ func mobileRepoDir(t *testing.T) string {
 func TestWireDTOContract(t *testing.T) {
 	root := mobileRepoDir(t)
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
-		t.Skipf("SKIP: mobile repo not found at %s (set YOTTU_MOBILE_DIR to override). "+
-			"This dev-time wire guard needs ../yottu-mobile to compare against the TS DTOs.", root)
+		t.Skipf("SKIP: mobile repo not found at %s (set YOTUVIA_MOBILE_DIR to override). "+
+			"This dev-time wire guard needs ../yotuvia-mobile to compare against the TS DTOs.", root)
 	}
 
 	cache := map[string]string{}

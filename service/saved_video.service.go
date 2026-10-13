@@ -1,6 +1,6 @@
 package service
 
-import "github.com/Nina-99/yottu-api/data/response"
+import "github.com/Nina-99/yotuvia-api/data/response"
 
 type SavedVideoService interface {
 	/** Toggle save: saves if not saved, removes if already saved. Returns new saved state. */

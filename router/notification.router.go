@@ -1,10 +1,10 @@
 package router
 
 import (
-	"github.com/Nina-99/yottu-api/controller"
-	"github.com/Nina-99/yottu-api/middleware"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/service"
+	"github.com/Nina-99/yotuvia-api/controller"
+	"github.com/Nina-99/yotuvia-api/middleware"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/service"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )

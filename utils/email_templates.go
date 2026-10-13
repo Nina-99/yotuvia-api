@@ -26,17 +26,17 @@ type EmailContent struct {
 }
 
 // DeepLinkBaseURL returns the app-scheme base for email links, configured with
-// APP_DEEP_LINK_BASE_URL (default "yottu://"). The mobile app registers both
-// "yottu" and "yottumobile" schemes; "yottu" is the canonical external one.
+// APP_DEEP_LINK_BASE_URL (default "yotuvia://"). The mobile app registers both
+// "yotuvia" and "yottumobile" schemes; "yotuvia" is the canonical external one.
 //
 // NOTE: an app-scheme link only works when the app is installed. A hosted web
-// fallback (e.g. https://yottu.app/verify?token=...) is REQUIRED for users
+// fallback (e.g. https://yotuvia.app/verify?token=...) is REQUIRED for users
 // without the app and is intentionally out of scope here; pointing this env var
 // at such a base later requires no code change beyond the destination routes.
 func DeepLinkBaseURL() string {
 	base := strings.TrimSpace(os.Getenv("APP_DEEP_LINK_BASE_URL"))
 	if base == "" {
-		return "yottu://"
+		return "yotuvia://"
 	}
 	if !strings.HasSuffix(base, "/") {
 		base += "/"

@@ -24,7 +24,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/Nina-99/yottu-api/migration"
+	"github.com/Nina-99/yotuvia-api/migration"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
 )

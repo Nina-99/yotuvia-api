@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -20,7 +20,7 @@ import (
 // shared two-service fixtures (services 10 and 11, 30 min each, start 10:00).
 func updateResBody(personnelID uint, serviceList string) string {
 	return fmt.Sprintf(
-		`{"beauty_center_id":1,"personnel_id":%d,"service_ids":[%s],"date":"2026-10-05","start_time":"10:00"}`,
+		`{"beauty_center_id":1,"personnel_id":%d,"service_ids":[%s],"date":"`+bookingTestDateKey+`","start_time":"10:00"}`,
 		personnelID, serviceList,
 	)
 }
@@ -29,7 +29,7 @@ func updateResBody(personnelID uint, serviceList string) string {
 // plan, mirroring the create-path shape.
 func updatePlanBody(serviceIDs [2]uint, personnelIDs [2]uint) string {
 	return fmt.Sprintf(
-		`{"beauty_center_id":1,"service_ids":[%d,%d],"assignments":[{"service_id":%d,"personnel_id":%d},{"service_id":%d,"personnel_id":%d}],"date":"2026-10-05","start_time":"10:00"}`,
+		`{"beauty_center_id":1,"service_ids":[%d,%d],"assignments":[{"service_id":%d,"personnel_id":%d},{"service_id":%d,"personnel_id":%d}],"date":"`+bookingTestDateKey+`","start_time":"10:00"}`,
 		serviceIDs[0], serviceIDs[1],
 		serviceIDs[0], personnelIDs[0], serviceIDs[1], personnelIDs[1],
 	)
@@ -159,23 +159,23 @@ func TestUpdateReservation_PlanValidation(t *testing.T) {
 	}{
 		{
 			name: "missing a requested service",
-			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1}],"date":"2026-10-05","start_time":"10:00"}`,
+			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1}],"date":"` + bookingTestDateKey + `","start_time":"10:00"}`,
 		},
 		{
 			name: "duplicate service",
-			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1},{"service_id":10,"personnel_id":2}],"date":"2026-10-05","start_time":"10:00"}`,
+			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1},{"service_id":10,"personnel_id":2}],"date":"` + bookingTestDateKey + `","start_time":"10:00"}`,
 		},
 		{
 			name: "unknown service (not requested)",
-			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1},{"service_id":99,"personnel_id":2}],"date":"2026-10-05","start_time":"10:00"}`,
+			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":1},{"service_id":99,"personnel_id":2}],"date":"` + bookingTestDateKey + `","start_time":"10:00"}`,
 		},
 		{
 			name: "zero professional",
-			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":0},{"service_id":11,"personnel_id":1}],"date":"2026-10-05","start_time":"10:00"}`,
+			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":10,"personnel_id":0},{"service_id":11,"personnel_id":1}],"date":"` + bookingTestDateKey + `","start_time":"10:00"}`,
 		},
 		{
 			name: "zero service",
-			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":0,"personnel_id":1},{"service_id":11,"personnel_id":1}],"date":"2026-10-05","start_time":"10:00"}`,
+			body: `{"beauty_center_id":1,"service_ids":[10,11],"assignments":[{"service_id":0,"personnel_id":1},{"service_id":11,"personnel_id":1}],"date":"` + bookingTestDateKey + `","start_time":"10:00"}`,
 		},
 	}
 
@@ -325,7 +325,7 @@ func TestUpdateReservation_NewServiceTakesRequestedProfessional(t *testing.T) {
 		})
 
 		// Keep 10, drop 11, add new service 12; ask for pro 3.
-		body := `{"beauty_center_id":1,"personnel_id":3,"service_ids":[10,12],"date":"2026-10-05","start_time":"10:00"}`
+		body := `{"beauty_center_id":1,"personnel_id":3,"service_ids":[10,12],"date":"` + bookingTestDateKey + `","start_time":"10:00"}`
 		w := do(r, http.MethodPut, fmt.Sprintf("/api/reservation/%d", target.ID),
 			roleToken(t, 7, 1, "beauty_center"), body)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -353,7 +353,7 @@ func TestUpdateReservation_NewServiceTakesRequestedProfessional(t *testing.T) {
 		})
 
 		// No top-level personnel_id: the new service falls back to the stored lead.
-		body := `{"beauty_center_id":1,"personnel_id":0,"service_ids":[10,12],"date":"2026-10-05","start_time":"10:00"}`
+		body := `{"beauty_center_id":1,"personnel_id":0,"service_ids":[10,12],"date":"` + bookingTestDateKey + `","start_time":"10:00"}`
 		w := do(r, http.MethodPut, fmt.Sprintf("/api/reservation/%d", target.ID),
 			roleToken(t, 7, 1, "beauty_center"), body)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())

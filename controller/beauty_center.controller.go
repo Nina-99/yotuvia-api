@@ -1,13 +1,15 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/service"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,6 +19,23 @@ type BeautyCenterController struct {
 
 func NewBeautyCenterController(service service.BeautyCenterService) *BeautyCenterController {
 	return &BeautyCenterController{beautyCenterService: service}
+}
+
+// writeError maps the ownership sentinels through apperrors.MapToHTTP so a
+// foreign centre gets 403 {"error":"forbidden"} and a missing row 404. Any
+// other error keeps the pre-existing contract: validator failures are 400,
+// everything else is 500.
+func (c *BeautyCenterController) writeError(ctx *gin.Context, err error) {
+	if errors.Is(err, apperrors.ErrForbidden) || errors.Is(err, apperrors.ErrNotFound) {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+	code := http.StatusInternalServerError
+	if strings.HasPrefix(err.Error(), "Key:") {
+		code = http.StatusBadRequest
+	}
+	ctx.JSON(code, gin.H{"error": err.Error()})
 }
 
 func (c *BeautyCenterController) Update(ctx *gin.Context) {
@@ -33,13 +52,10 @@ func (c *BeautyCenterController) Update(ctx *gin.Context) {
 		return
 	}
 
-	res, err := c.beautyCenterService.Update(uint(id), req)
+	// The caller's centerID claim is the owner; the service enforces id == claim.
+	res, err := c.beautyCenterService.Update(uint(id), ctx.GetUint("centerID"), req)
 	if err != nil {
-		code := http.StatusInternalServerError
-		if strings.HasPrefix(err.Error(), "Key:") {
-			code = http.StatusBadRequest
-		}
-		ctx.JSON(code, gin.H{"error": err.Error()})
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -54,8 +70,9 @@ func (c *BeautyCenterController) Delete(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.beautyCenterService.Delete(uint(id)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// The caller's centerID claim is the owner; the service enforces id == claim.
+	if err := c.beautyCenterService.Delete(uint(id), ctx.GetUint("centerID")); err != nil {
+		c.writeError(ctx, err)
 		return
 	}
 
@@ -76,6 +93,7 @@ func (c *BeautyCenterController) FindByID(ctx *gin.Context) {
 		return
 	}
 
+	res.Localize(ctx.DefaultQuery("lang", ""))
 	ctx.JSON(http.StatusOK, res)
 }
 
@@ -95,6 +113,7 @@ func (c *BeautyCenterController) FindAll(ctx *gin.Context) {
 		return
 	}
 
+	localizeCenters(res, ctx.DefaultQuery("lang", ""))
 	ctx.JSON(http.StatusOK, response.PaginatedResponse{
 		Data:  res,
 		Total: total,
@@ -156,6 +175,7 @@ func (c *BeautyCenterController) Search(ctx *gin.Context) {
 		return
 	}
 
+	localizeCenters(res, ctx.DefaultQuery("lang", ""))
 	ctx.JSON(http.StatusOK, response.PaginatedResponse{
 		Data:  res,
 		Total: total,
@@ -177,6 +197,7 @@ func (c *BeautyCenterController) FindTopRated(ctx *gin.Context) {
 		return
 	}
 
+	localizeCenters(res, ctx.DefaultQuery("lang", ""))
 	ctx.JSON(http.StatusOK, res)
 }
 
@@ -205,7 +226,18 @@ func (c *BeautyCenterController) FindNearby(ctx *gin.Context) {
 		return
 	}
 
+	localizeCenters(res, ctx.DefaultQuery("lang", ""))
 	ctx.JSON(http.StatusOK, res)
+}
+
+// localizeCenters resolves Name/Description for each center in place.
+func localizeCenters(res []response.BeautyCenterResponse, lang string) {
+	if lang == "" {
+		return
+	}
+	for i := range res {
+		res[i].Localize(lang)
+	}
 }
 
 // FindRanking returns beauty centers ranked by composite score for the

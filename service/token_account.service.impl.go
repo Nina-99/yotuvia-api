@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Nina-99/yottu-api/apperrors"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"gorm.io/gorm"
 )
 
@@ -187,25 +187,56 @@ func (s *TokenAccountServiceImpl) AddTokens(beautyCenterID uint, amountMilli int
 	return nil
 }
 
-func (s *TokenAccountServiceImpl) ProcessTopUp(topUpID, adminID uint, status string) error {
+// loadPendingTopUp resolves a top-up and applies the shared "not found / already
+// processed" guards, so every caller — centre-scoped or platform-scoped —
+// answers with the exact same messages.
+func (s *TokenAccountServiceImpl) loadPendingTopUp(topUpID uint) (*models.TokenTopUp, error) {
 	topup, err := s.topUpRepo.FindByID(topUpID)
+	if err != nil {
+		return nil, err
+	}
+	if topup == nil {
+		return nil, errors.New("top-up request not found")
+	}
+	if topup.Status != "pending" {
+		return nil, errors.New("top-up already processed")
+	}
+	return topup, nil
+}
+
+// ProcessTopUp is the centre-scoped decision path. D5 authz: the admin must own
+// the top-up's center. The role gate on the route guarantees the role; here the
+// service re-proves the claim so direct callers cannot bypass ownership
+// (mirrors CreateAdminReservation).
+func (s *TokenAccountServiceImpl) ProcessTopUp(topUpID, adminID uint, status string) error {
+	topup, err := s.loadPendingTopUp(topUpID)
 	if err != nil {
 		return err
 	}
-	if topup == nil {
-		return errors.New("top-up request not found")
-	}
-	if topup.Status != "pending" {
-		return errors.New("top-up already processed")
-	}
-
-	// D5 authz: the admin must own the top-up's center. The role gate on the
-	// route guarantees the role; here the service re-proves the claim so direct
-	// callers cannot bypass ownership (mirrors CreateAdminReservation).
 	if topup.BeautyCenterID != adminID {
 		return apperrors.ErrForbidden
 	}
+	return s.applyTopUpDecision(topup, adminID, status)
+}
 
+// ProcessTopUpAsPlatform is the platform-scoped decision path: a super_admin may
+// decide ANY centre's top-up, so the ownership check that guards the
+// centre-scoped path is deliberately absent. Everything else — the guards above,
+// the approve/reject semantics, the credit and the notifications — is the SAME
+// code, so the two paths cannot drift into two contracts. adminID is the
+// platform admin's own id and is what gets recorded as the validator.
+func (s *TokenAccountServiceImpl) ProcessTopUpAsPlatform(topUpID, adminID uint, status string) error {
+	topup, err := s.loadPendingTopUp(topUpID)
+	if err != nil {
+		return err
+	}
+	return s.applyTopUpDecision(topup, adminID, status)
+}
+
+// applyTopUpDecision performs the approved/rejected write, the balance credit and
+// the best-effort notification. It assumes the top-up is already known to be
+// pending.
+func (s *TokenAccountServiceImpl) applyTopUpDecision(topup *models.TokenTopUp, adminID uint, status string) error {
 	if status == "rejected" {
 		topup.Status = "rejected"
 		topup.ValidatedBy = &adminID

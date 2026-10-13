@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -89,16 +90,28 @@ func (s *PromotionServiceImpl) Create(req request.CreatePromotionRequest) (respo
 	return s.toResponse(&promo), nil
 }
 
-func (s *PromotionServiceImpl) FindByID(id uint) (*response.PromotionResponse, error) {
+func (s *PromotionServiceImpl) FindByID(id, actorCenterID uint) (*response.PromotionResponse, error) {
 	promo, err := s.repo.FindByID(id)
-	if err != nil || promo == nil {
-		return nil, errors.New("promotion not found")
+	if err != nil {
+		return nil, err
+	}
+	if promo == nil {
+		return nil, apperrors.ErrNotFound
+	}
+	// Ownership: the promo must belong to the acting center (centerID claim).
+	if actorCenterID == 0 || promo.BeautyCenterID != actorCenterID {
+		return nil, apperrors.ErrForbidden
 	}
 	resp := s.toResponse(promo)
 	return &resp, nil
 }
 
-func (s *PromotionServiceImpl) FindByCenter(beautyCenterID uint, includeInactive bool) ([]response.PromotionResponse, error) {
+func (s *PromotionServiceImpl) FindByCenter(beautyCenterID, actorCenterID uint, includeInactive bool) ([]response.PromotionResponse, error) {
+	// Reject a :centerId path value that does not match the caller's claim.
+	if actorCenterID == 0 || actorCenterID != beautyCenterID {
+		return nil, apperrors.ErrForbidden
+	}
+
 	promos, err := s.repo.FindByCenter(beautyCenterID, includeInactive)
 	if err != nil {
 		return nil, err
@@ -110,10 +123,17 @@ func (s *PromotionServiceImpl) FindByCenter(beautyCenterID uint, includeInactive
 	return res, nil
 }
 
-func (s *PromotionServiceImpl) Update(id uint, req request.UpdatePromotionRequest) (response.PromotionResponse, error) {
+func (s *PromotionServiceImpl) Update(id, actorCenterID uint, req request.UpdatePromotionRequest) (response.PromotionResponse, error) {
 	promo, err := s.repo.FindByID(id)
-	if err != nil || promo == nil {
-		return response.PromotionResponse{}, errors.New("promotion not found")
+	if err != nil {
+		return response.PromotionResponse{}, err
+	}
+	if promo == nil {
+		return response.PromotionResponse{}, apperrors.ErrNotFound
+	}
+	// Ownership: the promo must belong to the acting center (centerID claim).
+	if actorCenterID == 0 || promo.BeautyCenterID != actorCenterID {
+		return response.PromotionResponse{}, apperrors.ErrForbidden
 	}
 
 	if req.Name != nil {
@@ -162,10 +182,17 @@ func (s *PromotionServiceImpl) Update(id uint, req request.UpdatePromotionReques
 	return s.toResponse(promo), nil
 }
 
-func (s *PromotionServiceImpl) Delete(id uint) error {
+func (s *PromotionServiceImpl) Delete(id, actorCenterID uint) error {
 	promo, err := s.repo.FindByID(id)
-	if err != nil || promo == nil {
-		return errors.New("promotion not found")
+	if err != nil {
+		return err
+	}
+	if promo == nil {
+		return apperrors.ErrNotFound
+	}
+	// Ownership: the promo must belong to the acting center (centerID claim).
+	if actorCenterID == 0 || promo.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
 	}
 	return s.repo.Delete(promo)
 }

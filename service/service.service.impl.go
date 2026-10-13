@@ -3,10 +3,10 @@ package service
 import (
 	"errors"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -40,15 +40,17 @@ func (s *ServiceServiceImpl) Create(req request.CreateServiceRequest) (uint, err
 	}
 
 	service := models.Service{
-		BeautyCenterID: req.BeautyCenterID,
-		CategoryID:     req.CategoryID,
-		Name:           req.Name,
-		Description:    req.Description,
-		Duration:       req.Duration,
-		Price:          req.Price,
-		ImageURL:       req.ImageURL,
-		IsActive:       req.IsActive,
-		TreatmentID:    req.TreatmentID,
+		BeautyCenterID:  req.BeautyCenterID,
+		CategoryID:      req.CategoryID,
+		Name:            req.Name,
+		Description:     req.Description,
+		NameI18n:        utils.NormalizeI18n(req.NameI18n),
+		DescriptionI18n: utils.NormalizeI18n(req.DescriptionI18n),
+		Duration:        req.Duration,
+		Price:           req.Price,
+		ImageURL:        req.ImageURL,
+		IsActive:        req.IsActive,
+		TreatmentID:     req.TreatmentID,
 	}
 
 	if err := s.ServiceRepository.Create(&service); err != nil {
@@ -84,6 +86,12 @@ func (s *ServiceServiceImpl) Update(serviceID uint, req request.UpdateServiceReq
 	}
 	if req.Description != "" {
 		service.Description = req.Description
+	}
+	if req.NameI18n != nil {
+		service.NameI18n = utils.NormalizeI18n(req.NameI18n)
+	}
+	if req.DescriptionI18n != nil {
+		service.DescriptionI18n = utils.NormalizeI18n(req.DescriptionI18n)
 	}
 	if req.Duration != 0 {
 		service.Duration = req.Duration

@@ -7,11 +7,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -50,14 +51,21 @@ func (s *BeautyCenterServiceImpl) profileComplete(center *models.BeautyCenter) (
 }
 
 // Update implements BeautyCenterService
-func (s *BeautyCenterServiceImpl) Update(id uint, req request.UpdateBeautyCenterRequest) (response.BeautyCenterResponse, error) {
+func (s *BeautyCenterServiceImpl) Update(id, actorCenterID uint, req request.UpdateBeautyCenterRequest) (response.BeautyCenterResponse, error) {
+	// Ownership first: a centre only ever edits itself. The path id must equal
+	// the caller's centerID claim, so a center-A admin cannot rewrite center B
+	// (email/password included) and a token without a centerID claim (0) owns
+	// nothing. Enforced in the service, like loyalty/promotion/reservation.
+	if actorCenterID == 0 || id != actorCenterID {
+		return response.BeautyCenterResponse{}, apperrors.ErrForbidden
+	}
 	if err := s.Validate.Struct(req); err != nil {
 		return response.BeautyCenterResponse{}, err
 	}
 	// Find existing
 	center, err := s.repo.FindByID(id)
 	if err != nil {
-		return response.BeautyCenterResponse{}, errors.New("beauty center not found")
+		return response.BeautyCenterResponse{}, apperrors.ErrNotFound
 	}
 
 	// feat-token-missions D4: capture completeness BEFORE the update so the
@@ -83,6 +91,12 @@ func (s *BeautyCenterServiceImpl) Update(id uint, req request.UpdateBeautyCenter
 	}
 	if req.Description != "" {
 		center.Description = req.Description
+	}
+	if req.NameI18n != nil {
+		center.NameI18n = utils.NormalizeI18n(req.NameI18n)
+	}
+	if req.DescriptionI18n != nil {
+		center.DescriptionI18n = utils.NormalizeI18n(req.DescriptionI18n)
 	}
 	if req.Currency != "" {
 		center.Currency = req.Currency
@@ -212,8 +226,12 @@ func (s *BeautyCenterServiceImpl) MarkVerified(id uint) error {
 	return nil
 }
 
-// Delete implements BeautyCenterService
-func (s *BeautyCenterServiceImpl) Delete(id uint) error {
+// Delete implements BeautyCenterService. Ownership is enforced against the
+// caller's centerID claim before the row is touched.
+func (s *BeautyCenterServiceImpl) Delete(id, actorCenterID uint) error {
+	if actorCenterID == 0 || id != actorCenterID {
+		return apperrors.ErrForbidden
+	}
 	return s.repo.Delete(id)
 }
 
@@ -328,6 +346,8 @@ func (s *BeautyCenterServiceImpl) mapToResponse(center models.BeautyCenter) resp
 		Phone:                 center.Phone,
 		Url:                   center.Url,
 		Description:           center.Description,
+		NameI18n:              center.NameI18n,
+		DescriptionI18n:       center.DescriptionI18n,
 		Latitude:              center.Latitude,
 		Longitude:             center.Longitude,
 		IsActive:              center.IsActive,

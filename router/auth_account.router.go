@@ -1,11 +1,11 @@
 package router
 
 import (
-	"github.com/Nina-99/yottu-api/controller"
-	"github.com/Nina-99/yottu-api/middleware"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/service"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/controller"
+	"github.com/Nina-99/yotuvia-api/middleware"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/service"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
@@ -20,6 +20,7 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	personnelRepo := repository.NewPersonnelRepositoryImpl(db)
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	authRepo := repository.NewAuthAccountRepositoryImpl(db)
+	platformAdminRepo := repository.NewPlatformAdminRepositoryImpl(db)
 	sessionRepo := repository.NewUserSessionRepositoryImpl(db)
 	tokenRepo := repository.NewAuthTokenRepositoryImpl(db)
 
@@ -40,7 +41,7 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	tokenAccountSvc := service.NewTokenAccountServiceImpl(tokenAccountRepo, tokenTopUpRepo, centerRepo, tokenMissionSvc, tokenNotifSvc)
 	tokenMissionSvc = service.NewTokenMissionServiceImpl(tokenMissionRepo, tokenAccountSvc, tokenAccountRepo)
 
-	svc := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo, sessionRepo, tokenRepo, mailer, tokenAccountSvc, validate)
+	svc := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo, platformAdminRepo, sessionRepo, tokenRepo, mailer, tokenAccountSvc, validate)
 	ctrl := controller.NewAuthAccountController(svc)
 
 	// One limiter shared by every auth route below so a single attacker burns a

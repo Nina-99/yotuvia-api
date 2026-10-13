@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nina-99/yottu-api/apperrors"
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
 )
@@ -59,6 +59,9 @@ func (s *ClientServiceImpl) Update(id uint, actorClientID uint, req request.Upda
 	if req.LastName != "" {
 		client.LastName = req.LastName
 	}
+	if req.Phone != "" {
+		client.Phone = req.Phone
+	}
 	if req.Username != "" && req.Username != client.Username {
 		existingUsername, err := s.ClientRepository.FindByUsername(req.Username)
 		if err != nil {
@@ -94,7 +97,11 @@ func (s *ClientServiceImpl) Update(id uint, actorClientID uint, req request.Upda
 	if req.AvatarURL != "" {
 		client.AvatarURL = req.AvatarURL
 	}
-	client.IsActive = req.IsActive
+	// Only when explicitly provided: the mobile client edit never sends
+	// is_active, and a defaulted false would deactivate the account.
+	if req.IsActive != nil {
+		client.IsActive = *req.IsActive
+	}
 
 	if err := s.ClientRepository.Update(client); err != nil {
 		utils.Log.Errorf("Update failed: error saving client to database: %v", err)

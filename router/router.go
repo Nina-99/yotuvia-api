@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Nina-99/yottu-api/configs"
-	"github.com/Nina-99/yottu-api/middleware"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/configs"
+	"github.com/Nina-99/yotuvia-api/middleware"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 )
@@ -16,6 +16,9 @@ func SetupRouter() *gin.Engine {
 	r := gin.Default()
 	ConfigureTrustedProxies(r)
 	r.Use(middleware.GinLogger())
+	// CORS must run before any route so browser preflights are answered even
+	// for unmatched OPTIONS requests (otherwise they fall through to 404).
+	r.Use(middleware.CORS())
 
 	// Serve uploaded files
 	r.Static("/uploads", "./uploads")
@@ -39,6 +42,7 @@ func SetupRouter() *gin.Engine {
 		TokenRoutes(api, db, validate)
 		TreatmentRoutes(api, db, validate)
 		PaymentConfigRoutes(api, db, validate)
+		PlatformRoutes(api, db, validate)
 		PersonnelRoutes(api, db, validate)
 		PersonnelInvitationRoutes(api, db, validate)
 		PersonnelImageRoutes(api, db, validate)

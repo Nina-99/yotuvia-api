@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/Nina-99/yottu-api/service"
+	"github.com/Nina-99/yotuvia-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -35,7 +35,7 @@ func (c *PersonnelInvitationController) Generate(ctx *gin.Context) {
 		return
 	}
 
-	// INVITE_BASE_URL env: set to "https://yottu.app/join/" in production
+	// INVITE_BASE_URL env: set to "https://yotuvia.com/join/" in production
 	token, err := c.invitationService.Generate(beautyCenterID.(uint), req.Email)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -118,7 +118,7 @@ func (c *PersonnelInvitationController) ListByCenter(ctx *gin.Context) {
 func getInviteBaseURL() string {
 	url := os.Getenv("INVITE_BASE_URL")
 	if url == "" {
-		return "yottumobile://join/"
+		return "yotuvia://join/"
 	}
 	// Ensure trailing slash
 	if url[len(url)-1] != '/' {

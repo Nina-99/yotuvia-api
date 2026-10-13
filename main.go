@@ -4,9 +4,9 @@ import (
 	"log"
 	"os"
 
-	"github.com/Nina-99/yottu-api/configs"
-	"github.com/Nina-99/yottu-api/router"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/configs"
+	"github.com/Nina-99/yotuvia-api/router"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/joho/godotenv"
 )
 

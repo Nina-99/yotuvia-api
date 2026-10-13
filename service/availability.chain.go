@@ -1,6 +1,6 @@
 package service
 
-import "github.com/Nina-99/yottu-api/models"
+import "github.com/Nina-99/yotuvia-api/models"
 
 // This file holds the multi-professional CHAIN evaluation used by the
 // availability search. It deliberately does NOT introduce a second interval

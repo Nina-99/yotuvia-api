@@ -1,6 +1,6 @@
 package repository
 
-import "github.com/Nina-99/yottu-api/models"
+import "github.com/Nina-99/yotuvia-api/models"
 
 type LoyaltyRepository interface {
 	CreateProgram(program *models.LoyaltyProgram) error
@@ -38,4 +38,24 @@ type LoyaltyRepository interface {
 	UpdateProgramsActiveByCenter(beautyCenterID uint, isActive bool) error
 	// FindActiveCardForPersonnel finds an active card for a specific personnel.
 	FindActiveCardForPersonnel(clientID, programID, personnelID uint) (*models.CustomerPunchCard, error)
+
+	// ── Slice 1 client-experience reads ──
+	// FindPunchHistoryByClient returns punch rows for a client's cards, newest
+	// first, with program + service preloaded for timeline rendering.
+	FindPunchHistoryByClient(clientID uint) ([]models.PunchHistory, error)
+	// FindCompletedCardsByClient returns completed cards with program preloaded
+	// (pending-reward candidates; redemption state resolved in service).
+	FindCompletedCardsByClient(clientID uint) ([]models.CustomerPunchCard, error)
+	// FindPublicProgramsByCenter returns active programs for anonymous display.
+	FindPublicProgramsByCenter(beautyCenterID uint) ([]models.LoyaltyProgram, error)
+	// FindPunchHistoryByReservationCard returns an existing punch row for the
+	// (reservation, card) pair, or nil. Backs the UNIQUE double-punch guard.
+	FindPunchHistoryByReservationCard(reservationID, cardID uint) (*models.PunchHistory, error)
+
+	// ── Slice 2 metrics ──
+	// CountCardsByProgramStatus returns the (active, completed) card counts for
+	// a program. Zero-valued when the program has no cards.
+	CountCardsByProgramStatus(programID uint) (active, completed int64, err error)
+	// CountRedemptionsByProgram returns the redemption count for a program.
+	CountRedemptionsByProgram(programID uint) (int64, error)
 }

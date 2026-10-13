@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
 )
 

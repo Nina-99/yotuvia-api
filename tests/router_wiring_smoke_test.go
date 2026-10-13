@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/router"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/router"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -195,8 +195,8 @@ func TestRouterWiring_No5xxWithValidToken(t *testing.T) {
 		// ── treatments (public vocabulary) ──
 		{"treatment catalog", http.MethodGet, "/api/treatments", "client"},
 		// ── payment config ──
-		{"payment config get", http.MethodGet, "/api/config/payment", "client"},
-		{"tier config get", http.MethodGet, "/api/config/tiers", "client"},
+		{"payment config get", http.MethodGet, "/api/config/payment?beauty_center_id=1", "client"},
+		{"tier config get", http.MethodGet, "/api/config/tiers?beauty_center_id=1", "client"},
 		{"payment config update", http.MethodPut, "/api/admin/config/payment", "beauty_center"},
 		{"payment qr upload", http.MethodPost, "/api/admin/config/payment/qr", "beauty_center"},
 		// ── personnel ──

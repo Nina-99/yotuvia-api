@@ -3,9 +3,9 @@ package service
 import (
 	"errors"
 
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
 )

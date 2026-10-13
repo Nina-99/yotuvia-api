@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/router"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/router"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -48,7 +48,7 @@ func bookingAvailabilityRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 const fixtureServiceDuration = 45
 
 // bookingFixture seeds one center, one staff, one client and one 45-minute
-// service. 2026-10-05 is a Monday (weekday 1).
+// service on the shared future anchor day (see booking_test_dates.go).
 func bookingFixture(t *testing.T) (*gin.Engine, *gorm.DB, time.Time) {
 	t.Helper()
 	r, db := bookingAvailabilityRouter(t)
@@ -56,7 +56,7 @@ func bookingFixture(t *testing.T) (*gin.Engine, *gorm.DB, time.Time) {
 	seedDashboardPersonnel(t, db, 1, 1, true)
 	seedDashboardClient(t, db, 1, "Book", "Client")
 	seedServiceRow(t, db, 1, 1, fixtureServiceDuration)
-	return r, db, time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	return r, db, bookingTestDate
 }
 
 func readSlots(t *testing.T, r *gin.Engine, date string) response.AvailableSlotsResponse {

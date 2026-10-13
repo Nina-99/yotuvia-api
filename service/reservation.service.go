@@ -3,9 +3,9 @@ package service
 import (
 	"time"
 
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
 )
 
 type ReservationActor struct {
@@ -102,6 +102,9 @@ type ReservationService interface {
 	// performed the completion, true for an idempotent re-scan or a lost
 	// exactly-once race.
 	VerifyQR(token string, authBeautyCenterID uint) (*models.Reservation, bool, error)
+	// VerifyQRWithReward is VerifyQR plus the batched earn outcome for the
+	// verify-qr envelope (nil reward when nothing was minted).
+	VerifyQRWithReward(token string, authBeautyCenterID uint) (*models.Reservation, bool, *response.RewardLineResponse, error)
 	AssignPersonnel(reservationID uint, personnelID uint, centerID uint) error
 	// RecordNoShow marks a past CONFIRMED reservation as NO_SHOW and applies
 	// the trust penalty to the client. Only the owning center may call it

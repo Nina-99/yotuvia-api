@@ -7,11 +7,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Nina-99/yottu-api/controller"
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/service"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/controller"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -107,17 +108,17 @@ func TestReviewService_OwnershipUpdateDelete(t *testing.T) {
 	notifSvc := service.NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db))
 	svc := service.NewReviewServiceImpl(repo, notifSvc, nil, validate)
 
-	// User 2 trying to update User 1's review (ID 1)
+	// User 2 trying to update User 1's review (ID 1). Ownership is a sentinel
+	// (apperrors.ErrForbidden), not a free-form string: the controller maps it
+	// to 403 {"error":"forbidden"} instead of leaking a 500.
 	rating := 4
 	updateReq := request.UpdateReviewRequest{Rating: &rating}
 	err := svc.Update(2, 1, updateReq) // clientID 2, reviewID 1
-	assert.Error(t, err)
-	assert.Equal(t, "unauthorized: you can only update your own reviews", err.Error())
+	assert.ErrorIs(t, err, apperrors.ErrForbidden)
 
 	// User 2 trying to delete User 1's review
 	errDelete := svc.Delete(2, 1) // clientID 2, reviewID 1
-	assert.Error(t, errDelete)
-	assert.Equal(t, "unauthorized: you can only delete your own reviews", errDelete.Error())
+	assert.ErrorIs(t, errDelete, apperrors.ErrForbidden)
 
 	// User 1 successfully updating their own review
 	errSuccess := svc.Update(1, 1, updateReq)

@@ -1,7 +1,7 @@
 # Video → Booking Funnel Metrics
 
 Answer "where is the leak?" from the database today — no dashboard required.
-Every query below was executed against the local Postgres (`docker exec -it yottu_db psql -U yottu -d yottu`)
+Every query below was executed against the local Postgres (`docker exec -it yotuvia_db psql -U yotuvia -d yotuvia`)
 with the schema described here.
 
 > **Snapshot caveat.** The attribution columns (`reservations.source_post_id`,

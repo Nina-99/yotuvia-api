@@ -18,8 +18,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Nina-99/yottu-api/data/response"
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/data/response"
+	"github.com/Nina-99/yotuvia-api/models"
 )
 
 // SlotStepMinutes is the fixed candidate granularity: slots are offered every

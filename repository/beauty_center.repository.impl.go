@@ -3,28 +3,38 @@ package repository
 import (
 	"time"
 
-	"github.com/Nina-99/yottu-api/models"
+	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
 )
 
-// ratingSelect is the shared SELECT fragment appended to every beauty-center
-// listing/detail query: the base columns plus the avg_rating and review_count
-// subqueries against reviews.
-const ratingSelect = "beauty_centers.*, " +
-	"COALESCE((SELECT CAST(AVG(rating) AS numeric(10,2)) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as avg_rating, " +
-	"COALESCE((SELECT COUNT(*) FROM reviews WHERE beauty_center_id = beauty_centers.id), 0) as review_count"
+// ratingAggregateJoin computes avg_rating and review_count for a whole page of
+// centres in ONE pass over reviews, using the same grouped LEFT JOIN shape as
+// the ranking query. A correlated subquery (the previous implementation) would
+// re-scan reviews once per centre per column — and reviews has no index on
+// beauty_center_id. Grouping once and joining is the batched form: the number of
+// review scans stays constant no matter how many centres the page holds.
+const ratingAggregateJoin = "LEFT JOIN (" +
+	"SELECT beauty_center_id, AVG(rating) AS avg_rating, COUNT(*) AS review_count " +
+	"FROM reviews WHERE deleted_at IS NULL GROUP BY beauty_center_id" +
+	") rating_agg ON rating_agg.beauty_center_id = beauty_centers.id"
 
-// withAverageRating is a GORM scope that selects the base beauty_centers columns
-// plus the rating subqueries, replacing the duplicated inline expressions. A
-// trailing SELECT expression with bind arguments (e.g. the distance calculation
-// in FindNearby) is appended verbatim after the rating subqueries.
+// ratingAggregateSelect projects the joined aggregate onto the model's
+// read-only AvgRating/ReviewCount fields (see models.BeautyCenter).
+const ratingAggregateSelect = "beauty_centers.*, " +
+	"COALESCE(rating_agg.avg_rating, 0) AS avg_rating, " +
+	"COALESCE(rating_agg.review_count, 0) AS review_count"
+
+// withAverageRating is the shared GORM scope behind every beauty-center
+// listing/detail query: it joins the rating aggregate and exposes avg_rating /
+// review_count. A trailing SELECT expression with bind arguments (e.g. the
+// distance calculation in FindNearby) is appended verbatim after them.
 func withAverageRating(extraSelect string, args ...interface{}) func(*gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
-		selects := ratingSelect
+		selects := ratingAggregateSelect
 		if extraSelect != "" {
 			selects += ", " + extraSelect
 		}
-		return db.Select(selects, args...)
+		return db.Joins(ratingAggregateJoin).Select(selects, args...)
 	}
 }
 
@@ -80,6 +90,7 @@ func (r *BeautyCenterRepositoryImpl) FindAll(page, limit int) ([]models.BeautyCe
 	err := r.db.
 		Scopes(withAverageRating("")).
 		Preload("BeautyCenterImage").
+		Preload("WorkingHour").
 		Where("is_active = ?", true).
 		Offset(offset).Limit(limit).
 		Find(&centers).Error
@@ -89,6 +100,17 @@ func (r *BeautyCenterRepositoryImpl) FindAll(page, limit int) ([]models.BeautyCe
 func (r *BeautyCenterRepositoryImpl) FindAllActiveForClients() ([]models.BeautyCenter, error) {
 	var centers []models.BeautyCenter
 	err := r.db.Where("is_active = ?", true).Find(&centers).Error
+	if err != nil {
+		return nil, err
+	}
+	return centers, nil
+}
+
+// FindAllSummaries returns id + name for every centre (including inactive ones),
+// for the platform admin's centre picker.
+func (r *BeautyCenterRepositoryImpl) FindAllSummaries() ([]models.BeautyCenter, error) {
+	var centers []models.BeautyCenter
+	err := r.db.Select("id", "name").Order("name ASC").Find(&centers).Error
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +285,7 @@ func (r *BeautyCenterRepositoryImpl) Search(query string, page, limit int) ([]mo
 
 	base := r.db.Model(&models.BeautyCenter{}).
 		Where("is_active = ?", true).
-		Where("name ILIKE ? OR address ILIKE ? OR description ILIKE ?", searchPattern, searchPattern, searchPattern)
+		Where("LOWER(name) LIKE LOWER(?) OR LOWER(address) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?)", searchPattern, searchPattern, searchPattern)
 
 	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -272,6 +294,7 @@ func (r *BeautyCenterRepositoryImpl) Search(query string, page, limit int) ([]mo
 	err := base.
 		Scopes(withAverageRating("")).
 		Preload("BeautyCenterImage").
+		Preload("WorkingHour").
 		Offset(offset).Limit(limit).
 		Find(&centers).Error
 
@@ -285,6 +308,7 @@ func (r *BeautyCenterRepositoryImpl) FindTopRated(limit int) ([]models.BeautyCen
 	err := r.db.
 		Scopes(withAverageRating("")).
 		Preload("BeautyCenterImage").
+		Preload("WorkingHour").
 		Where("is_active = ?", true).
 		Order("avg_rating DESC, review_count DESC").
 		Limit(limit).
@@ -302,6 +326,7 @@ func (r *BeautyCenterRepositoryImpl) FindNearby(latitude, longitude float64, lim
 			"(6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance",
 			latitude, longitude, latitude)).
 		Preload("BeautyCenterImage").
+		Preload("WorkingHour").
 		Where("is_active = ? AND latitude != 0 AND longitude != 0", true).
 		Order("distance ASC").
 		Limit(limit).

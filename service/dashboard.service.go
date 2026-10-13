@@ -3,7 +3,7 @@ package service
 import (
 	"time"
 
-	"github.com/Nina-99/yottu-api/data/response"
+	"github.com/Nina-99/yotuvia-api/data/response"
 )
 
 // DashboardService computes the admin dashboard statistics for a beauty center.

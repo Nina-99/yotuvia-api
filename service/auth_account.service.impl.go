@@ -5,26 +5,29 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
-	"github.com/Nina-99/yottu-api/apperrors"
-	"github.com/Nina-99/yottu-api/data/request"
-	"github.com/Nina-99/yottu-api/models"
-	"github.com/Nina-99/yottu-api/repository"
-	"github.com/Nina-99/yottu-api/utils"
+	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
+	"github.com/Nina-99/yotuvia-api/models"
+	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
 )
 
 type AuthAccountServiceImpl struct {
-	AuthRepo        repository.AuthAccountRepository
-	ClientRepo      repository.ClientRepository
-	PersonnelRepo   repository.PersonnelRepository
-	CenterRepo      repository.BeautyCenterRepository
-	SessionRepo     repository.UserSessionRepository
-	TokenRepo       repository.AuthTokenRepository
-	Mailer          utils.Mailer
-	TokenAccountSvc TokenAccountService
-	Validate        *validator.Validate
+	AuthRepo          repository.AuthAccountRepository
+	ClientRepo        repository.ClientRepository
+	PersonnelRepo     repository.PersonnelRepository
+	CenterRepo        repository.BeautyCenterRepository
+	PlatformAdminRepo repository.PlatformAdminRepository
+	SessionRepo       repository.UserSessionRepository
+	TokenRepo         repository.AuthTokenRepository
+	Mailer            utils.Mailer
+	TokenAccountSvc   TokenAccountService
+	Validate          *validator.Validate
 }
 
 func NewAuthAccountServiceImpl(
@@ -32,6 +35,7 @@ func NewAuthAccountServiceImpl(
 	clientRepo repository.ClientRepository,
 	personnelRepo repository.PersonnelRepository,
 	centerRepo repository.BeautyCenterRepository,
+	platformAdminRepo repository.PlatformAdminRepository,
 	sessionRepo repository.UserSessionRepository,
 	tokenRepo repository.AuthTokenRepository,
 	mailer utils.Mailer,
@@ -44,29 +48,61 @@ func NewAuthAccountServiceImpl(
 		mailer = utils.NewDevMailer()
 	}
 	return &AuthAccountServiceImpl{
-		AuthRepo:        authRepo,
-		ClientRepo:      clientRepo,
-		PersonnelRepo:   personnelRepo,
-		CenterRepo:      centerRepo,
-		SessionRepo:     sessionRepo,
-		TokenRepo:       tokenRepo,
-		Mailer:          mailer,
-		TokenAccountSvc: tokenAccountSvc,
-		Validate:        validate,
+		AuthRepo:          authRepo,
+		ClientRepo:        clientRepo,
+		PersonnelRepo:     personnelRepo,
+		CenterRepo:        centerRepo,
+		PlatformAdminRepo: platformAdminRepo,
+		SessionRepo:       sessionRepo,
+		TokenRepo:         tokenRepo,
+		Mailer:            mailer,
+		TokenAccountSvc:   tokenAccountSvc,
+		Validate:          validate,
 	}
 }
 
+// DefaultMaxActiveSessions caps how many sessions one (account, role) pair may
+// keep active at the same time. There is no usable device identity to key on
+// (UserSession.DeviceInfo is never populated), so a "session" is one login and
+// the cap is really "how many places may this account+role be signed in at
+// once". Overridable with MAX_ACTIVE_SESSIONS.
+const DefaultMaxActiveSessions = 2
+
+// maxActiveSessions resolves the concurrent-session cap from
+// MAX_ACTIVE_SESSIONS (plain os.Getenv, as in configs/scheduler.go). An unset,
+// non-numeric, blank or sub-1 value falls back to DefaultMaxActiveSessions: a
+// typo must never silently disable the cap.
+func maxActiveSessions() int {
+	raw := strings.TrimSpace(os.Getenv("MAX_ACTIVE_SESSIONS"))
+	if raw == "" {
+		return DefaultMaxActiveSessions
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 {
+		utils.Log.Warnf("[AUTH] ignoring invalid MAX_ACTIVE_SESSIONS=%q; falling back to %d", raw, DefaultMaxActiveSessions)
+		return DefaultMaxActiveSessions
+	}
+	return limit
+}
+
 // mintSession creates a new active session generation for the authenticated
-// user and returns the raw refresh token to hand to the client exactly once.
+// user and returns the raw refresh token to hand to the client exactly once,
+// plus how many older sessions the cap forced out.
 // Sessions key on the polymorphic JWT user_id claim (D1).
-func (s *AuthAccountServiceImpl) mintSession(userID, centerID uint, role, email, username string) (string, error) {
+//
+// The cap is enforced AFTER the insert (so the new session is part of the
+// count): when the account+role now exceeds MAX_ACTIVE_SESSIONS, the oldest
+// session(s) are revoked until exactly `limit` remain. The new login always
+// succeeds — that is the point of option A: the user is never locked out of
+// the device they are using right now.
+func (s *AuthAccountServiceImpl) mintSession(userID, centerID uint, role, email, username string) (string, int, error) {
 	raw, err := utils.GenerateRefreshToken()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	familyID, err := utils.GenerateFamilyID()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	session := &models.UserSession{
 		UserID:           userID,
@@ -79,9 +115,18 @@ func (s *AuthAccountServiceImpl) mintSession(userID, centerID uint, role, email,
 		Username:         username,
 	}
 	if err := s.SessionRepo.Create(context.Background(), session); err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return raw, nil
+
+	evicted, err := s.SessionRepo.EnforceActiveLimit(context.Background(), userID, role, maxActiveSessions(), time.Now())
+	if err != nil {
+		// The session exists and is valid, so the login MUST NOT fail here: a
+		// failed enforcement degrades to "one session over the cap", never to
+		// "the user cannot sign in". The client simply gets no warning.
+		utils.Log.Errorf("[AUTH] session limit not enforced for %s #%d: %v", role, userID, err)
+		return raw, 0, nil
+	}
+	return raw, evicted, nil
 }
 
 // termsVersion returns the server-authoritative Terms version stamped on every
@@ -195,6 +240,25 @@ func (s *AuthAccountServiceImpl) loginByType(identifier, password, userType stri
 		firstName = center.Name
 		lastName = ""
 		passwordHash = center.Password
+
+	case "super_admin":
+		// The platform-level principal lives in its own table and is resolved by
+		// email only (it has no username and never a social link). It belongs to
+		// NO centre, so centerID stays 0 and the JWT/middleware omit the claim.
+		if s.PlatformAdminRepo == nil {
+			return AuthResult{}, errors.New("invalid credentials")
+		}
+		admin, err := s.PlatformAdminRepo.FindByEmail(identifier)
+		if err != nil || admin == nil || !admin.IsActive || admin.Password == "" {
+			return AuthResult{}, errors.New("invalid credentials")
+		}
+		userID = admin.ID
+		centerID = 0
+		email = admin.Email
+		username = admin.Name
+		firstName = admin.Name
+		lastName = ""
+		passwordHash = admin.Password
 	}
 
 	if passwordHash == "" {
@@ -211,24 +275,28 @@ func (s *AuthAccountServiceImpl) loginByType(identifier, password, userType stri
 		return AuthResult{}, err
 	}
 
-	refreshToken, err := s.mintSession(userID, centerID, userType, email, username)
+	refreshToken, evicted, err := s.mintSession(userID, centerID, userType, email, username)
 	if err != nil {
 		return AuthResult{}, err
 	}
 
 	return AuthResult{
-		Token:        token,
-		RefreshToken: refreshToken,
-		UserID:       userID,
-		Email:        email,
-		FirstName:    firstName,
-		LastName:     lastName,
-		Role:         userType,
+		Token:           token,
+		RefreshToken:    refreshToken,
+		UserID:          userID,
+		Email:           email,
+		FirstName:       firstName,
+		LastName:        lastName,
+		Role:            userType,
+		SessionsEvicted: evicted,
 	}, nil
 }
 
 func (s *AuthAccountServiceImpl) tryLoginAllTypes(identifier, password string) (AuthResult, error) {
-	types := []string{"client", "beauty_center", "personnel"}
+	// super_admin is LAST on purpose: it can only ever match the admin's own
+	// email, so every other role resolves exactly as before and the generic
+	// "invalid credentials" outcome is unchanged.
+	types := []string{"client", "beauty_center", "personnel", "super_admin"}
 
 	var lastErr error
 	for _, userType := range types {
@@ -390,19 +458,20 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		return AuthResult{}, err
 	}
 
-	refreshToken, err := s.mintSession(userID, centerID, req.UserType, email, username)
+	refreshToken, evicted, err := s.mintSession(userID, centerID, req.UserType, email, username)
 	if err != nil {
 		return AuthResult{}, err
 	}
 
 	return AuthResult{
-		Token:        token,
-		RefreshToken: refreshToken,
-		UserID:       userID,
-		Email:        email,
-		FirstName:    firstName,
-		LastName:     lastName,
-		Role:         req.UserType,
+		Token:           token,
+		RefreshToken:    refreshToken,
+		UserID:          userID,
+		Email:           email,
+		FirstName:       firstName,
+		LastName:        lastName,
+		Role:            req.UserType,
+		SessionsEvicted: evicted,
 	}, nil
 }
 
@@ -616,19 +685,20 @@ func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccoun
 		return AuthResult{}, err
 	}
 
-	refreshToken, err := s.mintSession(userID, centerID, account.UserType, email, username)
+	refreshToken, evicted, err := s.mintSession(userID, centerID, account.UserType, email, username)
 	if err != nil {
 		return AuthResult{}, err
 	}
 
 	return AuthResult{
-		Token:        token,
-		RefreshToken: refreshToken,
-		UserID:       userID,
-		Email:        email,
-		FirstName:    firstName,
-		LastName:     lastName,
-		Role:         account.UserType,
+		Token:           token,
+		RefreshToken:    refreshToken,
+		UserID:          userID,
+		Email:           email,
+		FirstName:       firstName,
+		LastName:        lastName,
+		Role:            account.UserType,
+		SessionsEvicted: evicted,
 	}, nil
 }
 

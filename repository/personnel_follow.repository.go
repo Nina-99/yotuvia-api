@@ -1,6 +1,6 @@
 package repository
 
-import "github.com/Nina-99/yottu-api/models"
+import "github.com/Nina-99/yotuvia-api/models"
 
 // PersonnelFollowRepository persists client -> professional follow edges.
 // Every mutator is idempotent: Follow never duplicates a row (DB unique index
