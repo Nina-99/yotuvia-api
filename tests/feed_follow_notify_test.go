@@ -34,6 +34,7 @@ func feedSvcWithNotif(db *gorm.DB, notif service.NotificationService) service.Fe
 		repository.NewPersonnelFollowRepositoryImpl(db),
 		notif,
 		validator.New(),
+		nil,
 	)
 }
 

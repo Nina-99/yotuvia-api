@@ -44,4 +44,13 @@ type FeedPostResponse struct {
 	// slot). Additive: existing clients ignore it, and the feed must always
 	// label a true value as "Promocionado" wherever it renders.
 	IsBoosted bool `json:"is_boosted"`
+
+	// External (multi-source) feed: a LINK to a video hosted elsewhere
+	// (tiktok|youtube|instagram). Provider is "native" for uploaded posts.
+	// External videos are never rehosted; external_url is the deep link and
+	// video_url is empty.
+	Provider       string `json:"provider"`
+	ExternalURL    string `json:"external_url,omitempty"`
+	ExternalID     string `json:"external_id,omitempty"`
+	ExternalAuthor string `json:"external_author,omitempty"`
 }

@@ -23,7 +23,7 @@ func FeedPostRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 		repository.NewNotificationRepositoryImpl(db),
 		repository.NewPushDeviceRepositoryImpl(db),
 	)
-	svc := service.NewFeedPostServiceImpl(repo, repoBC, repoPersonnel, repoService, repoLike, repoSaved, repoComment, followRepo, notifSvc, validate)
+	svc := service.NewFeedPostServiceImpl(repo, repoBC, repoPersonnel, repoService, repoLike, repoSaved, repoComment, followRepo, notifSvc, validate, nil)
 	ctrl := controller.NewFeedPostController(svc)
 
 	posts := rg.Group("/feed-posts")
@@ -42,6 +42,8 @@ func FeedPostRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 		{
 			// staff + beauty_center creators (role-scoped in service).
 			protected.POST("", middleware.RequireRole("personnel", "beauty_center"), ctrl.Create)
+			// Link an already-published external video instead of uploading.
+			protected.POST("/external", middleware.RequireRole("personnel", "beauty_center"), ctrl.CreateExternal)
 			protected.PUT("/:id", ctrl.Update)
 			protected.DELETE("/:id", ctrl.Delete)
 			protected.GET("/mine", ctrl.FindMine)

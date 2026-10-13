@@ -31,7 +31,7 @@ func VideoWatchEventRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator
 		repository.NewNotificationRepositoryImpl(db),
 		repository.NewPushDeviceRepositoryImpl(db),
 	)
-	feedSvc := service.NewFeedPostServiceImpl(feedRepo, bcRepo, personnelRepo, serviceRepo, likeRepo, savedRepo, repoComment, followRepo, notifSvc, validate)
+	feedSvc := service.NewFeedPostServiceImpl(feedRepo, bcRepo, personnelRepo, serviceRepo, likeRepo, savedRepo, repoComment, followRepo, notifSvc, validate, nil)
 
 	// Boost (CPM promotion). The auction holds budgets through the token account
 	// service, so it is wired exactly like the token routes.

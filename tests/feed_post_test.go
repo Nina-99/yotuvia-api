@@ -37,7 +37,7 @@ func setupFeedHTTPRouter(t *testing.T, db *gorm.DB, role string, userID, centerI
 	likeRepo := repository.NewPostLikeRepositoryImpl(db)
 	savedRepo := repository.NewSavedVideoRepositoryImpl(db)
 	commentRepo := repository.NewVideoCommentRepositoryImpl(db)
-	svc := service.NewFeedPostServiceImpl(feedRepo, bcRepo, personnelRepo, serviceRepo, likeRepo, savedRepo, commentRepo, repository.NewPersonnelFollowRepositoryImpl(db), nil, validator.New())
+	svc := service.NewFeedPostServiceImpl(feedRepo, bcRepo, personnelRepo, serviceRepo, likeRepo, savedRepo, commentRepo, repository.NewPersonnelFollowRepositoryImpl(db), nil, validator.New(), nil)
 	ctrl := controller.NewFeedPostController(svc)
 
 	r := gin.New()

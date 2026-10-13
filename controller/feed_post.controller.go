@@ -62,6 +62,24 @@ func (c *FeedPostController) Create(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, res)
 }
 
+// CreateExternal handles POST /feed-posts/external (application/json): link an
+// already-published external video (tiktok|youtube|instagram) instead of
+// uploading one. The video is never rehosted; only its URL and enriched
+// metadata are stored.
+func (c *FeedPostController) CreateExternal(ctx *gin.Context) {
+	var req request.CreateExternalFeedPostRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	res, err := c.feedPostService.CreateFromExternal(feedActor(ctx), req)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusCreated, res)
+}
+
 // Update allows the author to edit caption/promo of their own post.
 func (c *FeedPostController) Update(ctx *gin.Context) {
 	id, err := strconv.Atoi(ctx.Param("id"))

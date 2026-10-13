@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"mime/multipart"
@@ -42,6 +43,9 @@ type FeedPostServiceImpl struct {
 	PersonnelFollowRepository repository.PersonnelFollowRepository
 	NotificationService       NotificationService
 	Validate                  *validator.Validate
+	// OEmbedResolver enriches external-video posts with a thumbnail and author.
+	// OPTIONAL: nil stores a bare link (see CreateFromExternal).
+	OEmbedResolver OEmbedResolver
 }
 
 // maxFollowerFanout caps how many followers one new-video publish notifies, so
@@ -66,6 +70,7 @@ func NewFeedPostServiceImpl(
 	followRepo repository.PersonnelFollowRepository,
 	notificationSvc NotificationService,
 	validate *validator.Validate,
+	oembed OEmbedResolver,
 ) FeedPostService {
 	requireDeps("NewFeedPostServiceImpl",
 		dep("FeedPostRepository", feedPostRepo),
@@ -77,6 +82,9 @@ func NewFeedPostServiceImpl(
 		dep("CommentRepository", commentRepo),
 		dep("Validate", validate),
 	)
+	if oembed == nil {
+		oembed = NewHTTPOEmbedResolver(nil)
+	}
 	return &FeedPostServiceImpl{
 		FeedPostRepository:        feedPostRepo,
 		BeautyCenterRepository:    beautyCenterRepo,
@@ -88,6 +96,7 @@ func NewFeedPostServiceImpl(
 		PersonnelFollowRepository: followRepo,
 		NotificationService:       notificationSvc,
 		Validate:                  validate,
+		OEmbedResolver:            oembed,
 	}
 }
 
@@ -226,6 +235,67 @@ func (s *FeedPostServiceImpl) notifyFollowers(post models.FeedPost) {
 			utils.Log.Errorf("[FEED] new_video push failed for client %d: %v", clientID, err)
 		}
 	}
+}
+
+// CreateFromExternal links an already-published external video rather than
+// uploading it. The provider is derived strictly from the URL; an unsupported
+// host is rejected. Metadata (thumbnail/author) is enriched best-effort through
+// the oEmbed resolver — a failed or unsupported lookup (e.g. Instagram) stores
+// the bare link so the card still renders.
+func (s *FeedPostServiceImpl) CreateFromExternal(actor FeedActor, req request.CreateExternalFeedPostRequest) (response.FeedPostResponse, error) {
+	provider := ProviderFromURL(req.ExternalURL)
+	if provider == "" {
+		return response.FeedPostResponse{}, errors.New("unsupported external video url")
+	}
+	if req.Caption == "" && req.ServiceID == 0 && !req.IsPromo {
+		return response.FeedPostResponse{}, errors.New("caption, service or promo flag required")
+	}
+
+	centerID, rawPersonnelID, err := s.resolveAuthorship(actor, req.PersonnelID)
+	if err != nil {
+		return response.FeedPostResponse{}, err
+	}
+	var serviceID *uint
+	if req.ServiceID != 0 {
+		svcRow, svcErr := s.ServiceRepository.FindById(req.ServiceID)
+		if svcErr != nil || svcRow == nil || svcRow.BeautyCenterID != centerID {
+			return response.FeedPostResponse{}, errors.New("service does not belong to your center")
+		}
+		serviceID = &req.ServiceID
+	}
+	var personnelID *uint
+	if rawPersonnelID != 0 {
+		personnelID = &rawPersonnelID
+	}
+
+	post := models.FeedPost{
+		BeautyCenterID: centerID,
+		PersonnelID:    personnelID,
+		ServiceID:      serviceID,
+		Provider:       provider,
+		ExternalURL:    req.ExternalURL,
+		ExternalID:     ExternalIDFromURL(req.ExternalURL),
+		Caption:        req.Caption,
+		IsPromo:        req.IsPromo,
+		IsActive:       true,
+	}
+
+	if s.OEmbedResolver != nil {
+		meta, mErr := s.OEmbedResolver.Resolve(context.Background(), req.ExternalURL, provider)
+		if mErr != nil {
+			utils.Log.Warnf("[FEED] oembed lookup failed for %s: %v (storing bare link)", req.ExternalURL, mErr)
+		} else if meta != nil {
+			post.ThumbnailURL = meta.ThumbnailURL
+			post.ExternalAuthor = meta.AuthorName
+		}
+	}
+
+	if err := s.FeedPostRepository.Create(&post); err != nil {
+		return response.FeedPostResponse{}, err
+	}
+	utils.Log.Infof("[FEED] external post created by %s %d (center %d, provider %s)", actor.Role, actor.UserID, centerID, provider)
+	s.notifyFollowers(post)
+	return s.mapToResponse(post), nil
 }
 
 // Update allows ONLY the author to edit caption/promo flags of their own post.
@@ -449,6 +519,10 @@ func (s *FeedPostServiceImpl) mapToResponse(post models.FeedPost) response.FeedP
 		LikesCount:     post.LikesCount,
 		BookTaps:       post.BookTaps,
 		CreatedAt:      post.CreatedAt,
+		Provider:       providerOrDefault(post.Provider),
+		ExternalURL:    post.ExternalURL,
+		ExternalID:     post.ExternalID,
+		ExternalAuthor: post.ExternalAuthor,
 	}
 	if post.Service.ID != 0 {
 		resp.ServiceName = post.Service.Name
@@ -469,6 +543,15 @@ func (s *FeedPostServiceImpl) mapToResponse(post models.FeedPost) response.FeedP
 			post.Personnel.FirstName, post.Personnel.LastName)
 	}
 	return resp
+}
+
+// providerOrDefault normalizes a stored provider: legacy/zero rows predate the
+// external feed and are native uploads.
+func providerOrDefault(provider string) string {
+	if provider == "" {
+		return ProviderNative
+	}
+	return provider
 }
 
 // saveFeedVideo stores the uploaded file under the shared streaming path

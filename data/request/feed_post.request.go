@@ -11,6 +11,17 @@ type CreateFeedPostRequest struct {
 	IsPromo        bool   `json:"is_promo"`
 }
 
+// CreateExternalFeedPostRequest links an already-published external video
+// (tiktok|youtube|instagram) instead of uploading one. The video is never
+// rehosted; only its URL and enriched metadata are stored.
+type CreateExternalFeedPostRequest struct {
+	ExternalURL string `json:"external_url" validate:"required"`
+	PersonnelID uint   `json:"personnel_id"`
+	ServiceID   uint   `json:"service_id"`
+	Caption     string `json:"caption" validate:"max=255"`
+	IsPromo     bool   `json:"is_promo"`
+}
+
 type UpdateFeedPostRequest struct {
 	Caption      string `json:"caption" validate:"max=255"`
 	IsPromo      *bool  `json:"is_promo"`

@@ -9,6 +9,10 @@ import (
 
 type FeedPostService interface {
 	CreateFromUpload(actor FeedActor, req request.CreateFeedPostRequest, file *multipart.FileHeader) (response.FeedPostResponse, error)
+	// CreateFromExternal links an already-published external video instead of
+	// uploading one. Metadata is enriched best-effort via oEmbed; a failed
+	// lookup still stores the bare link.
+	CreateFromExternal(actor FeedActor, req request.CreateExternalFeedPostRequest) (response.FeedPostResponse, error)
 	Update(actor FeedActor, id uint, req request.UpdateFeedPostRequest) (response.FeedPostResponse, error)
 	Delete(actor FeedActor, id uint) error
 	SetSuspended(centerID, postID uint, suspend bool, note string) error

@@ -52,3 +52,44 @@ func hostMatches(host, domain string) bool {
 func IsSupportedExternalURL(rawURL string) bool {
 	return ProviderFromURL(rawURL) != ""
 }
+
+// ExternalIDFromURL extracts a provider-specific video id from a supported URL,
+// or "" when it cannot be derived. Best-effort: used for dedup and for building
+// the official embed later, never as a validation gate.
+func ExternalIDFromURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	switch ProviderFromURL(rawURL) {
+	case ProviderTikTok:
+		// /@user/video/<id>
+		for i := 0; i+1 < len(segments); i++ {
+			if segments[i] == "video" {
+				return segments[i+1]
+			}
+		}
+	case ProviderYouTube:
+		if id := parsed.Query().Get("v"); id != "" {
+			return id
+		}
+		// youtu.be/<id>, /shorts/<id>, /embed/<id>
+		if parsed.Hostname() == "youtu.be" && len(segments) > 0 {
+			return segments[0]
+		}
+		for i := 0; i+1 < len(segments); i++ {
+			if segments[i] == "shorts" || segments[i] == "embed" {
+				return segments[i+1]
+			}
+		}
+	case ProviderInstagram:
+		// /reel/<code>/ or /p/<code>/
+		for i := 0; i+1 < len(segments); i++ {
+			if segments[i] == "reel" || segments[i] == "p" || segments[i] == "tv" {
+				return segments[i+1]
+			}
+		}
+	}
+	return ""
+}

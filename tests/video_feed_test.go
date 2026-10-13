@@ -42,6 +42,7 @@ func newFeedSUT(t *testing.T) (service.FeedPostService, *gorm.DB) {
 		repository.NewPersonnelFollowRepositoryImpl(db),
 		nil, // notification service not exercised by this unit test
 		validator.New(),
+		nil,
 	)
 	return svc, db
 }
