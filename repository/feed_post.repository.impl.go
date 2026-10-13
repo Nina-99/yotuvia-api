@@ -49,9 +49,21 @@ var feedPreloads = []string{
 	"Personnel",
 }
 
+// feedProfileImagePreloads narrows the creator's image associations to the
+// profile image only (is_profile), so the card can render an avatar without
+// dragging every gallery image: still one bounded query per association, never
+// a per-row lookup.
+var feedProfileImagePreloads = []string{
+	"BeautyCenter.BeautyCenterImage",
+	"Personnel.PersonnelImage",
+}
+
 func applyFeedPreloads(q *gorm.DB) *gorm.DB {
 	for _, p := range feedPreloads {
 		q = q.Preload(p)
+	}
+	for _, p := range feedProfileImagePreloads {
+		q = q.Preload(p, "is_profile = ?", true)
 	}
 	return q
 }

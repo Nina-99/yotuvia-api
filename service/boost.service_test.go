@@ -25,6 +25,10 @@ func setupBoostTestDB(t *testing.T) *gorm.DB {
 		&models.TokenMission{},
 		&models.TokenMissionProgress{},
 		&models.FeedPost{},
+		// The feed repository now preloads the creator profile images for the
+		// card avatar, so any DB that backs it must carry these tables.
+		&models.BeautyCenterImage{},
+		&models.PersonnelImage{},
 		&models.BoostCampaign{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)

@@ -45,6 +45,12 @@ type FeedPostResponse struct {
 	// label a true value as "Promocionado" wherever it renders.
 	IsBoosted bool `json:"is_boosted"`
 
+	// Creator avatars (the `is_profile` image). The card shows the credited
+	// professional's photo when the post is theirs, otherwise the center's;
+	// either may be empty and the client falls back to an initial.
+	PersonnelAvatarURL    string `json:"personnel_avatar_url,omitempty"`
+	BeautyCenterAvatarURL string `json:"beauty_center_avatar_url,omitempty"`
+
 	// External (multi-source) feed: a LINK to a video hosted elsewhere
 	// (tiktok|youtube|instagram). Provider is "native" for uploaded posts.
 	// External videos are never rehosted; external_url is the deep link and

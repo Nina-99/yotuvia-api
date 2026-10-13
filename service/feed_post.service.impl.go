@@ -523,6 +523,9 @@ func (s *FeedPostServiceImpl) mapToResponse(post models.FeedPost) response.FeedP
 		ExternalURL:    post.ExternalURL,
 		ExternalID:     post.ExternalID,
 		ExternalAuthor: post.ExternalAuthor,
+
+		PersonnelAvatarURL:    firstProfilePersonnelImage(post.Personnel.PersonnelImage),
+		BeautyCenterAvatarURL: firstProfileCenterImage(post.BeautyCenter.BeautyCenterImage),
 	}
 	if post.Service.ID != 0 {
 		resp.ServiceName = post.Service.Name
@@ -543,6 +546,29 @@ func (s *FeedPostServiceImpl) mapToResponse(post models.FeedPost) response.FeedP
 			post.Personnel.FirstName, post.Personnel.LastName)
 	}
 	return resp
+}
+
+// firstProfileCenterImage returns the center's profile image URL (the row
+// flagged is_profile), or "" when there is none. The feed preload already
+// filters to is_profile, but the guard keeps the helper honest for any caller.
+func firstProfileCenterImage(images []models.BeautyCenterImage) string {
+	for _, img := range images {
+		if img.IsProfile && img.ImageUrl != "" {
+			return img.ImageUrl
+		}
+	}
+	return ""
+}
+
+// firstProfilePersonnelImage is the personnel counterpart of
+// firstProfileCenterImage.
+func firstProfilePersonnelImage(images []models.PersonnelImage) string {
+	for _, img := range images {
+		if img.IsProfile && img.ImageUrl != "" {
+			return img.ImageUrl
+		}
+	}
+	return ""
 }
 
 // providerOrDefault normalizes a stored provider: legacy/zero rows predate the
