@@ -157,6 +157,11 @@ func (s *BoostServiceImpl) SelectWinners(now time.Time, slots int, reserveCPMMil
 	}
 	candidates := make([]BoostCandidate, 0, len(campaigns))
 	for _, campaign := range campaigns {
+		// Budget pacing: a campaign may only spend what its schedule allows, so
+		// the highest bidder cannot exhaust its budget in the first minutes.
+		if !WithinPacing(campaign.BudgetMilli, campaign.SpentMilli, campaign.StartsAt, campaign.EndsAt, now) {
+			continue
+		}
 		candidates = append(candidates, BoostCandidate{
 			CampaignID:           campaign.ID,
 			PostID:               campaign.FeedPostID,

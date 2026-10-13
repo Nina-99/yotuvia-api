@@ -1,6 +1,9 @@
 package service
 
-import "sort"
+import (
+	"sort"
+	"time"
+)
 
 // BoostCandidate is one active campaign competing for a promoted slot in a feed
 // page. Bids and budgets are milli-tokens per 1000 impressions / total.
@@ -84,6 +87,33 @@ func CostPerImpressionMilli(priceCPMMilli int64) int64 {
 		return 0
 	}
 	return (priceCPMMilli + 999) / 1000
+}
+
+// WithinPacing reports whether a campaign may spend more right now under linear
+// budget pacing: over its window, a campaign may have spent at most its budget
+// scaled by the fraction of time elapsed (plus a 1% opening buffer so a fresh
+// campaign is never starved). This spreads a budget across the campaign instead
+// of letting the highest bidder exhaust it in the first minutes.
+//
+// Returns false when the campaign has not started, is already exhausted, or has
+// spent ahead of its schedule.
+func WithinPacing(budgetMilli, spentMilli int64, startsAt, endsAt, now time.Time) bool {
+	if budgetMilli <= 0 || spentMilli >= budgetMilli {
+		return false
+	}
+	if !now.After(startsAt) && !now.Equal(startsAt) {
+		return false
+	}
+	total := endsAt.Sub(startsAt)
+	if total <= 0 {
+		return true
+	}
+	fraction := float64(now.Sub(startsAt)) / float64(total)
+	if fraction > 1 {
+		fraction = 1
+	}
+	allowed := int64(float64(budgetMilli)*fraction) + budgetMilli/100 + 1
+	return spentMilli < allowed
 }
 
 // MergePromotedIDs weaves promoted post ids into a ranked feed so that at most

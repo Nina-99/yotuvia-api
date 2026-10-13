@@ -1,6 +1,9 @@
 package service
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func candidate(id uint, bid, remaining int64) BoostCandidate {
 	return BoostCandidate{CampaignID: id, PostID: id, CenterID: id, BidCPMMilli: bid, RemainingBudgetMilli: remaining}
@@ -144,5 +147,27 @@ func TestMergePromotedIDs_RespectsDensityBetweenPromoted(t *testing.T) {
 	}
 	if positions[1]-positions[0] < 5 {
 		t.Fatalf("promoted items must be >= density apart: %v", positions)
+	}
+}
+
+func TestWithinPacing(t *testing.T) {
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	const budget = int64(100_000)
+
+	if !WithinPacing(budget, 0, start, end, start) {
+		t.Fatal("a fresh campaign must be allowed (opening buffer)")
+	}
+	if !WithinPacing(budget, 40_000, start, end, start.Add(12*time.Hour)) {
+		t.Fatal("40% spent at half-time is within pacing")
+	}
+	if WithinPacing(budget, 60_000, start, end, start.Add(12*time.Hour)) {
+		t.Fatal("60% spent at half-time is ahead of schedule")
+	}
+	if WithinPacing(budget, budget, start, end, start.Add(23*time.Hour)) {
+		t.Fatal("an exhausted budget is never allowed")
+	}
+	if WithinPacing(budget, 0, start, end, start.Add(-time.Hour)) {
+		t.Fatal("a campaign that has not started is not allowed")
 	}
 }
