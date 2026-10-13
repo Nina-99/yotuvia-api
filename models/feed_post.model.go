@@ -16,10 +16,20 @@ type FeedPost struct {
 	LikesCount   int    `gorm:"default:0" json:"likes_count"`
 	// BookTaps counts CTA taps on this feed post (video → booking funnel).
 	// It is the middle signal between a view and an attributed booking.
-	BookTaps int `gorm:"default:0" json:"book_taps"`
-	IsActive     bool   `gorm:"default:true" json:"is_active"`
+	BookTaps       int    `gorm:"default:0" json:"book_taps"`
+	IsActive       bool   `gorm:"default:true" json:"is_active"`
 	IsPromo        bool   `gorm:"default:false" json:"is_promo"`
 	ModerationNote string `gorm:"size:255" json:"moderation_note,omitempty"`
+
+	// External (multi-source) feed: a post can either be a native upload
+	// (Provider "" / "native", video_url populated) or a LINK to a video on an
+	// external platform (provider tiktok|youtube|instagram, external_url set and
+	// video_url empty). External videos are NEVER rehosted; the client renders a
+	// thumbnail that deep-links to the source.
+	Provider       string `gorm:"size:16;default:'native'" json:"provider"`
+	ExternalURL    string `gorm:"size:512" json:"external_url,omitempty"`
+	ExternalID     string `gorm:"size:128" json:"external_id,omitempty"`
+	ExternalAuthor string `gorm:"size:128" json:"external_author,omitempty"`
 
 	Likes        []PostLike   `gorm:"foreignKey:FeedPostID" json:"-"`
 	Service      Service      `gorm:"foreignKey:ServiceID" json:"service"`
