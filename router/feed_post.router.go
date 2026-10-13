@@ -10,20 +10,30 @@ import (
 	"gorm.io/gorm"
 )
 
-func FeedPostRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
-	repo := repository.NewFeedPostRepositoryImpl(db)
-	repoBC := repository.NewBeautyCenterRepositoryImpl(db)
-	repoPersonnel := repository.NewPersonnelRepositoryImpl(db)
-	repoService := repository.NewServiceRepositoryImpl(db)
-	repoLike := repository.NewPostLikeRepositoryImpl(db)
-	repoSaved := repository.NewSavedVideoRepositoryImpl(db)
-	repoComment := repository.NewVideoCommentRepositoryImpl(db)
-	followRepo := repository.NewPersonnelFollowRepositoryImpl(db)
-	notifSvc := service.NewNotificationServiceImpl(
-		repository.NewNotificationRepositoryImpl(db),
-		repository.NewPushDeviceRepositoryImpl(db),
+// NewFeedPostService wires the feed service exactly once, so every router that
+// needs it (the feed routes and the TikTok import path) shares the same wiring
+// instead of duplicating the dependency list.
+func NewFeedPostService(db *gorm.DB, validate *validator.Validate) service.FeedPostService {
+	return service.NewFeedPostServiceImpl(
+		repository.NewFeedPostRepositoryImpl(db),
+		repository.NewBeautyCenterRepositoryImpl(db),
+		repository.NewPersonnelRepositoryImpl(db),
+		repository.NewServiceRepositoryImpl(db),
+		repository.NewPostLikeRepositoryImpl(db),
+		repository.NewSavedVideoRepositoryImpl(db),
+		repository.NewVideoCommentRepositoryImpl(db),
+		repository.NewPersonnelFollowRepositoryImpl(db),
+		service.NewNotificationServiceImpl(
+			repository.NewNotificationRepositoryImpl(db),
+			repository.NewPushDeviceRepositoryImpl(db),
+		),
+		validate,
+		nil,
 	)
-	svc := service.NewFeedPostServiceImpl(repo, repoBC, repoPersonnel, repoService, repoLike, repoSaved, repoComment, followRepo, notifSvc, validate, nil)
+}
+
+func FeedPostRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
+	svc := NewFeedPostService(db, validate)
 	ctrl := controller.NewFeedPostController(svc)
 
 	posts := rg.Group("/feed-posts")

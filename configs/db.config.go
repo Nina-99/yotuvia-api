@@ -70,6 +70,8 @@ func DBConnection() {
 		&models.WaitlistEntry{},
 		&models.PlatformAdmin{},
 		&models.BoostCampaign{},
+		&models.TikTokAccount{},
+		&models.TikTokConnectionState{},
 	}
 
 	for _, model := range list_models {

@@ -57,6 +57,7 @@ func SetupRouter() *gin.Engine {
 		SocialMediaRoutes(api, db, validate)
 		VideoWatchEventRoutes(api, db, validate)
 		BoostRoutes(api, db, validate)
+		TikTokRoutes(api, db, validate)
 	}
 
 	UploadRoutes(api)

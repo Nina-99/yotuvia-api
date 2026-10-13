@@ -22,6 +22,17 @@ type CreateExternalFeedPostRequest struct {
 	IsPromo     bool   `json:"is_promo"`
 }
 
+// TikTokImportRequest imports one of the connected TikTok account's own videos
+// into the feed. The metadata comes from the Display API list the client already
+// fetched; the share URL is re-validated server-side.
+type TikTokImportRequest struct {
+	VideoID   string `json:"video_id" validate:"required"`
+	ShareURL  string `json:"share_url" validate:"required"`
+	Title     string `json:"title" validate:"max=255"`
+	ServiceID uint   `json:"service_id"`
+	IsPromo   bool   `json:"is_promo"`
+}
+
 type UpdateFeedPostRequest struct {
 	Caption      string `json:"caption" validate:"max=255"`
 	IsPromo      *bool  `json:"is_promo"`
