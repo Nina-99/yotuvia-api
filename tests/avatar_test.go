@@ -82,7 +82,8 @@ func TestClientAvatar_UploadValidation(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll("uploads/clients") })
 
 	t.Run("jpeg upload returns 200 with avatar_url under own client dir", func(t *testing.T) {
-		r, _ := authzTestRouter(t)
+		r, db := authzTestRouter(t)
+		seedClient(t, db, 5, "five", "five@test.com")
 		token := roleToken(t, 5, 0, "client")
 
 		w := uploadAvatar(t, r, token, "photo.jpg", jpegBytes)
@@ -95,7 +96,8 @@ func TestClientAvatar_UploadValidation(t *testing.T) {
 	})
 
 	t.Run("jpeg with spoofed extension is stored with sniffed .jpg ext", func(t *testing.T) {
-		r, _ := authzTestRouter(t)
+		r, db := authzTestRouter(t)
+		seedClient(t, db, 5, "five", "five@test.com")
 		token := roleToken(t, 5, 0, "client")
 
 		w := uploadAvatar(t, r, token, "avatar.txt", jpegBytes)
@@ -106,7 +108,8 @@ func TestClientAvatar_UploadValidation(t *testing.T) {
 	})
 
 	t.Run("png upload returns 200 and stores .png", func(t *testing.T) {
-		r, _ := authzTestRouter(t)
+		r, db := authzTestRouter(t)
+		seedClient(t, db, 5, "five", "five@test.com")
 		token := roleToken(t, 5, 0, "client")
 
 		w := uploadAvatar(t, r, token, "photo.notpng", pngBytes)
@@ -118,7 +121,8 @@ func TestClientAvatar_UploadValidation(t *testing.T) {
 	})
 
 	t.Run("text file is rejected 400 and nothing stored", func(t *testing.T) {
-		r, _ := authzTestRouter(t)
+		r, db := authzTestRouter(t)
+		seedClient(t, db, 6, "six", "six@test.com")
 		token := roleToken(t, 6, 0, "client")
 
 		w := uploadAvatar(t, r, token, "notes.txt", textBytes)
@@ -128,7 +132,8 @@ func TestClientAvatar_UploadValidation(t *testing.T) {
 	})
 
 	t.Run("file over 5MB is rejected 413 and nothing stored", func(t *testing.T) {
-		r, _ := authzTestRouter(t)
+		r, db := authzTestRouter(t)
+		seedClient(t, db, 7, "seven", "seven@test.com")
 		token := roleToken(t, 7, 0, "client")
 
 		w := uploadAvatar(t, r, token, "big.jpg", over5MBBytes)
@@ -138,7 +143,8 @@ func TestClientAvatar_UploadValidation(t *testing.T) {
 	})
 
 	t.Run("multipart without image field is rejected 400", func(t *testing.T) {
-		r, _ := authzTestRouter(t)
+		r, db := authzTestRouter(t)
+		seedClient(t, db, 8, "eight", "eight@test.com")
 		token := roleToken(t, 8, 0, "client")
 
 		var buf bytes.Buffer
@@ -167,7 +173,8 @@ func TestClientAvatar_Authz(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll("uploads/clients") })
 
 	t.Run("client uploads own avatar stored under claim only", func(t *testing.T) {
-		r, _ := authzTestRouter(t)
+		r, db := authzTestRouter(t)
+		seedClient(t, db, 5, "five", "five@test.com")
 		token := roleToken(t, 5, 0, "client")
 
 		w := uploadAvatar(t, r, token, "me.jpg", jpegBytes)
@@ -311,5 +318,29 @@ func TestClientAvatar_Persistence(t *testing.T) {
 			t.Fatalf("failed to reload client: %v", err)
 		}
 		assert.Empty(t, stored.AvatarURL, "cross-client PUT must not mutate avatar_url")
+	})
+
+	// THE HOLE THIS SUITE HAD: every persistence case above goes through PUT, so
+	// an upload that saved the file but never attached it to the client passed
+	// all of them while the photo vanished on the next reload.
+	t.Run("the UPLOAD itself persists the avatar on the client", func(t *testing.T) {
+		t.Cleanup(func() { os.RemoveAll("uploads/clients") })
+		r, db := authzTestRouter(t)
+		seedClient(t, db, 5, "five", "five@test.com")
+		token := roleToken(t, 5, 0, "client")
+
+		w := uploadAvatar(t, r, token, "photo.jpg", jpegBytes)
+		assert.Equal(t, http.StatusOK, w.Code)
+		url := avatarURLFrom(t, w.Body.String())
+
+		var stored models.Client
+		if err := db.First(&stored, 5).Error; err != nil {
+			t.Fatalf("failed to reload client: %v", err)
+		}
+		assert.Equal(t, url, stored.AvatarURL, "the upload must attach the avatar to the client row")
+
+		me := do(r, http.MethodGet, "/api/client/5", token, "")
+		assert.Equal(t, http.StatusOK, me.Code)
+		assert.Contains(t, me.Body.String(), `"avatar_url":"`+url+`"`, "reading the profile back must return the uploaded avatar")
 	})
 }

@@ -237,5 +237,25 @@ func (s *ClientServiceImpl) UploadAvatar(clientID uint, file *multipart.FileHead
 		return "", err
 	}
 
-	return fmt.Sprintf("/uploads/clients/%d/%s", clientID, safeName), nil
+	avatarURL := fmt.Sprintf("/uploads/clients/%d/%s", clientID, safeName)
+
+	// Persist it HERE. Attaching the uploaded image to the client is the whole
+	// point of this endpoint; leaving it to the caller meant the web did the
+	// extra PUT and the mobile silently discarded the returned URL, so the
+	// avatar was saved to disk and then vanished on the next reload.
+	//
+	// The value stored stays RELATIVE on purpose: it is portable across hosts,
+	// and clients resolve it against their own asset origin on read.
+	client, err := s.ClientRepository.FindById(clientID)
+	if err != nil || client == nil {
+		utils.Log.Errorf("UploadAvatar failed: cannot load client %d: %v", clientID, err)
+		return "", err
+	}
+	client.AvatarURL = avatarURL
+	if err := s.ClientRepository.Update(client); err != nil {
+		utils.Log.Errorf("UploadAvatar failed: cannot persist avatar for client %d: %v", clientID, err)
+		return "", err
+	}
+
+	return avatarURL, nil
 }
