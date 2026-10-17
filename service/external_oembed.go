@@ -25,9 +25,15 @@ type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// OEmbedResolver fetches public metadata for an external video URL.
+// OEmbedResolver fetches public metadata for an external video URL and
+// canonicalizes provider short links.
 type OEmbedResolver interface {
 	Resolve(ctx context.Context, rawURL, provider string) (*ExternalVideoMetadata, error)
+	// Canonicalize follows a provider share/short link (e.g. TikTok's
+	// vt.tiktok.com / vm.tiktok.com / tiktok.com/t/... forms) to the canonical
+	// post URL, returning rawURL unchanged when it is already canonical or
+	// cannot be resolved. Callers MUST bound ctx.
+	Canonicalize(ctx context.Context, rawURL string) string
 }
 
 // ErrOEmbedUnsupported means the provider has no public, keyless oEmbed (e.g.
@@ -96,4 +102,27 @@ func (r *HTTPOEmbedResolver) Resolve(ctx context.Context, rawURL, provider strin
 		AuthorName:   payload.AuthorName,
 		AuthorURL:    payload.AuthorURL,
 	}, nil
+}
+
+// Canonicalize follows a provider share/short link to its canonical post URL so
+// a post id can be extracted from a link the user copied from the mobile app.
+// Best-effort: it returns rawURL unchanged when the request fails or the
+// provider does not redirect. Redirects are followed by the underlying client;
+// the final URL is read from the response's Request.
+func (r *HTTPOEmbedResolver) Canonicalize(ctx context.Context, rawURL string) string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return rawURL
+	}
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return rawURL
+	}
+	defer resp.Body.Close()
+	if resp.Request != nil && resp.Request.URL != nil {
+		if final := resp.Request.URL.String(); final != "" {
+			return final
+		}
+	}
+	return rawURL
 }

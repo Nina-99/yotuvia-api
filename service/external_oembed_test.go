@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -13,13 +15,27 @@ type stubDoer struct {
 	status int
 	body   string
 	gotURL string
+	// finalURL is what Canonicalize should read back as the post-redirect URL.
+	// Empty means "no redirect": the input URL is echoed.
+	finalURL string
+	err      error
 }
 
 func (s *stubDoer) Do(req *http.Request) (*http.Response, error) {
 	s.gotURL = req.URL.String()
+	if s.err != nil {
+		return nil, s.err
+	}
+	final := req.URL
+	if s.finalURL != "" {
+		if parsed, err := url.Parse(s.finalURL); err == nil {
+			final = parsed
+		}
+	}
 	return &http.Response{
 		StatusCode: s.status,
 		Body:       io.NopCloser(strings.NewReader(s.body)),
+		Request:    &http.Request{URL: final},
 	}, nil
 }
 
@@ -53,5 +69,38 @@ func TestOEmbedResolver_UnsupportedProvider(t *testing.T) {
 	resolver := NewHTTPOEmbedResolver(&stubDoer{status: http.StatusOK, body: "{}"})
 	if _, err := resolver.Resolve(context.Background(), "https://www.instagram.com/reel/x/", ProviderInstagram); err != ErrOEmbedUnsupported {
 		t.Fatalf("instagram must report unsupported, got %v", err)
+	}
+}
+
+func TestOEmbedResolver_CanonicalizeFollowsRedirect(t *testing.T) {
+	doer := &stubDoer{
+		status:   http.StatusOK,
+		finalURL: "https://www.tiktok.com/@studio/video/7312345678",
+	}
+	resolver := NewHTTPOEmbedResolver(doer)
+
+	got := resolver.Canonicalize(context.Background(), "https://vt.tiktok.com/ZSABC123/")
+	if got != "https://www.tiktok.com/@studio/video/7312345678" {
+		t.Fatalf("Canonicalize: got %q", got)
+	}
+	if doer.gotURL != "https://vt.tiktok.com/ZSABC123/" {
+		t.Fatalf("Canonicalize must request the original url, got %q", doer.gotURL)
+	}
+}
+
+func TestOEmbedResolver_CanonicalizeEchoesInputWhenUnchanged(t *testing.T) {
+	// A canonical link does not redirect, so the input must come back untouched.
+	resolver := NewHTTPOEmbedResolver(&stubDoer{status: http.StatusOK})
+	const raw = "https://www.tiktok.com/@u/video/1"
+	if got := resolver.Canonicalize(context.Background(), raw); got != raw {
+		t.Fatalf("Canonicalize must echo the input, got %q", got)
+	}
+}
+
+func TestOEmbedResolver_CanonicalizeEchoesInputOnError(t *testing.T) {
+	resolver := NewHTTPOEmbedResolver(&stubDoer{err: errors.New("network down")})
+	const raw = "https://vt.tiktok.com/ZSABC123/"
+	if got := resolver.Canonicalize(context.Background(), raw); got != raw {
+		t.Fatalf("Canonicalize must fall back to the input on error, got %q", got)
 	}
 }

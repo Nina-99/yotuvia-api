@@ -29,6 +29,10 @@ func setupBoostTestDB(t *testing.T) *gorm.DB {
 		// card avatar, so any DB that backs it must carry these tables.
 		&models.BeautyCenterImage{},
 		&models.PersonnelImage{},
+		// ...plus the rating aggregate and the centre's schedule, which the
+		// slide now surfaces ("open now" / rating badges).
+		&models.Review{},
+		&models.WorkingHour{},
 		&models.BoostCampaign{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)

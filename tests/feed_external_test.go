@@ -20,11 +20,23 @@ type stubResolver struct {
 	meta        *service.ExternalVideoMetadata
 	err         error
 	gotProvider string
+	// canonical is what Canonicalize returns; empty means "already canonical".
+	canonical string
+	// gotCanonical records the URL Canonicalize was asked to resolve.
+	gotCanonical string
 }
 
 func (s *stubResolver) Resolve(_ context.Context, _ string, provider string) (*service.ExternalVideoMetadata, error) {
 	s.gotProvider = provider
 	return s.meta, s.err
+}
+
+func (s *stubResolver) Canonicalize(_ context.Context, rawURL string) string {
+	s.gotCanonical = rawURL
+	if s.canonical != "" {
+		return s.canonical
+	}
+	return rawURL
 }
 
 func newExternalFeedSUT(t *testing.T, resolver service.OEmbedResolver) service.FeedPostService {
@@ -74,6 +86,47 @@ func TestFeed_CreateExternal_EnrichesFromOEmbed(t *testing.T) {
 	assert.Equal(t, "studio", res.ExternalAuthor)
 	assert.Empty(t, res.VideoURL, "external posts never rehost: video_url stays empty")
 	assert.True(t, res.IsActive)
+	// A canonical link already carries its id, so no redirect hop is paid.
+	assert.Empty(t, resolver.gotCanonical, "canonical url must not trigger a redirect chase")
+}
+
+// TestFeed_CreateExternal_ResolvesShortLink: a TikTok share/short link has no
+// post id in its path, so the canonical URL is resolved first and the id is
+// extracted from it; the canonical URL is what gets stored as the deep link.
+func TestFeed_CreateExternal_ResolvesShortLink(t *testing.T) {
+	resolver := &stubResolver{
+		meta:      &service.ExternalVideoMetadata{Title: "Look", AuthorName: "studio"},
+		canonical: "https://www.tiktok.com/@studio/video/7312345678",
+	}
+	svc := newExternalFeedSUT(t, resolver)
+
+	res, err := svc.CreateFromExternal(staffActor, request.CreateExternalFeedPostRequest{
+		ExternalURL: "https://vt.tiktok.com/ZSABC123/",
+		Caption:     "Link corto",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, service.ProviderTikTok, res.Provider)
+	assert.Equal(t, "https://vt.tiktok.com/ZSABC123/", resolver.gotCanonical)
+	assert.Equal(t, "7312345678", res.ExternalID)
+	assert.Equal(t, "https://www.tiktok.com/@studio/video/7312345678", res.ExternalURL)
+}
+
+// TestFeed_CreateExternal_ShortLinkRedirectOffProvider: a redirect that leaves
+// the provider is ignored, so the stored link cannot be swapped for an
+// unrelated host.
+func TestFeed_CreateExternal_ShortLinkRedirectOffProvider(t *testing.T) {
+	resolver := &stubResolver{canonical: "https://evil.test/@studio/video/7312345678"}
+	svc := newExternalFeedSUT(t, resolver)
+
+	res, err := svc.CreateFromExternal(staffActor, request.CreateExternalFeedPostRequest{
+		ExternalURL: "https://vt.tiktok.com/ZSABC123/",
+		Caption:     "Link corto",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "https://vt.tiktok.com/ZSABC123/", res.ExternalURL)
+	assert.Empty(t, res.ExternalID)
 }
 
 // TestFeed_CreateExternal_RejectsUnsupportedHost: an unsupported host is a hard

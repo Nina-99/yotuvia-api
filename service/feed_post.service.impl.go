@@ -54,6 +54,10 @@ type FeedPostServiceImpl struct {
 // silently skipped (best-effort delivery).
 const maxFollowerFanout = 500
 
+// externalResolveTimeout bounds the short-link redirect chase in
+// CreateFromExternal so a slow provider cannot stall post creation.
+const externalResolveTimeout = 5 * time.Second
+
 // NewFeedPostServiceImpl builds the feed service. Every dependency below is
 // REQUIRED: FindAll dereferences FeedPost/PostLike/SavedVideo/Comment, the
 // write paths dereference Personnel/Service, and the feed is public, so there
@@ -268,22 +272,37 @@ func (s *FeedPostServiceImpl) CreateFromExternal(actor FeedActor, req request.Cr
 		personnelID = &rawPersonnelID
 	}
 
+	// A share/short link (TikTok's vt./vm./t/ forms) has no post id to build an
+	// embed from, so follow the redirect to its canonical URL first. This hop is
+	// paid ONLY when the id is missing, so already-canonical links add no request.
+	canonicalURL := req.ExternalURL
+	if ExternalIDFromURL(canonicalURL) == "" && s.OEmbedResolver != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), externalResolveTimeout)
+		resolved := s.OEmbedResolver.Canonicalize(ctx, canonicalURL)
+		cancel()
+		// Only trust a redirect that stays on the same supported provider.
+		if resolved != "" && ProviderFromURL(resolved) == provider {
+			canonicalURL = resolved
+		}
+	}
+	externalID := ExternalIDFromURL(canonicalURL)
+
 	post := models.FeedPost{
 		BeautyCenterID: centerID,
 		PersonnelID:    personnelID,
 		ServiceID:      serviceID,
 		Provider:       provider,
-		ExternalURL:    req.ExternalURL,
-		ExternalID:     ExternalIDFromURL(req.ExternalURL),
+		ExternalURL:    canonicalURL,
+		ExternalID:     externalID,
 		Caption:        req.Caption,
 		IsPromo:        req.IsPromo,
 		IsActive:       true,
 	}
 
 	if s.OEmbedResolver != nil {
-		meta, mErr := s.OEmbedResolver.Resolve(context.Background(), req.ExternalURL, provider)
+		meta, mErr := s.OEmbedResolver.Resolve(context.Background(), canonicalURL, provider)
 		if mErr != nil {
-			utils.Log.Warnf("[FEED] oembed lookup failed for %s: %v (storing bare link)", req.ExternalURL, mErr)
+			utils.Log.Warnf("[FEED] oembed lookup failed for %s: %v (storing bare link)", canonicalURL, mErr)
 		} else if meta != nil {
 			post.ThumbnailURL = meta.ThumbnailURL
 			post.ExternalAuthor = meta.AuthorName
@@ -497,14 +516,39 @@ func (s *FeedPostServiceImpl) FindByBeautyCenterID(centerID uint) ([]response.Fe
 	return res, nil
 }
 
+// workingHourResponses converts a centre's preloaded schedule rows for the feed
+// payload. It returns nil when the centre publishes no hours, so clients can
+// tell "unknown" apart from "closed" — a client that renders an empty schedule
+// as "cerrado" would turn missing data into a lost booking.
+func workingHourResponses(hours []models.WorkingHour) []response.WorkingHourResp {
+	if len(hours) == 0 {
+		return nil
+	}
+	out := make([]response.WorkingHourResp, 0, len(hours))
+	for _, h := range hours {
+		out = append(out, response.WorkingHourResp{
+			ID:        h.ID,
+			DayOfWeek: h.DayOfWeek,
+			StartTime: h.StartTime,
+			EndTime:   h.EndTime,
+		})
+	}
+	return out
+}
+
 func (s *FeedPostServiceImpl) mapToResponse(post models.FeedPost) response.FeedPostResponse {
 	resp := response.FeedPostResponse{
 		ID:             post.ID,
 		BeautyCenterID: post.BeautyCenterID,
 		BeautyCenter: response.BeautyCenterResponse{
-			ID:      post.BeautyCenter.ID,
-			Name:    post.BeautyCenter.Name,
-			Address: post.BeautyCenter.Address,
+			ID:          post.BeautyCenter.ID,
+			Name:        post.BeautyCenter.Name,
+			Address:     post.BeautyCenter.Address,
+			Latitude:    post.BeautyCenter.Latitude,
+			Longitude:   post.BeautyCenter.Longitude,
+			AvgRating:   post.BeautyCenter.AvgRating,
+			ReviewCount: post.BeautyCenter.ReviewCount,
+			Schedules:   workingHourResponses(post.BeautyCenter.WorkingHour),
 		},
 		PersonnelID:    post.PersonnelID,
 		ServiceID:      post.ServiceID,

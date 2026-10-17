@@ -43,7 +43,6 @@ func (r *FeedPostRepositoryImpl) FindByID(id uint) (*models.FeedPost, error) {
 // NOT preloaded: the like count is computed live with a grouped COUNT, and
 // nothing reads post.Likes.
 var feedPreloads = []string{
-	"BeautyCenter",
 	"Service",
 	"Service.Category",
 	"Personnel",
@@ -59,6 +58,16 @@ var feedProfileImagePreloads = []string{
 }
 
 func applyFeedPreloads(q *gorm.DB) *gorm.DB {
+	// The feed's centre must carry avg_rating / review_count. Those are
+	// read-only PROJECTIONS on the model (computed by the shared rating
+	// aggregate scope), so a plain Preload("BeautyCenter") leaves them at zero —
+	// which is exactly why every slide showed a blank rating. Its schedule rides
+	// along for the "open now" badge.
+	q = q.
+		Preload("BeautyCenter", func(db *gorm.DB) *gorm.DB {
+			return withAverageRating("")(db)
+		}).
+		Preload("BeautyCenter.WorkingHour")
 	for _, p := range feedPreloads {
 		q = q.Preload(p)
 	}
