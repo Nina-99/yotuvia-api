@@ -20,6 +20,9 @@ func (r *PushDeviceRepositoryImpl) Register(device *models.PushDevice) error {
 	if result.Error == nil {
 		existing.ClientID = device.ClientID
 		existing.Platform = device.Platform
+		// Web subscriptions rotate their keys; a re-register must refresh them.
+		existing.P256dh = device.P256dh
+		existing.Auth = device.Auth
 		return r.db.Save(&existing).Error
 	}
 	return r.db.Create(device).Error

@@ -6,11 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
+
+	webpush "github.com/SherClockHolmes/webpush-go"
 
 	"github.com/Nina-99/yotuvia-api/apperrors"
 	"github.com/Nina-99/yotuvia-api/models"
 	"github.com/Nina-99/yotuvia-api/repository"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"gorm.io/gorm"
 )
 
@@ -202,11 +206,41 @@ func (s *NotificationServiceImpl) MarkAsReadByCenter(notificationID, actorCenter
 //  PUSH DEVICES
 // ──────────────────────────────────────────────
 
-func (s *NotificationServiceImpl) RegisterPushDevice(clientID uint, pushToken, platform string) error {
+// platformWeb marks a browser Push API subscription (as opposed to an Expo
+// token). Kept as a constant so the send path can branch on ONE spelling.
+const platformWeb = "web"
+
+// vapidSettings reads the Web Push VAPID configuration from the environment.
+// All-empty means Web Push is simply NOT configured: registration of a web
+// device then fails closed at the service layer and the send path skips web
+// silently, so a deployment without the keys keeps working exactly as before.
+func vapidSettings() (public, private, subject string) {
+	return os.Getenv("VAPID_PUBLIC_KEY"), os.Getenv("VAPID_PRIVATE_KEY"), os.Getenv("VAPID_SUBJECT")
+}
+
+func (s *NotificationServiceImpl) VapidPublicKey() string {
+	public, _, _ := vapidSettings()
+	return public
+}
+
+func (s *NotificationServiceImpl) RegisterPushDevice(clientID uint, pushToken, platform, p256dh, auth string) error {
 	device := &models.PushDevice{
 		ClientID:  clientID,
 		PushToken: pushToken,
 		Platform:  platform,
+	}
+	if platform == platformWeb {
+		// A web subscription without its encryption keys can never be delivered,
+		// so refuse it instead of storing a dead device.
+		public, private, _ := vapidSettings()
+		if public == "" || private == "" {
+			return apperrors.ErrBadRequest
+		}
+		if p256dh == "" || auth == "" {
+			return apperrors.ErrBadRequest
+		}
+		device.P256dh = &p256dh
+		device.Auth = &auth
 	}
 	return s.PushDeviceRepo.Register(device)
 }
@@ -216,7 +250,7 @@ func (s *NotificationServiceImpl) UnregisterPushDevice(token string) error {
 }
 
 // ──────────────────────────────────────────────
-//  SEND PUSH via Expo Push API
+//  SEND PUSH — native (Expo) + web (Web Push)
 // ──────────────────────────────────────────────
 
 type expoPushMessage struct {
@@ -228,6 +262,17 @@ type expoPushMessage struct {
 	Priority string          `json:"priority,omitempty"`
 }
 
+// webPushMessage is the JSON the service worker receives.
+type webPushMessage struct {
+	Title string          `json:"title"`
+	Body  string          `json:"body"`
+	Data  json.RawMessage `json:"data,omitempty"`
+}
+
+// SendPushToClient delivers to every device the client registered, splitting the
+// set by flavour. The native path keeps its EXACT previous semantics (a
+// transport failure is returned); the web path is best-effort — a single stale
+// subscription must never fail the operation that produced the notification.
 func (s *NotificationServiceImpl) SendPushToClient(clientID uint, title, body, dataJSON string) error {
 	devices, err := s.PushDeviceRepo.FindByClientID(clientID)
 	if err != nil {
@@ -237,6 +282,28 @@ func (s *NotificationServiceImpl) SendPushToClient(clientID uint, title, body, d
 		return nil // No devices registered, silently skip
 	}
 
+	native := make([]models.PushDevice, 0, len(devices))
+	var web []models.PushDevice
+	for _, d := range devices {
+		if d.Platform == platformWeb {
+			web = append(web, d)
+		} else {
+			native = append(native, d)
+		}
+	}
+
+	if err := s.sendExpoPush(native, title, body, dataJSON); err != nil {
+		return err
+	}
+	s.sendWebPush(web, title, body, dataJSON)
+	return nil
+}
+
+// sendExpoPush is the original Expo delivery, unchanged.
+func (s *NotificationServiceImpl) sendExpoPush(devices []models.PushDevice, title, body, dataJSON string) error {
+	if len(devices) == 0 {
+		return nil
+	}
 	// Expo Push API accepts up to 100 messages per request
 	var messages []expoPushMessage
 	for _, d := range devices {
@@ -271,4 +338,60 @@ func (s *NotificationServiceImpl) SendPushToClient(clientID uint, title, body, d
 
 	// Expo returns 200 OK even for partial failures — we log but don't fail the operation
 	return nil
+}
+
+// sendWebPush encrypts and delivers the payload to each web subscription
+// (RFC 8291). A 404/410 from the push service means the subscription is gone,
+// so the row is pruned. Every failure is logged, never returned.
+func (s *NotificationServiceImpl) sendWebPush(devices []models.PushDevice, title, body, dataJSON string) {
+	if len(devices) == 0 {
+		return
+	}
+	public, private, subject := vapidSettings()
+	if public == "" || private == "" {
+		utils.Log.Warn("[PUSH] web devices registered but VAPID keys are not configured; skipping web push")
+		return
+	}
+	if subject == "" {
+		// The VAPID contact is mandatory in the JWT; a mailto: is the convention.
+		subject = "mailto:no-reply@yotuvia.app"
+	}
+
+	payload := webPushMessage{Title: title, Body: body}
+	if dataJSON != "" {
+		payload.Data = json.RawMessage(dataJSON)
+	}
+	message, err := json.Marshal(payload)
+	if err != nil {
+		utils.Log.Errorf("[PUSH] web payload marshal failed: %v", err)
+		return
+	}
+
+	for _, d := range devices {
+		if d.P256dh == nil || d.Auth == nil {
+			continue
+		}
+		subscription := &webpush.Subscription{
+			Endpoint: d.PushToken,
+			Keys:     webpush.Keys{P256dh: *d.P256dh, Auth: *d.Auth},
+		}
+		resp, err := webpush.SendNotification(message, subscription, &webpush.Options{
+			Subscriber:      subject,
+			TTL:             60,
+			VAPIDPublicKey:  public,
+			VAPIDPrivateKey: private,
+		})
+		if err != nil {
+			utils.Log.Errorf("[PUSH] web push send failed: %v", err)
+			continue
+		}
+		// 404/410 = the subscription no longer exists; drop it so the next send
+		// does not keep retrying a dead endpoint.
+		if resp.StatusCode == http.StatusGone || resp.StatusCode == http.StatusNotFound {
+			if err := s.PushDeviceRepo.Unregister(d.PushToken); err != nil {
+				utils.Log.Errorf("[PUSH] pruning stale web subscription failed: %v", err)
+			}
+		}
+		resp.Body.Close()
+	}
 }

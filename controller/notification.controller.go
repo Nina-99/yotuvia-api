@@ -274,12 +274,21 @@ func (c *NotificationController) RegisterPushDevice(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.notificationService.RegisterPushDevice(clientID, req.PushToken, req.Platform); err != nil {
+	if err := c.notificationService.RegisterPushDevice(clientID, req.PushToken, req.Platform, req.P256dh, req.Auth); err != nil {
 		c.writeError(ctx, err)
 		return
 	}
 
 	ctx.JSON(http.StatusCreated, gin.H{"message": "Device registered"})
+}
+
+// GET /push-devices/vapid-public-key
+//
+// PUBLIC (no JWT): a signed-out browser may need the application server key
+// before it can even ask for notification permission. When Web Push is not
+// configured the key is empty and the web client hides the affordance.
+func (c *NotificationController) VapidPublicKey(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, gin.H{"public_key": c.notificationService.VapidPublicKey()})
 }
 
 // ─── Helpers ─────────────────────────────────

@@ -36,7 +36,10 @@ type NotificationService interface {
 	GetUnreadByCenterID(centerID, actorCenterID uint) ([]models.Notification, error)
 	CountUnreadByCenterID(centerID, actorCenterID uint) (int64, error)
 	MarkAsReadByCenter(notificationID, actorCenterID uint) error
-	RegisterPushDevice(clientID uint, pushToken, platform string) error
+	RegisterPushDevice(clientID uint, pushToken, platform, p256dh, auth string) error
 	UnregisterPushDevice(token string) error
 	SendPushToClient(clientID uint, title, body, dataJSON string) error
+	// VapidPublicKey returns the application server key a browser needs before
+	// it will create a PushSubscription. Empty when Web Push is not configured.
+	VapidPublicKey() string
 }

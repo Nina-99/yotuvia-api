@@ -53,8 +53,14 @@ func NotificationRoutes(rg *gin.RouterGroup, db *gorm.DB) {
 
 	// Push devices (client auth)
 	push := rg.Group("/push-devices")
-	push.Use(middleware.JWTAuthMiddleware())
 	{
-		push.POST("/register", ctrl.RegisterPushDevice)
+		// PUBLIC: the VAPID application server key must be readable before the
+		// browser has a session, since subscribing is a signed-out-safe step.
+		push.GET("/vapid-public-key", ctrl.VapidPublicKey)
+	}
+	pushAuth := rg.Group("/push-devices")
+	pushAuth.Use(middleware.JWTAuthMiddleware())
+	{
+		pushAuth.POST("/register", ctrl.RegisterPushDevice)
 	}
 }
