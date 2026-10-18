@@ -533,7 +533,60 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 	if err != nil || reservation == nil {
 		return err
 	}
+	s.notifyNewReservation(reservation)
 	return s.applyDepositDecision(reservation)
+}
+
+// notifyNewReservation tells the people who need to know that an appointment was
+// booked: the CENTRE and every professional who will work it.
+//
+// Both CreateFor* calls also deliver a push to the target's devices, so the
+// in-app row and the device alert come from one place. The notification service
+// is optional in the sweeps wiring and every failure is swallowed on purpose: a
+// notification must never fail a real booking.
+func (s *ReservationServiceImpl) notifyNewReservation(reservation *models.Reservation) {
+	if s.NotificationService == nil || reservation == nil {
+		return
+	}
+
+	when := fmt.Sprintf("%s a las %s", reservation.Date.Format("2006-01-02"), reservation.StartTime)
+	payload := fmt.Sprintf(`{"reservation_id":%d,"client_id":%d}`, reservation.ID, reservation.ClientID)
+
+	_ = s.NotificationService.CreateForCenter(reservation.BeautyCenterID, "reservation_created",
+		"Nueva reserva",
+		"Nueva reserva el "+when,
+		payload)
+
+	// Every DISTINCT professional on the plan: a multi-professional booking must
+	// reach all of them, not just the lead.
+	for _, personnelID := range reservationPersonnel(reservation) {
+		_ = s.NotificationService.CreateForPersonnel(personnelID, "reservation_created",
+			"Nuevo turno",
+			"Tenés un nuevo turno el "+when,
+			payload)
+	}
+}
+
+// reservationPersonnel returns the DISTINCT professionals of a reservation's
+// service lines, falling back to the lead when the lines were not preloaded.
+func reservationPersonnel(reservation *models.Reservation) []uint {
+	seen := map[uint]bool{}
+	out := make([]uint, 0, len(reservation.ReservationServices))
+	for _, line := range reservation.ReservationServices {
+		if line.PersonnelID == nil || *line.PersonnelID == 0 {
+			continue
+		}
+		pid := *line.PersonnelID
+		if seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		out = append(out, pid)
+	}
+	if len(out) == 0 && reservation.PersonnelID != 0 {
+		out = append(out, reservation.PersonnelID)
+	}
+	return out
 }
 
 // validateClientBookingWindow rejects a client booking whose [start, end)
@@ -750,7 +803,26 @@ func (s *ReservationServiceImpl) CreateAdminReservation(req request.CreateAdminR
 
 	// D6: return the reservation with relations preloaded so the controller can
 	// emit the full ReservationResponse DTO (names, services, prices).
-	return s.ReservationRepository.FindById(id)
+	created, err := s.ReservationRepository.FindById(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// The professional(s) who will work the appointment are told as well. The
+	// centre already got its own walk-in event above, so only the personnel side
+	// fires here — a new appointment must never surprise the person working it.
+	if s.NotificationService != nil {
+		payload := fmt.Sprintf(`{"reservation_id":%d,"client_id":%d}`, id, req.ClientID)
+		when := fmt.Sprintf("%s a las %s", req.Date, req.StartTime)
+		for _, personnelID := range reservationPersonnel(created) {
+			_ = s.NotificationService.CreateForPersonnel(personnelID, "reservation_created",
+				"Nuevo turno",
+				"Tenés un nuevo turno el "+when,
+				payload)
+		}
+	}
+
+	return created, nil
 }
 
 // ──────────────────────────────────────────────
