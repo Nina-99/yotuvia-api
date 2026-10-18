@@ -46,7 +46,7 @@ func setupRouterAuthzDB(t *testing.T) *gorm.DB {
 		&models.Favorite{}, &models.PersonnelFollow{}, &models.FeedPost{}, &models.LoyaltyProgram{}, &models.Personnel{}, &models.PersonnelImage{}, &models.PersonnelService{},
 		&models.PostLike{}, &models.PunchHistory{}, &models.Reservation{},
 		&models.ReservationService{}, &models.Review{}, &models.Service{},
-		&models.SocialMedia{}, &models.WorkingHour{}, &models.PersonnelInvitation{}, &models.Notification{}, &models.PushDevice{},
+		&models.SocialMedia{}, &models.WorkingHour{}, &models.TimeBlock{}, &models.PersonnelInvitation{}, &models.Notification{}, &models.PushDevice{},
 		&models.MarketConfig{}, &models.VideoComment{}, &models.SavedVideo{}, &models.VideoWatchEvent{},
 		&models.LoyaltyRedemption{}, &models.UserSession{}, &models.Promotion{},
 		&models.PromotionRedemption{}, &models.PaymentConfig{}, &models.WaitlistEntry{},

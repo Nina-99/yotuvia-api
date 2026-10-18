@@ -263,3 +263,41 @@ func personnelIntervals(r *models.Reservation, personnelID uint) [][2]int {
 func formatClockMinutes(m int) string {
 	return fmt.Sprintf("%02d:%02d", m/60, m%60)
 }
+
+// BlockBusyReservations projects unavailability blocks down to the busy
+// intervals the slot kernel reads, for ONE professional preference. It mirrors
+// PersonnelBusyReservations so the kernel stays untouched: a block is just
+// another busy interval.
+func BlockBusyReservations(blocks []models.TimeBlock, personnelID uint) []models.Reservation {
+	out := make([]models.Reservation, 0, len(blocks))
+	for _, b := range blocks {
+		if !b.AppliesToPersonnel(personnelID) {
+			continue
+		}
+		out = append(out, models.Reservation{
+			BeautyCenterID: b.BeautyCenterID,
+			Date:           b.Date,
+			StartTime:      b.StartTime,
+			EndTime:        b.EndTime,
+		})
+	}
+	return out
+}
+
+// WindowOverlapsBlocks reports whether [startMinutes, endMinutes) collides with
+// any block that applies to the professional preference. The WRITE path uses it
+// so a window the kernel would not offer cannot be booked anyway — the read and
+// write paths must agree.
+func WindowOverlapsBlocks(blocks []models.TimeBlock, personnelID uint, startMinutes, endMinutes int) bool {
+	for _, b := range blocks {
+		if !b.AppliesToPersonnel(personnelID) {
+			continue
+		}
+		bStart := ParseScheduleMinutes(b.StartTime)
+		bEnd := ParseScheduleMinutes(b.EndTime)
+		if startMinutes < bEnd && endMinutes > bStart {
+			return true
+		}
+	}
+	return false
+}
