@@ -62,5 +62,6 @@ func NotificationRoutes(rg *gin.RouterGroup, db *gorm.DB) {
 	pushAuth.Use(middleware.JWTAuthMiddleware())
 	{
 		pushAuth.POST("/register", ctrl.RegisterPushDevice)
+		pushAuth.POST("/unregister", ctrl.UnregisterPushDevice)
 	}
 }

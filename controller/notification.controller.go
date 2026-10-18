@@ -282,6 +282,24 @@ func (c *NotificationController) RegisterPushDevice(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, gin.H{"message": "Device registered"})
 }
 
+// POST /push-devices/unregister
+//
+// Drops ONE device. It is keyed by the push token / subscription endpoint —
+// the very value registration stored — so a signed-out browser can still be
+// cleaned up when the user opts out.
+func (c *NotificationController) UnregisterPushDevice(ctx *gin.Context) {
+	var req request.RegisterPushDeviceRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.PushToken == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "push_token is required"})
+		return
+	}
+	if err := c.notificationService.UnregisterPushDevice(req.PushToken); err != nil {
+		c.writeError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"message": "Device unregistered"})
+}
+
 // GET /push-devices/vapid-public-key
 //
 // PUBLIC (no JWT): a signed-out browser may need the application server key
