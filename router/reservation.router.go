@@ -46,6 +46,9 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	)
 	ctrl := controller.NewReservationController(svc, waitlistSvc)
 
+	visitNoteSvc := service.NewVisitNoteService(repository.NewVisitNoteRepositoryImpl(db), repo)
+	visitNoteCtrl := controller.NewVisitNoteController(visitNoteSvc)
+
 	reservation := rg.Group("/reservation")
 	reservation.Use(middleware.JWTAuthMiddleware())
 	{
@@ -98,6 +101,13 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 		// (lead or plan member). Reuses the shared update; the service authorizes
 		// by membership and forbids moving the lead.
 		reservation.PUT("/me/:id", middleware.RequireRole("personnel"), ctrl.Update)
+
+		// Internal per-visit notes (C3). Static /me/notes coexists with
+		// /me/:id/note; both are personnel-only and claim-scoped, and the
+		// service authorizes by membership (lead or plan member).
+		reservation.GET("/me/notes", middleware.RequireRole("personnel"), visitNoteCtrl.ListMine)
+		reservation.PUT("/me/:id/note", middleware.RequireRole("personnel"), visitNoteCtrl.Upsert)
+		reservation.DELETE("/me/:id/note", middleware.RequireRole("personnel"), visitNoteCtrl.Delete)
 
 		// verify-qr widening lives in its OWN isolated group (design D4):
 		// granting personnel access here must NOT leak /status or /assign,

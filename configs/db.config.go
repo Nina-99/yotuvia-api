@@ -57,6 +57,7 @@ func DBConnection() {
 		&models.SocialMedia{},
 		&models.WorkingHour{},
 		&models.TimeBlock{},
+		&models.VisitNote{},
 		&models.PersonnelInvitation{},
 		&models.Notification{},
 		&models.PushDevice{},
