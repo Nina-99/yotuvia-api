@@ -105,7 +105,13 @@ func (s *NotificationServiceImpl) CreateForPersonnel(personnelID uint, notifType
 		Message:     message,
 		Data:        data,
 	}
-	return s.NotificationRepo.Create(notif)
+	if err := s.NotificationRepo.Create(notif); err != nil {
+		return err
+	}
+	// Best-effort push for EVERY staff notification: a transport failure must
+	// never fail the write that produced the in-app row.
+	_ = s.SendPushToOwner("personnel", personnelID, title, message, data)
+	return nil
 }
 
 func (s *NotificationServiceImpl) GetByPersonnelID(personnelID, actorPersonnelID uint) ([]models.Notification, error) {
@@ -159,7 +165,12 @@ func (s *NotificationServiceImpl) CreateForCenter(centerID uint, notifType, titl
 		Message:        message,
 		Data:           data,
 	}
-	return s.NotificationRepo.Create(notif)
+	if err := s.NotificationRepo.Create(notif); err != nil {
+		return err
+	}
+	// Best-effort push to the CENTRE's devices, same rule as the staff path.
+	_ = s.SendPushToOwner("beauty_center", centerID, title, message, data)
+	return nil
 }
 
 func (s *NotificationServiceImpl) GetByCenterID(centerID, actorCenterID uint) ([]models.Notification, error) {
@@ -223,9 +234,16 @@ func (s *NotificationServiceImpl) VapidPublicKey() string {
 	return public
 }
 
-func (s *NotificationServiceImpl) RegisterPushDevice(clientID uint, pushToken, platform, p256dh, auth string) error {
+// RegisterPushDevice stores ONE device for one (role, owner). The role is what
+// makes the table polymorphic: the same endpoint can belong to a client, a
+// professional or a centre without the numeric ids ever colliding.
+func (s *NotificationServiceImpl) RegisterPushDevice(role string, actorID uint, pushToken, platform, p256dh, auth string) error {
+	if role == "" {
+		role = "client"
+	}
 	device := &models.PushDevice{
-		ClientID:  clientID,
+		ClientID:  actorID,
+		OwnerRole: role,
 		PushToken: pushToken,
 		Platform:  platform,
 	}
@@ -269,12 +287,19 @@ type webPushMessage struct {
 	Data  json.RawMessage `json:"data,omitempty"`
 }
 
-// SendPushToClient delivers to every device the client registered, splitting the
-// set by flavour. The native path keeps its EXACT previous semantics (a
-// transport failure is returned); the web path is best-effort — a single stale
-// subscription must never fail the operation that produced the notification.
+// SendPushToClient delivers to every device the CLIENT registered.
 func (s *NotificationServiceImpl) SendPushToClient(clientID uint, title, body, dataJSON string) error {
-	devices, err := s.PushDeviceRepo.FindByClientID(clientID)
+	return s.SendPushToOwner("client", clientID, title, body, dataJSON)
+}
+
+// SendPushToOwner delivers to every device one (role, owner) registered. Staff
+// and owners reach this path; clients use the SendPushToClient wrapper so the
+// existing call sites stay untouched.
+func (s *NotificationServiceImpl) SendPushToOwner(role string, ownerID uint, title, body, dataJSON string) error {
+	if role == "" {
+		role = "client"
+	}
+	devices, err := s.PushDeviceRepo.FindByOwner(role, ownerID)
 	if err != nil {
 		return err
 	}

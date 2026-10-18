@@ -14,7 +14,15 @@ import "gorm.io/gorm"
 //     payload cannot be encrypted, so they are required for a web device.
 type PushDevice struct {
 	gorm.Model
-	ClientID  uint   `gorm:"not null;index"`
+	// ClientID is the POLYMORPHIC owner id: a client id, a personnel id or a
+	// centre id depending on OwnerRole. The name predates staff/owner push and
+	// is kept so the existing rows and index stay valid.
+	ClientID uint `gorm:"not null;index"`
+	// OwnerRole scopes ClientID: "client" (default, every pre-existing row),
+	// "personnel" or "beauty_center". A push lookup ALWAYS filters by both, so a
+	// staff device can never receive a client's notification just because the
+	// numeric ids collide.
+	OwnerRole string `gorm:"size:20;not null;default:client;index"`
 	PushToken string `gorm:"size:255;not null;uniqueIndex"`
 	Platform  string `gorm:"size:20"` // ios, android, web
 

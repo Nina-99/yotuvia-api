@@ -174,7 +174,7 @@ func TestWebPush_DeliversToTheSubscriptionEndpoint(t *testing.T) {
 
 	seedDashboardClient(t, db, 1, "Ana", "Lopez")
 	p256dh, auth := subscriptionKeys(t)
-	require.NoError(t, svc.RegisterPushDevice(1, srv.URL+"/push/1", "web", p256dh, auth))
+	require.NoError(t, svc.RegisterPushDevice("client", 1, srv.URL+"/push/1", "web", p256dh, auth))
 
 	require.NoError(t, svc.SendPushToClient(1, "Turno confirmado", "Tu turno está listo", `{"reservation_id":9}`))
 
@@ -206,7 +206,7 @@ func TestWebPush_PrunesGoneSubscription(t *testing.T) {
 
 	seedDashboardClient(t, db, 1, "Ana", "Lopez")
 	p256dh, auth := subscriptionKeys(t)
-	require.NoError(t, svc.RegisterPushDevice(1, srv.URL+"/push/gone", "web", p256dh, auth))
+	require.NoError(t, svc.RegisterPushDevice("client", 1, srv.URL+"/push/gone", "web", p256dh, auth))
 
 	require.NoError(t, svc.SendPushToClient(1, "t", "b", ""))
 

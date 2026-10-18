@@ -274,7 +274,7 @@ func (c *NotificationController) RegisterPushDevice(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.notificationService.RegisterPushDevice(clientID, req.PushToken, req.Platform, req.P256dh, req.Auth); err != nil {
+	if err := c.notificationService.RegisterPushDevice(ctx.GetString("role"), clientID, req.PushToken, req.Platform, req.P256dh, req.Auth); err != nil {
 		c.writeError(ctx, err)
 		return
 	}

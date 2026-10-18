@@ -36,9 +36,16 @@ type NotificationService interface {
 	GetUnreadByCenterID(centerID, actorCenterID uint) ([]models.Notification, error)
 	CountUnreadByCenterID(centerID, actorCenterID uint) (int64, error)
 	MarkAsReadByCenter(notificationID, actorCenterID uint) error
-	RegisterPushDevice(clientID uint, pushToken, platform, p256dh, auth string) error
+	// RegisterPushDevice stores ONE device for the caller's role: "client",
+	// "personnel" or "beauty_center". The role comes from the JWT, so a staff or
+	// owner device is never mistaken for a client one.
+	RegisterPushDevice(role string, actorID uint, pushToken, platform, p256dh, auth string) error
 	UnregisterPushDevice(token string) error
 	SendPushToClient(clientID uint, title, body, dataJSON string) error
+	// SendPushToOwner delivers to one (role, owner) — "personnel" or
+	// "beauty_center". It is what staff and owners receive; clients keep using
+	// SendPushToClient.
+	SendPushToOwner(role string, ownerID uint, title, body, dataJSON string) error
 	// VapidPublicKey returns the application server key a browser needs before
 	// it will create a PushSubscription. Empty when Web Push is not configured.
 	VapidPublicKey() string
