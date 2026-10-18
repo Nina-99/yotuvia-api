@@ -550,7 +550,10 @@ func (s *ReservationServiceImpl) notifyNewReservation(reservation *models.Reserv
 	}
 
 	when := fmt.Sprintf("%s a las %s", reservation.Date.Format("2006-01-02"), reservation.StartTime)
-	payload := fmt.Sprintf(`{"reservation_id":%d,"client_id":%d}`, reservation.ID, reservation.ClientID)
+	// `type` travels in the payload so a tapped PUSH can route exactly like the
+	// in-app row (see the clients' notification-navigation resolver).
+	payload := fmt.Sprintf(`{"reservation_id":%d,"client_id":%d,"type":"reservation_created"}`,
+		reservation.ID, reservation.ClientID)
 
 	_ = s.NotificationService.CreateForCenter(reservation.BeautyCenterID, "reservation_created",
 		"Nueva reserva",
@@ -559,34 +562,12 @@ func (s *ReservationServiceImpl) notifyNewReservation(reservation *models.Reserv
 
 	// Every DISTINCT professional on the plan: a multi-professional booking must
 	// reach all of them, not just the lead.
-	for _, personnelID := range reservationPersonnel(reservation) {
+	for _, personnelID := range reservationPersonnelRecipients(reservation) {
 		_ = s.NotificationService.CreateForPersonnel(personnelID, "reservation_created",
 			"Nuevo turno",
 			"Tenés un nuevo turno el "+when,
 			payload)
 	}
-}
-
-// reservationPersonnel returns the DISTINCT professionals of a reservation's
-// service lines, falling back to the lead when the lines were not preloaded.
-func reservationPersonnel(reservation *models.Reservation) []uint {
-	seen := map[uint]bool{}
-	out := make([]uint, 0, len(reservation.ReservationServices))
-	for _, line := range reservation.ReservationServices {
-		if line.PersonnelID == nil || *line.PersonnelID == 0 {
-			continue
-		}
-		pid := *line.PersonnelID
-		if seen[pid] {
-			continue
-		}
-		seen[pid] = true
-		out = append(out, pid)
-	}
-	if len(out) == 0 && reservation.PersonnelID != 0 {
-		out = append(out, reservation.PersonnelID)
-	}
-	return out
 }
 
 // validateClientBookingWindow rejects a client booking whose [start, end)
@@ -812,9 +793,9 @@ func (s *ReservationServiceImpl) CreateAdminReservation(req request.CreateAdminR
 	// centre already got its own walk-in event above, so only the personnel side
 	// fires here — a new appointment must never surprise the person working it.
 	if s.NotificationService != nil {
-		payload := fmt.Sprintf(`{"reservation_id":%d,"client_id":%d}`, id, req.ClientID)
+		payload := fmt.Sprintf(`{"reservation_id":%d,"client_id":%d,"type":"reservation_created"}`, id, req.ClientID)
 		when := fmt.Sprintf("%s a las %s", req.Date, req.StartTime)
-		for _, personnelID := range reservationPersonnel(created) {
+		for _, personnelID := range reservationPersonnelRecipients(created) {
 			_ = s.NotificationService.CreateForPersonnel(personnelID, "reservation_created",
 				"Nuevo turno",
 				"Tenés un nuevo turno el "+when,
@@ -1145,10 +1126,11 @@ func (s *ReservationServiceImpl) AssignPersonnel(reservationID uint, personnelID
 		_ = s.NotificationService.SendPushToClient(reservation.ClientID, title, message, pushData)
 	}
 
-	// Personnel-scoped notifications (design D5): in-app only, no push.
-	// The losing staff member is notified only when a staff was actually
-	// assigned before; the gaining staff member always is (personnelID is
-	// validated above and belongs to the right center).
+	// Personnel-scoped notifications (design D5): in-app row PLUS a push to the
+	// professional's devices (CreateForPersonnel pushes now). The losing staff
+	// member is notified only when a staff was actually assigned before; the
+	// gaining staff member always is (personnelID is validated above and belongs
+	// to the right center).
 	if reservation.PersonnelID != 0 && reservation.PersonnelID != personnelID {
 		_ = s.NotifyPersonnelReassigned(reservation, personnelID)
 	}
