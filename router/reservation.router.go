@@ -94,6 +94,10 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 		// (accept/reject pending turnos). Stays isolated from the admin
 		// /:id/status group above (beauty_center-only).
 		reservation.PATCH("/me/:id/status", middleware.RequireRole("personnel"), ctrl.UpdateMyStatus)
+		// personnel-only reschedule: edits the professional's OWN appointment
+		// (lead or plan member). Reuses the shared update; the service authorizes
+		// by membership and forbids moving the lead.
+		reservation.PUT("/me/:id", middleware.RequireRole("personnel"), ctrl.Update)
 
 		// verify-qr widening lives in its OWN isolated group (design D4):
 		// granting personnel access here must NOT leak /status or /assign,

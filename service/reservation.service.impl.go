@@ -131,6 +131,29 @@ func ownsReservation(r *models.Reservation, clientID, centerID uint, role string
 	}
 }
 
+// authorizePersonnelEdit gates a professional's edit of ONE reservation: the
+// acting centre must own it AND the caller must be ON it — the lead, or a line
+// of the multi-professional plan (bounded query, never one per line). Mirrors
+// `UpdateStatusByPersonnel`; it deliberately does NOT use `ownsReservation`,
+// whose personnel branch is centre-wide and would let a colleague edit a
+// booking that is not theirs.
+func (s *ReservationServiceImpl) authorizePersonnelEdit(reservation *models.Reservation, reservationID, personnelID, centerID uint) error {
+	if reservation.BeautyCenterID != centerID {
+		return apperrors.ErrForbidden
+	}
+	if reservation.PersonnelID == personnelID {
+		return nil
+	}
+	member, err := s.ReservationRepository.IsPersonnelMember(reservationID, personnelID)
+	if err != nil {
+		return err
+	}
+	if !member {
+		return apperrors.ErrForbidden
+	}
+	return nil
+}
+
 // normalizeStatus canonicalizes status strings to UPPERCASE so legacy lowercase
 // rows (e.g. "completed") compare and persist correctly.
 func normalizeStatus(status string) string {
@@ -715,9 +738,19 @@ func (s *ReservationServiceImpl) Update(reservationID uint, req request.UpdateRe
 	if err != nil || reservation == nil {
 		return apperrors.ErrNotFound
 	}
-	if !ownsReservation(reservation, clientID, centerID, role) {
+	if role == "personnel" {
+		// A professional may edit only an appointment they are ON (lead or plan
+		// member), never a colleague's — the centre-wide check `ownsReservation`
+		// would otherwise grant that.
+		if err := s.authorizePersonnelEdit(reservation, reservationID, clientID, centerID); err != nil {
+			return err
+		}
+	} else if !ownsReservation(reservation, clientID, centerID, role) {
 		return apperrors.ErrForbidden
 	}
+	// Captured for the personnel lead guard: a professional moves the SLOT, never
+	// the appointment's professional.
+	originalLead := reservation.PersonnelID
 
 	if err := s.Validate.Struct(req); err != nil {
 		return apperrors.ErrValidation
@@ -833,6 +866,9 @@ func (s *ReservationServiceImpl) Update(reservationID uint, req request.UpdateRe
 		// on Save, so drop it and let the DERIVED LEAD land on the row.
 		reservation.Personnel = models.Personnel{}
 		reservation.PersonnelID = linePersonnel[req.ServiceIDs[0]]
+		if role == "personnel" && reservation.PersonnelID != originalLead {
+			return apperrors.ErrForbidden
+		}
 		return s.ReservationRepository.Update(reservation)
 	}
 
@@ -874,6 +910,9 @@ func (s *ReservationServiceImpl) Update(reservationID uint, req request.UpdateRe
 		reservation.PersonnelID = req.PersonnelID
 	}
 
+	if role == "personnel" && reservation.PersonnelID != originalLead {
+		return apperrors.ErrForbidden
+	}
 	return s.ReservationRepository.Update(reservation)
 }
 
