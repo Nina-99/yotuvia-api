@@ -8,6 +8,7 @@ import (
 	"github.com/Nina-99/yotuvia-api/models"
 	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeNotificationService captures Create/SendPushToClient payloads while
@@ -87,17 +88,11 @@ func pendingReservation(beautyCenterID, clientID uint) *models.Reservation {
 	}
 }
 
-// pushEnvelope decodes the {type, data} push payload; data must be a JSON
-// string that carries the original reservation payload (design D3 / D6).
-type pushEnvelope struct {
-	Type string `json:"type"`
-	Data string `json:"data"`
-}
-
-// TestAssignPersonnelPushUsesTypedEnvelope: the push payload sent by
-// AssignPersonnel must be wrapped as {"type":"personnel_changed","data":<json string>}
-// so the mobile mapper resolves the cold-start push to the reservations tab.
-func TestAssignPersonnelPushUsesTypedEnvelope(t *testing.T) {
+// TestAssignPersonnelClientNotificationCarriesType: the reassignment
+// notification must carry the TYPE inside its own payload, because
+// NotificationService.Create owns delivery now — this payload IS what the
+// device receives, and routing depends on the type being present.
+func TestAssignPersonnelClientNotificationCarriesType(t *testing.T) {
 	staff := &models.Personnel{
 		FirstName:      "Jane",
 		LastName:       "Doe",
@@ -107,23 +102,22 @@ func TestAssignPersonnelPushUsesTypedEnvelope(t *testing.T) {
 
 	err := svc.AssignPersonnel(42, 7, 10)
 	assert.NoError(t, err)
-	assert.Len(t, notif.pushedData, 1, "one push must be sent")
+	require.Len(t, notif.created, 1)
 
-	var envelope pushEnvelope
-	assert.NoError(t, json.Unmarshal([]byte(notif.pushedData[0]), &envelope))
-	assert.Equal(t, "personnel_changed", envelope.Type)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(notif.created[0]), &payload))
+	assert.Equal(t, "personnel_changed", payload["type"])
+	assert.Equal(t, float64(42), payload["reservation_id"])
+	assert.Equal(t, float64(7), payload["personnel_id"])
 
-	// The inner data is a JSON string that round-trips to the original payload.
-	var inner map[string]uint
-	assert.NoError(t, json.Unmarshal([]byte(envelope.Data), &inner))
-	assert.Equal(t, uint(42), inner["reservation_id"])
-	assert.Equal(t, uint(7), inner["personnel_id"])
+	// Create pushes on its own; a second explicit push would deliver the same
+	// event twice.
+	assert.Empty(t, notif.pushedData, "the push must not be sent twice")
 }
 
-// TestAssignPersonnelPushEnvelopeUsesCallArgs triangulates with different IDs
-// to prove the envelope is built from the call arguments (not hardcoded) and
-// that the row data stored via Create stays clean (no envelope).
-func TestAssignPersonnelPushEnvelopeUsesCallArgs(t *testing.T) {
+// TestAssignPersonnelNotificationUsesCallArgs triangulates with different IDs to
+// prove the payload is built from the call arguments, not hardcoded.
+func TestAssignPersonnelNotificationUsesCallArgs(t *testing.T) {
 	staff := &models.Personnel{
 		FirstName:      "Jane",
 		LastName:       "Doe",
@@ -133,20 +127,11 @@ func TestAssignPersonnelPushEnvelopeUsesCallArgs(t *testing.T) {
 
 	err := svc.AssignPersonnel(1, 2, 10)
 	assert.NoError(t, err)
-	assert.Len(t, notif.pushedData, 1)
+	require.Len(t, notif.created, 1)
 
-	var envelope pushEnvelope
-	assert.NoError(t, json.Unmarshal([]byte(notif.pushedData[0]), &envelope))
-	var inner map[string]uint
-	assert.NoError(t, json.Unmarshal([]byte(envelope.Data), &inner))
-	assert.Equal(t, uint(1), inner["reservation_id"])
-	assert.Equal(t, uint(2), inner["personnel_id"])
-
-	// Row data (NotificationService.Create) must remain the raw payload,
-	// untouched by the push envelope.
-	assert.Len(t, notif.created, 1)
-	var rowData map[string]uint
-	assert.NoError(t, json.Unmarshal([]byte(notif.created[0]), &rowData))
-	assert.Equal(t, uint(1), rowData["reservation_id"])
-	assert.Equal(t, uint(2), rowData["personnel_id"])
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(notif.created[0]), &payload))
+	assert.Equal(t, "personnel_changed", payload["type"])
+	assert.Equal(t, float64(1), payload["reservation_id"])
+	assert.Equal(t, float64(2), payload["personnel_id"])
 }

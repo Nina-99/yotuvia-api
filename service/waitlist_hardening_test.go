@@ -261,20 +261,18 @@ func TestWaitlistOfferPayloadIsFlat(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, entry)
 
-	require.Len(t, notif.pushedData, 1, "one push must be sent")
-	var push map[string]any
-	require.NoError(t, json.Unmarshal([]byte(notif.pushedData[0]), &push), "push payload must be valid flat JSON")
-	assert.Equal(t, "waitlist_offer", push["type"])
-	assert.Equal(t, float64(entry.ID), push["waitlist_id"])
-	assert.Equal(t, slotDate, push["reservation_date"])
-	assert.Equal(t, "10:00", push["start_time"])
-	_, nested := push["data"]
-	assert.False(t, nested, "push payload must not be double-encoded under data")
-
-	// In-app data is the same flat object and also carries the type.
+	// The notification's OWN data is the payload that gets delivered: Create
+	// pushes it, so there is no separate (possibly divergent) push payload and
+	// no double delivery.
 	require.Len(t, notif.created, 1, "one in-app notification must be written")
-	assert.JSONEq(t, notif.pushedData[0], notif.created[0])
+	assert.Empty(t, notif.pushedData, "the push must not be sent twice")
+
 	var inApp map[string]any
-	require.NoError(t, json.Unmarshal([]byte(notif.created[0]), &inApp))
-	assert.Equal(t, "waitlist_offer", inApp["type"], "in-app data must include type for deep-linking")
+	require.NoError(t, json.Unmarshal([]byte(notif.created[0]), &inApp), "payload must be valid flat JSON")
+	assert.Equal(t, "waitlist_offer", inApp["type"], "the payload must carry type for deep-linking")
+	assert.Equal(t, float64(entry.ID), inApp["waitlist_id"])
+	assert.Equal(t, slotDate, inApp["reservation_date"])
+	assert.Equal(t, "10:00", inApp["start_time"])
+	_, nested := inApp["data"]
+	assert.False(t, nested, "payload must not be double-encoded under data")
 }

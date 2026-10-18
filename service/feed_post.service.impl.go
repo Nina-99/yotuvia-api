@@ -235,9 +235,6 @@ func (s *FeedPostServiceImpl) notifyFollowers(post models.FeedPost) {
 		if err := s.NotificationService.Create(clientID, "new_video", title, message, payload); err != nil {
 			utils.Log.Errorf("[FEED] new_video notification failed for client %d: %v", clientID, err)
 		}
-		if err := s.NotificationService.SendPushToClient(clientID, title, message, payload); err != nil {
-			utils.Log.Errorf("[FEED] new_video push failed for client %d: %v", clientID, err)
-		}
 	}
 }
 

@@ -45,7 +45,14 @@ func (s *NotificationServiceImpl) Create(clientID uint, notifType, title, messag
 		Message:  message,
 		Data:     data,
 	}
-	return s.NotificationRepo.Create(notif)
+	if err := s.NotificationRepo.Create(notif); err != nil {
+		return err
+	}
+	// Same rule as the staff/centre paths: EVERY notification pushes, so the
+	// recipient sees it with the app CLOSED, not only when it is open. Callers
+	// must therefore NOT push separately, or the device gets it twice.
+	_ = s.SendPushToOwner("client", clientID, title, message, data)
+	return nil
 }
 
 func (s *NotificationServiceImpl) GetByClientID(clientID, actorClientID uint) ([]models.Notification, error) {
@@ -278,6 +285,10 @@ type expoPushMessage struct {
 	Data     json.RawMessage `json:"data,omitempty"`
 	Sound    string          `json:"sound,omitempty"`
 	Priority string          `json:"priority,omitempty"`
+	// ChannelID targets the Android notification channel. Sending it explicitly
+	// guarantees a CLOSED Android app shows the alert on our own channel (with
+	// its sound/importance) instead of a bare FCM fallback channel.
+	ChannelID string `json:"channelId,omitempty"`
 }
 
 // webPushMessage is the JSON the service worker receives.
@@ -333,11 +344,12 @@ func (s *NotificationServiceImpl) sendExpoPush(devices []models.PushDevice, titl
 	var messages []expoPushMessage
 	for _, d := range devices {
 		msg := expoPushMessage{
-			To:       d.PushToken,
-			Title:    title,
-			Body:     body,
-			Sound:    "default",
-			Priority: "high",
+			To:        d.PushToken,
+			Title:     title,
+			Body:      body,
+			Sound:     "default",
+			Priority:  "high",
+			ChannelID: "default",
 		}
 		if dataJSON != "" {
 			msg.Data = json.RawMessage(dataJSON)

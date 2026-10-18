@@ -303,8 +303,6 @@ func (s *WaitlistServiceImpl) notifyOffer(entry *models.WaitlistEntry) {
 		fmt.Sprintf("Tenés %d minutos para reclamar el turno del %s a las %s",
 			models.WaitlistOfferMinutes, entry.Date.Format("02/01"), entry.StartTime),
 		payload)
-	_ = s.NotificationService.SendPushToClient(entry.ClientID, "Se liberó un turno",
-		fmt.Sprintf("Turno del %s a las %s disponible", entry.Date.Format("02/01"), entry.StartTime), payload)
 }
 
 // OfferForFreedSlot implements WaitlistService. The select-and-mark is atomic

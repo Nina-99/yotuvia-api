@@ -1111,7 +1111,7 @@ func (s *ReservationServiceImpl) AssignPersonnel(reservationID uint, personnelID
 	// Create notification for the client
 	personnelNew, _ := s.PersonnelRepository.FindByID(personnelID)
 	if personnelNew != nil {
-		dataStr := fmt.Sprintf(`{"reservation_id":%d,"personnel_id":%d}`, reservationID, personnelID)
+		dataStr := fmt.Sprintf(`{"type":"personnel_changed","reservation_id":%d,"personnel_id":%d}`, reservationID, personnelID)
 		title := "Cambio de profesional"
 		message := fmt.Sprintf("Tu turno del %s a las %s ahora será con %s %s",
 			reservation.Date.Format("02/01"),
@@ -1119,11 +1119,9 @@ func (s *ReservationServiceImpl) AssignPersonnel(reservationID uint, personnelID
 			personnelNew.FirstName,
 			personnelNew.LastName,
 		)
+		// Create pushes as well, so there is no separate SendPush here (that
+		// would deliver the same event twice).
 		_ = s.NotificationService.Create(reservation.ClientID, "personnel_changed", title, message, dataStr)
-		// Push mirrors the REST {type, data} shape so the mobile mapper can
-		// resolve the payload on cold start (design D3). Row data stays clean.
-		pushData := fmt.Sprintf(`{"type":"personnel_changed","data":%q}`, dataStr)
-		_ = s.NotificationService.SendPushToClient(reservation.ClientID, title, message, pushData)
 	}
 
 	// Personnel-scoped notifications (design D5): in-app row PLUS a push to the
@@ -1314,12 +1312,10 @@ func (s *ReservationServiceImpl) sendReminder(r *models.Reservation, kind string
 	title := "Recordatorio de turno"
 	message := fmt.Sprintf("Tenés turno el %s a las %s en %s",
 		start.Format("02/01"), r.StartTime, centerNameOrDefault(r))
-	dataStr := fmt.Sprintf(`{"reservation_id":%d}`, r.ID)
-	pushData := fmt.Sprintf(`{"type":"reminder_%s","data":%q}`, kind, dataStr)
+	dataStr := fmt.Sprintf(`{"type":"reminder_%s","reservation_id":%d}`, kind, r.ID)
 	if err := s.NotificationService.Create(r.ClientID, "reminder_"+kind, title, message, dataStr); err != nil {
 		return err
 	}
-	_ = s.NotificationService.SendPushToClient(r.ClientID, title, message, pushData)
 	if kind == "24h" {
 		r.Reminder24HSentAt = &when
 	} else {
@@ -2237,12 +2233,9 @@ func (s *ReservationServiceImpl) notifyLoyaltyScan(reservation *models.Reservati
 		title = "Reward ready"
 		message = "Your loyalty card is complete — a reward is waiting for you."
 	}
-	data := fmt.Sprintf(`{"reservation_id":%d}`, reservation.ID)
+	data := fmt.Sprintf(`{"type":%q,"reservation_id":%d}`, notifType, reservation.ID)
 	if err := s.NotificationService.Create(reservation.ClientID, notifType, title, message, data); err != nil {
 		utils.Log.Errorf("[LOYALTY] Failed to create %s notification for client %d: %v", notifType, reservation.ClientID, err)
-	}
-	if err := s.NotificationService.SendPushToClient(reservation.ClientID, title, message, data); err != nil {
-		utils.Log.Errorf("[LOYALTY] Failed to push %s notification for client %d: %v", notifType, reservation.ClientID, err)
 	}
 }
 
