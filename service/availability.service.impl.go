@@ -304,8 +304,10 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 				// predicate then filters it. Using the center-wide busy union
 				// here would over-block: a shared reservation can occupy pro 1
 				// at [t,t+d1) and pro 2 at [t+d1,t+d2) without the chain
-				// conflicting at all.
-				busy := ChainBusyByPersonnel(centerRes[dateStr], chain)
+				// conflicting at all. Unavailability blocks ARE folded into the
+				// per-professional busy set, so a blocked window is never
+				// offered by the chain search either.
+				busy := ChainBusyByPersonnel(centerRes[dateStr], blocksByCenter[center.ID][dateStr], chain)
 				for _, slot := range ComputeAvailabilitySlots(d, duration, blocks, nil, now) {
 					if !slot.Available {
 						continue

@@ -41,17 +41,25 @@ func ChainPersonnel(chain []ChainStep) []uint {
 	return out
 }
 
-// ChainBusyByPersonnel projects the date's reservations down to each DISTINCT
-// chain professional's busy minute intervals. Each professional is projected
-// ONCE (never once per slot) and the result is a pure in-memory map, so the
-// chain evaluation adds no per-professional or per-slot query.
-func ChainBusyByPersonnel(reservations []models.Reservation, chain []ChainStep) map[uint][][2]int {
+// ChainBusyByPersonnel projects the date's reservations AND unavailability
+// blocks down to each DISTINCT chain professional's busy minute intervals. Each
+// professional is projected ONCE (never once per slot) and the result is a pure
+// in-memory map, so the chain evaluation adds no per-professional or per-slot
+// query.
+//
+// Blocks are folded in exactly like the single-professional path does: a
+// centre-wide block applies to every professional, one professional's block only
+// to them (see models.TimeBlock.AppliesToPersonnel).
+func ChainBusyByPersonnel(reservations []models.Reservation, blocks []models.TimeBlock, chain []ChainStep) map[uint][][2]int {
 	busy := make(map[uint][][2]int, len(chain))
 	for _, step := range chain {
 		if _, done := busy[step.PersonnelID]; done {
 			continue
 		}
-		projected := PersonnelBusyReservations(reservations, step.PersonnelID)
+		projected := append(
+			PersonnelBusyReservations(reservations, step.PersonnelID),
+			BlockBusyReservations(blocks, step.PersonnelID)...,
+		)
 		intervals := make([][2]int, 0, len(projected))
 		for i := range projected {
 			intervals = append(intervals, [2]int{
