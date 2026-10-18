@@ -34,6 +34,7 @@ func newReservationTriggerTestService(t *testing.T, db *gorm.DB) service.Reserva
 		repository.NewBeautyCenterRepositoryImpl(db),
 		nil, // FeedPostRepository: attribution not exercised here
 		repository.NewPersonnelServiceRepositoryImpl(db),
+		nil, // TimeBlockRepository: blocks not exercised here
 	)
 }
 

@@ -28,6 +28,9 @@ type AvailabilityServiceImpl struct {
 	// OPTIONAL: nil disables the existence check (only relevant for a chain
 	// request, which is never the sweeps wiring).
 	personnelRepo repository.PersonnelRepository
+	// timeBlockRepo backs unavailability blocks (breaks/holidays). OPTIONAL: nil
+	// disables block subtraction (the sweeps/test wiring that never searches).
+	timeBlockRepo repository.TimeBlockRepository
 }
 
 func NewAvailabilityServiceImpl(
@@ -35,12 +38,14 @@ func NewAvailabilityServiceImpl(
 	serviceRepo repository.ServiceRepository,
 	treatmentRepo repository.TreatmentRepository,
 	personnelRepo repository.PersonnelRepository,
+	timeBlockRepo repository.TimeBlockRepository,
 ) AvailabilityService {
 	return &AvailabilityServiceImpl{
 		centerRepo:    centerRepo,
 		serviceRepo:   serviceRepo,
 		treatmentRepo: treatmentRepo,
 		personnelRepo: personnelRepo,
+		timeBlockRepo: timeBlockRepo,
 	}
 }
 
@@ -229,6 +234,25 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 		resByCenter[r.BeautyCenterID][key] = append(resByCenter[r.BeautyCenterID][key], r)
 	}
 
+	// ── Unavailability blocks over the same range (one query) ──
+	// Projected into the SAME busy set as reservations, so the pure slot kernel
+	// stays untouched. NOT applied to the chain path: that path builds a
+	// per-professional busy structure and folding blocks there is a follow-up.
+	blocksByCenter := map[uint]map[string][]models.TimeBlock{}
+	if s.timeBlockRepo != nil {
+		blocks, err := s.timeBlockRepo.ListByCentersRange(centerIDs, from, to)
+		if err != nil {
+			return empty, err
+		}
+		for _, b := range blocks {
+			key := b.Date.Format("2006-01-02")
+			if blocksByCenter[b.BeautyCenterID] == nil {
+				blocksByCenter[b.BeautyCenterID] = map[string][]models.TimeBlock{}
+			}
+			blocksByCenter[b.BeautyCenterID][key] = append(blocksByCenter[b.BeautyCenterID][key], b)
+		}
+	}
+
 	now := time.Now()
 	all := make([]response.AvailabilitySlotResult, 0)
 	for _, center := range centers {
@@ -294,7 +318,10 @@ func (s *AvailabilityServiceImpl) Search(req request.AvailabilitySearchRequest) 
 				continue
 			}
 
-			slots := ComputeAvailabilitySlots(d, duration, blocks, centerRes[dateStr], now)
+			slots := ComputeAvailabilitySlots(d, duration, blocks,
+				append(append([]models.Reservation{}, centerRes[dateStr]...),
+					BlockBusyReservations(blocksByCenter[center.ID][dateStr], req.PersonnelID)...),
+				now)
 			for _, slot := range slots {
 				appendSlot(slot)
 			}

@@ -356,12 +356,13 @@ func TestAvailabilitySearch_TreatmentDriven_QueryCountIsBounded(t *testing.T) {
 
 	// Surfacing service_ids must NOT grow the budget: the ids are derived from
 	// the services already loaded to size the windows. The treatment path is a
-	// fixed 5 SELECTs (treatments, candidate centers, active services, working
-	// hours, reservations); pin it so a per-row regression fails loudly.
+	// fixed 6 SELECTs (treatments, candidate centers, active services, working
+	// hours, reservations, unavailability blocks); pin it so a per-row
+	// regression fails loudly.
 	var env searchEnvelope
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
 	require.NotEmpty(t, env.Results)
 	assert.NotEmpty(t, env.Results[0].ServiceIDs, "service_ids must be surfaced")
-	assert.LessOrEqualf(t, queries, int64(5),
-		"treatment search SELECTs must not grow beyond the 5-query baseline, got %d", queries)
+	assert.LessOrEqualf(t, queries, int64(6),
+		"treatment search SELECTs must not grow beyond the 6-query baseline, got %d", queries)
 }

@@ -73,7 +73,11 @@ type ReservationServiceImpl struct {
 	// those services). OPTIONAL: nil disables the check, which is the correct
 	// configuration for the sweeps wiring, where Create is never reachable.
 	PersonnelServiceRepository repository.PersonnelServiceRepository
-	Validate                   *validator.Validate
+	// TimeBlockRepository backs unavailability blocks on the client booking path
+	// (breaks/holidays must reject a booking the read path hides). OPTIONAL: nil
+	// disables the check (the sweeps wiring, where Create is unreachable).
+	TimeBlockRepository repository.TimeBlockRepository
+	Validate            *validator.Validate
 }
 
 func NewReservationServiceImpl(
@@ -92,6 +96,7 @@ func NewReservationServiceImpl(
 	centerRepository repository.BeautyCenterRepository,
 	feedPostRepository repository.FeedPostRepository,
 	personnelServiceRepository repository.PersonnelServiceRepository,
+	timeBlockRepository repository.TimeBlockRepository,
 ) ReservationService {
 	requireDeps("NewReservationServiceImpl",
 		dep("ReservationRepository", reservationRepository),
@@ -111,6 +116,7 @@ func NewReservationServiceImpl(
 		MarketConfigService:        marketConfigService,
 		FeedPostRepository:         feedPostRepository,
 		PersonnelServiceRepository: personnelServiceRepository,
+		TimeBlockRepository:        timeBlockRepository,
 		Validate:                   validate,
 	}
 }
@@ -507,6 +513,16 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 	} else if err := s.validateClientServiceCapability(req.PersonnelID, req.ServiceIDs); err != nil {
 		return err
 	}
+	// A window overlapping an unavailability BLOCK must not be bookable: the read
+	// path already hides those slots, so the write path has to agree. The check
+	// needs the affected professionals, which are known only after the plan is
+	// resolved — hence it runs here, after the capability/plan block.
+	if err := s.validateWindowAgainstBlocks(
+		req.BeautyCenterID, req.Date, req.StartTime, req.ServiceIDs,
+		affectedPersonnel(personnelID, req.ServiceIDs, linePersonnel),
+	); err != nil {
+		return err
+	}
 	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, personnelID, req.ServiceIDs, req.Date, req.StartTime, s.resolveSourcePostID(req.SourcePostID), linePersonnel, req.ApplyLoyalty)
 	if err != nil {
 		return err
@@ -556,6 +572,69 @@ func (s *ReservationServiceImpl) validateClientBookingWindow(centerID uint, date
 	endMinutes := startMinutes + TotalServicesDuration(services)
 	if !BookingWindowAllowed(parsedDate, startMinutes, endMinutes, schedules, time.Now()) {
 		return apperrors.ErrBadRequest
+	}
+	return nil
+}
+
+// affectedPersonnel resolves the set of professionals a booking touches: every
+// plan line's professional, or the single requested one, or none ("any
+// professional", where only a centre-wide block applies).
+func affectedPersonnel(personnelID uint, serviceIDs []uint, plan map[uint]uint) []uint {
+	if len(plan) == 0 {
+		if personnelID == 0 {
+			return nil
+		}
+		return []uint{personnelID}
+	}
+	seen := map[uint]bool{}
+	out := make([]uint, 0, len(plan))
+	for _, sid := range serviceIDs {
+		pid := plan[sid]
+		if pid != 0 && !seen[pid] {
+			seen[pid] = true
+			out = append(out, pid)
+		}
+	}
+	return out
+}
+
+// validateWindowAgainstBlocks rejects a booking whose [start, end) window
+// overlaps an unavailability block applying to any affected professional, or a
+// centre-wide block. It mirrors the read path, so an unoffered window cannot be
+// booked anyway. A nil repository disables the check.
+//
+// The conflict maps to 409 (ErrConflict): the slot is real but not available.
+func (s *ReservationServiceImpl) validateWindowAgainstBlocks(centerID uint, dateStr, startTimeStr string, serviceIDs []uint, personnelIDs []uint) error {
+	if s.TimeBlockRepository == nil {
+		return nil
+	}
+	parsedDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return apperrors.ErrBadRequest
+	}
+	startParsed, err := time.Parse("15:04", startTimeStr)
+	if err != nil {
+		return apperrors.ErrBadRequest
+	}
+	services, err := s.ServiceRepository.FindByIDs(serviceIDs)
+	if err != nil || len(services) != len(serviceIDs) {
+		return apperrors.ErrBadRequest
+	}
+	startMinutes := startParsed.Hour()*60 + startParsed.Minute()
+	endMinutes := startMinutes + TotalServicesDuration(services)
+
+	blocks, err := s.TimeBlockRepository.ListByCentersRange([]uint{centerID}, parsedDate, parsedDate)
+	if err != nil {
+		return err
+	}
+	// personnelID 0 = centre-wide blocks only.
+	if WindowOverlapsBlocks(blocks, 0, startMinutes, endMinutes) {
+		return apperrors.ErrConflict
+	}
+	for _, pid := range personnelIDs {
+		if WindowOverlapsBlocks(blocks, pid, startMinutes, endMinutes) {
+			return apperrors.ErrConflict
+		}
 	}
 	return nil
 }
@@ -824,6 +903,15 @@ func (s *ReservationServiceImpl) Update(reservationID uint, req request.UpdateRe
 		if overlap {
 			return apperrors.ErrConflict
 		}
+	}
+
+	// Blocked windows are not bookable either: mirror the read path on the edit.
+	editAffected := affectedPersonnel(req.PersonnelID, req.ServiceIDs, linePersonnel)
+	if len(linePersonnel) == 0 && originalLead != 0 && originalLead != req.PersonnelID {
+		editAffected = append(editAffected, originalLead)
+	}
+	if err := s.validateWindowAgainstBlocks(req.BeautyCenterID, req.Date, req.StartTime, req.ServiceIDs, editAffected); err != nil {
+		return err
 	}
 
 	// ClientID is never rewritten from the request: ownership was already proven

@@ -20,13 +20,17 @@ type BeautyCenterServiceImpl struct {
 	repo           repository.BeautyCenterRepository
 	missionService TokenMissionService
 	Validate       *validator.Validate
+	// timeBlockRepo backs unavailability blocks in GetAvailableSlots. OPTIONAL:
+	// nil disables block subtraction.
+	timeBlockRepo repository.TimeBlockRepository
 }
 
-func NewBeautyCenterServiceImpl(repo repository.BeautyCenterRepository, missionService TokenMissionService, validate *validator.Validate) BeautyCenterService {
+func NewBeautyCenterServiceImpl(repo repository.BeautyCenterRepository, missionService TokenMissionService, validate *validator.Validate, timeBlockRepo repository.TimeBlockRepository) BeautyCenterService {
 	return &BeautyCenterServiceImpl{
 		repo:           repo,
 		missionService: missionService,
 		Validate:       validate,
+		timeBlockRepo:  timeBlockRepo,
 	}
 }
 
@@ -288,6 +292,17 @@ func (s *BeautyCenterServiceImpl) GetAvailableSlots(centerID uint, date string, 
 		return response.AvailableSlotsResponse{}, err
 	}
 	reservations = PersonnelBusyReservations(reservations, personnelID)
+
+	// Unavailability blocks (breaks/holidays) are folded into the SAME busy set,
+	// so a blocked window is never offered. Centre-wide blocks apply to every
+	// professional; a professional's own block only to them.
+	if s.timeBlockRepo != nil {
+		timeBlocks, err := s.timeBlockRepo.ListByCentersRange([]uint{centerID}, parsedDate, parsedDate)
+		if err != nil {
+			return response.AvailableSlotsResponse{}, err
+		}
+		reservations = append(reservations, BlockBusyReservations(timeBlocks, personnelID)...)
+	}
 
 	// The slot kernel is shared with the cross-center search so the two can
 	// never disagree (see service/availability).

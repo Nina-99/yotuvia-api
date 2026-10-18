@@ -16,7 +16,7 @@ func BeautyCenterRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Va
 		service.NewTokenMissionServiceImpl(
 			repository.NewTokenMissionRepositoryImpl(db), nil,
 			repository.NewTokenAccountRepositoryImpl(db),
-		), validate)
+		), validate, repository.NewTimeBlockRepositoryImpl(db))
 	ctrl := controller.NewBeautyCenterController(svc)
 
 	beautyCenter := rg.Group("/beauty-centers")

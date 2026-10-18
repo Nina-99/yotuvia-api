@@ -129,7 +129,7 @@ func TestTrigger_ProfileCompleted(t *testing.T) {
 	assert.NoError(t, db.Create(mission).Error)
 
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
-	svc := service.NewBeautyCenterServiceImpl(centerRepo, missionSvc, validator.New())
+	svc := service.NewBeautyCenterServiceImpl(centerRepo, missionSvc, validator.New(), nil)
 
 	// Completing update: description + address were missing.
 	req := request.UpdateBeautyCenterRequest{
@@ -207,7 +207,7 @@ func TestTrigger_ReferralVerification(t *testing.T) {
 	assert.NoError(t, db.Create(referral).Error)
 
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
-	svc := service.NewBeautyCenterServiceImpl(centerRepo, missionSvc, validator.New())
+	svc := service.NewBeautyCenterServiceImpl(centerRepo, missionSvc, validator.New(), nil)
 
 	// Verify the referred center → referrer credited.
 	assert.NoError(t, svc.MarkVerified(2))
