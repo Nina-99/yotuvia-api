@@ -19,19 +19,19 @@ import (
 // A "whole day" block is simply a wide range (00:00–23:59); no special case.
 type TimeBlock struct {
 	gorm.Model
-	BeautyCenterID uint  `gorm:"index;not null"`
-	PersonnelID    *uint `gorm:"index"`
+	BeautyCenterID uint  `gorm:"index;not null" json:"beauty_center_id"`
+	PersonnelID    *uint `gorm:"index" json:"personnel_id"`
 
-	Date      time.Time `gorm:"index;not null"`
-	StartTime string    `gorm:"size:5;not null"`
-	EndTime   string    `gorm:"size:5;not null"`
-	Reason    string    `gorm:"size:255"`
+	Date      time.Time `gorm:"index;not null" json:"date"`
+	StartTime string    `gorm:"size:5;not null" json:"start_time"`
+	EndTime   string    `gorm:"size:5;not null" json:"end_time"`
+	Reason    string    `gorm:"size:255" json:"reason"`
 
 	// CreatedByRole records who made the block ("personnel" | "beauty_center")
 	// so ownership can be enforced without a second table.
-	CreatedByRole string `gorm:"size:20"`
+	CreatedByRole string `gorm:"size:20" json:"created_by_role"`
 	// CreatedByID is the actor's id (personnel id or centre id) in that role.
-	CreatedByID uint
+	CreatedByID uint `json:"created_by_id"`
 }
 
 // AppliesToPersonnel reports whether this block constrains the given
