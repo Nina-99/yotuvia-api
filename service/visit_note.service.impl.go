@@ -21,10 +21,15 @@ func NewVisitNoteService(
 	return &VisitNoteServiceImpl{repo: repo, reservationRepo: reservationRepo}
 }
 
-// authorize loads the visit and proves the caller may note it: the reservation
-// must belong to the caller's centre AND the caller must be its lead or one of
-// its service lines. A client may never reach here (the route is
-// personnel-only), and any other role is rejected.
+// authorize loads the visit and proves the caller may note it:
+//
+//   - BOTH roles require the reservation to belong to the caller's centre.
+//   - A professional must additionally be the visit's LEAD or one of its service
+//     lines, so they can never note a colleague's visit.
+//   - The owner may note any visit of its own centre.
+//
+// The author key is (role, actorID), so a staff member and the owner keep
+// separate notes on the same visit.
 func (s *VisitNoteServiceImpl) authorize(reservationID uint, role string, actorID, centerID uint) error {
 	reservation, err := s.reservationRepo.FindById(reservationID)
 	if err != nil || reservation == nil {
@@ -33,20 +38,25 @@ func (s *VisitNoteServiceImpl) authorize(reservationID uint, role string, actorI
 	if reservation.BeautyCenterID != centerID {
 		return apperrors.ErrForbidden
 	}
-	if role != "personnel" {
-		return apperrors.ErrForbidden
-	}
-	if reservation.PersonnelID == actorID {
+
+	switch role {
+	case "beauty_center":
 		return nil
-	}
-	member, err := s.reservationRepo.IsPersonnelMember(reservationID, actorID)
-	if err != nil {
-		return err
-	}
-	if !member {
+	case "personnel":
+		if reservation.PersonnelID == actorID {
+			return nil
+		}
+		member, err := s.reservationRepo.IsPersonnelMember(reservationID, actorID)
+		if err != nil {
+			return err
+		}
+		if !member {
+			return apperrors.ErrForbidden
+		}
+		return nil
+	default:
 		return apperrors.ErrForbidden
 	}
-	return nil
 }
 
 func (s *VisitNoteServiceImpl) Upsert(reservationID uint, role string, actorID, centerID uint, body string) (*models.VisitNote, error) {
@@ -79,8 +89,8 @@ func (s *VisitNoteServiceImpl) Delete(reservationID uint, role string, actorID, 
 	return s.repo.DeleteByAuthor(reservationID, role, actorID)
 }
 
-func (s *VisitNoteServiceImpl) ListMine(role string, actorID, centerID uint, from, to string) ([]models.VisitNote, error) {
-	if role != "personnel" {
+func (s *VisitNoteServiceImpl) List(role string, actorID, centerID uint, from, to string) ([]models.VisitNote, error) {
+	if role != "personnel" && role != "beauty_center" {
 		return nil, apperrors.ErrForbidden
 	}
 	fromDay, err := time.Parse("2006-01-02", strings.TrimSpace(from))

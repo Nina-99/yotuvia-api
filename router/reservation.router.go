@@ -102,12 +102,17 @@ func ReservationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 		// by membership and forbids moving the lead.
 		reservation.PUT("/me/:id", middleware.RequireRole("personnel"), ctrl.Update)
 
-		// Internal per-visit notes (C3). Static /me/notes coexists with
-		// /me/:id/note; both are personnel-only and claim-scoped, and the
-		// service authorizes by membership (lead or plan member).
-		reservation.GET("/me/notes", middleware.RequireRole("personnel"), visitNoteCtrl.ListMine)
-		reservation.PUT("/me/:id/note", middleware.RequireRole("personnel"), visitNoteCtrl.Upsert)
-		reservation.DELETE("/me/:id/note", middleware.RequireRole("personnel"), visitNoteCtrl.Delete)
+		// Internal per-visit notes (C3). ROLE-AGNOSTIC: the service scopes by the
+		// JWT — a professional notes visits they SERVED (lead or plan member),
+		// the owner notes any visit of its centre — and keys each note by
+		// (role, actor), so two professionals on one visit never overwrite each
+		// other.
+		visitNotes := reservation.Group("/visit-notes", middleware.RequireRole("personnel", "beauty_center"))
+		{
+			visitNotes.GET("", visitNoteCtrl.List)
+			visitNotes.PUT("/:id", visitNoteCtrl.Upsert)
+			visitNotes.DELETE("/:id", visitNoteCtrl.Delete)
+		}
 
 		// verify-qr widening lives in its OWN isolated group (design D4):
 		// granting personnel access here must NOT leak /status or /assign,

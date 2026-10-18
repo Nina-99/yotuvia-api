@@ -24,8 +24,8 @@ func (c *VisitNoteController) writeError(ctx *gin.Context, err error) {
 	ctx.JSON(status, gin.H{"error": msg})
 }
 
-// Upsert handles PUT /reservation/me/:id/note. The author and centre come from
-// the JWT; the body carries only the text.
+// Upsert handles PUT /reservation/visit-notes/:id. The author and centre come
+// from the JWT; the body carries only the text.
 func (c *VisitNoteController) Upsert(ctx *gin.Context) {
 	id, ok := parsePositiveID(ctx.Param("id"))
 	if !ok {
@@ -52,7 +52,7 @@ func (c *VisitNoteController) Upsert(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, note)
 }
 
-// Delete handles DELETE /reservation/me/:id/note.
+// Delete handles DELETE /reservation/visit-notes/:id.
 func (c *VisitNoteController) Delete(ctx *gin.Context) {
 	id, ok := parsePositiveID(ctx.Param("id"))
 	if !ok {
@@ -71,9 +71,9 @@ func (c *VisitNoteController) Delete(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Visit note deleted"})
 }
 
-// ListMine handles GET /reservation/me/notes?from=&to=.
-func (c *VisitNoteController) ListMine(ctx *gin.Context) {
-	notes, err := c.visitNoteService.ListMine(
+// List handles GET /reservation/visit-notes?from=&to=.
+func (c *VisitNoteController) List(ctx *gin.Context) {
+	notes, err := c.visitNoteService.List(
 		ctx.GetString("role"),
 		ctx.GetUint("clientID"),
 		ctx.GetUint("centerID"),
