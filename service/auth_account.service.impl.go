@@ -432,14 +432,14 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		firstName = center.Name
 		lastName = ""
 
-		// ── Welcome bonus: 25 free YOTTUs ──
+		// ── Welcome bonus: 25 free Ytv ──
 		if s.TokenAccountSvc != nil {
 			if _, err := s.TokenAccountSvc.GetOrCreate(center.ID, center.Currency); err != nil {
 				utils.Log.Errorf("[AUTH] Failed to create token account for center %d: %v", center.ID, err)
-			} else if err := s.TokenAccountSvc.AddTokens(center.ID, utils.ToMilli(25), "bonus", 0, "Welcome bonus: 25 free YOTTUs"); err != nil {
-				utils.Log.Errorf("[AUTH] Failed to add welcome YOTTUs for center %d: %v", center.ID, err)
+			} else if err := s.TokenAccountSvc.AddTokens(center.ID, utils.ToMilli(25), "bonus", 0, "Welcome bonus: 25 free Ytv"); err != nil {
+				utils.Log.Errorf("[AUTH] Failed to add welcome Ytv for center %d: %v", center.ID, err)
 			} else {
-				utils.Log.Infof("[AUTH] Welcome bonus: 25 YOTTUs credited to center %d", center.ID)
+				utils.Log.Infof("[AUTH] Welcome bonus: 25 Ytv credited to center %d", center.ID)
 			}
 		}
 

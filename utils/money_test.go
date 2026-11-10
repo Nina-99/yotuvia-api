@@ -12,13 +12,13 @@ func TestToMilli(t *testing.T) {
 		want int64
 	}{
 		{"zero", 0, 0},
-		{"exact two-decimal YOTTU", 25.50, 25500},
+		{"exact two-decimal Ytv", 25.50, 25500},
 		{"half-up tie (25.5555 -> 25556)", 25.5555, 25556},
 		{"single milli (0.001)", 0.001, 1},
 		{"sub-milli rounds away from zero (0.0004 -> 0)", 0.0004, 0},
 		{"sub-milli rounds away from zero (0.0005 -> 1)", 0.0005, 1},
 		{"one tenth is exactly 100 milli", 0.10, 100},
-		{"whole YOTTUs", 5, 5000},
+		{"whole Ytv", 5, 5000},
 		{"large value", 1000, 1_000_000},
 		{"negative half-up tie", -25.5555, -25556},
 		{"negative sub-milli rounds away from zero", -0.0005, -1},
@@ -34,7 +34,7 @@ func TestToMilli(t *testing.T) {
 	}
 }
 
-// TestRepeatedSmallAdditionsStayExact — 0.10 YOTTU credited ten times must
+// TestRepeatedSmallAdditionsStayExact — 0.10 Ytv credited ten times must
 // sum to exactly 1000 milli with zero accumulated float error.
 func TestRepeatedSmallAdditionsStayExact(t *testing.T) {
 	var total int64

@@ -1,5 +1,5 @@
 // Command migrate_milli converts the token-ledger money columns from float to
-// int64 milli-YOTTUs on the production PostgreSQL database.
+// int64 milli-Ytv on the production PostgreSQL database.
 //
 // Usage:
 //

@@ -176,7 +176,7 @@ func seedQRReservation(t *testing.T, db *gorm.DB, status, token string, expiry *
 }
 
 // TestVerifyQR_CompletesExactlyOnce — first scan completes + charges
-// atomically (3.5 YOTTU for a 100 Bs ticket), punches and triggers missions
+// atomically (3.5 Ytv for a 100 Bs ticket), punches and triggers missions
 // exactly once, persists UPPERCASE COMPLETED, clears the token; the re-scan
 // finds no token (ErrNotFound) without a second charge.
 func TestVerifyQR_CompletesExactlyOnce(t *testing.T) {
@@ -191,7 +191,7 @@ func TestVerifyQR_CompletesExactlyOnce(t *testing.T) {
 	assert.Equal(t, res.ID, completed.ID)
 	assert.Equal(t, "COMPLETED", completed.Status)
 
-	// Atomic charge: 3.5% of 100 Bs = 3.5 YOTTU = 3500 milli.
+	// Atomic charge: 3.5% of 100 Bs = 3.5 Ytv = 3500 milli.
 	assert.Equal(t, int64(96_500), accountBalance(t, db))
 	assert.Equal(t, int64(1), consumptionLedgerCount(t, db))
 	assert.Equal(t, 1, loyalty.punchCalls)

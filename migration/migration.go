@@ -1,5 +1,5 @@
 // Package migration implements the additive, verified, reversible conversion
-// of the token-ledger money columns from float to int64 milli-YOTTUs.
+// of the token-ledger money columns from float to int64 milli-Ytv.
 //
 // The engine is dialect-agnostic: production runs against PostgreSQL via
 // scripts/migrate_milli.go (DialectPostgres), while the integration tests run
@@ -34,7 +34,7 @@ type MoneyColumn struct {
 	Name  string
 }
 
-// MoneyColumns lists the 11 float money columns converted to milli-YOTTUs
+// MoneyColumns lists the 11 float money columns converted to milli-Ytv
 // (design Phase 4). Tables/columns come from this fixed list only; they are
 // never derived from user input, so interpolating them into SQL is safe.
 var MoneyColumns = []MoneyColumn{
@@ -51,7 +51,7 @@ var MoneyColumns = []MoneyColumn{
 	{Table: "referrals", Name: "reward_referred"},
 }
 
-// BackfillMilli converts a legacy decimal YOTTU value to milli-YOTTUs using
+// BackfillMilli converts a legacy decimal Ytv value to milli-Ytv using
 // the same canonical rounding the application uses (utils.ToMilli): 6-decimal
 // quantization then half-away-from-zero rounding. Delegating guarantees the
 // migration backfill always matches what the app writes (spec: 25.50 -> 25500,
@@ -133,7 +133,7 @@ func exec(ctx context.Context, db sqlDB, query string, args ...any) error {
 	return nil
 }
 
-// Upgrade converts the 11 money columns to milli-YOTTUs:
+// Upgrade converts the 11 money columns to milli-Ytv:
 //
 //  1. Additive: create *_milli bigint columns where missing (idempotent);
 //     recover a crash between DROP and RENAME from a previous run.

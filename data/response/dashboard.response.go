@@ -108,7 +108,7 @@ type DashboardStatsResponse struct {
 	TicketSeries       []SeriesDayDTO          `json:"ticket_series"`
 	RatingSeries       []SeriesDayDTO          `json:"rating_series"`
 
-	// ── Token / YOTTU balance (feat-token-economy) ──
+	// ── Token / Ytv balance (feat-token-economy) ──
 	Balance        float64 `json:"balance"`
 	OverdraftLimit float64 `json:"overdraft_limit"`
 	AvailableBalance float64 `json:"available_balance"`

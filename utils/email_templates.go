@@ -14,7 +14,7 @@ import (
 // neutral/professional Spanish. When per-user locale exists, these builders can
 // branch on it; the call sites already pass everything they need.
 //
-// Visual identity: the Yottu gold accent (#CFB53B) is taken from the mobile
+// Visual identity: the Yotuvia gold accent (#CFB53B) is taken from the mobile
 // design tokens (src/constants/theme.ts, goldYottu) and kept simple — a single
 // gold button on a light card, table-based so it renders in most mail clients.
 
@@ -61,20 +61,20 @@ func buildDeepLink(path, rawToken string) string {
 // VerificationEmail renders the email-verification message.
 func VerificationEmail(firstName, link string) EmailContent {
 	name := displayName(firstName)
-	subject := "Verifica tu correo en Yottu"
+	subject := "Verifica tu correo en Yotuvia"
 
 	text := fmt.Sprintf(`¡Hola %s!
 
-Confirma que este correo es tuyo para completar la verificación de tu cuenta en Yottu.
+Confirma que este correo es tuyo para completar la verificación de tu cuenta en Yotuvia.
 
 Abre este enlace para verificar tu correo:
 %s
 
 Por seguridad, el enlace vence en 24 horas y solo puede usarse una vez.
 
-Si no creaste una cuenta en Yottu, puedes ignorar este mensaje.
+Si no creaste una cuenta en Yotuvia, puedes ignorar este mensaje.
 
-— El equipo de Yottu`, name, link)
+— El equipo de Yotuvia`, name, link)
 
 	return EmailContent{
 		Subject: subject,
@@ -86,11 +86,11 @@ Si no creaste una cuenta en Yottu, puedes ignorar este mensaje.
 // PasswordResetEmail renders the password-recovery message.
 func PasswordResetEmail(firstName, link string) EmailContent {
 	name := displayName(firstName)
-	subject := "Restablece tu contraseña de Yottu"
+	subject := "Restablece tu contraseña de Yotuvia"
 
 	text := fmt.Sprintf(`¡Hola %s!
 
-Recibimos una solicitud para restablecer la contraseña de tu cuenta en Yottu.
+Recibimos una solicitud para restablecer la contraseña de tu cuenta en Yotuvia.
 
 Abre este enlace para crear una contraseña nueva:
 %s
@@ -99,7 +99,7 @@ Por seguridad, el enlace vence en 1 hora y solo puede usarse una vez. Al usarlo,
 
 Si no solicitaste este cambio, puedes ignorar este mensaje: tu contraseña no cambiará.
 
-— El equipo de Yottu`, name, link)
+— El equipo de Yotuvia`, name, link)
 
 	return EmailContent{
 		Subject: subject,
@@ -119,14 +119,14 @@ type emailContext struct {
 var (
 	contextVerification = emailContext{
 		heading:      "Verifica tu correo",
-		intro:        "Confirma que este correo es tuyo para completar la verificación de tu cuenta en Yottu.",
+		intro:        "Confirma que este correo es tuyo para completar la verificación de tu cuenta en Yotuvia.",
 		buttonLabel:  "Verificar mi correo",
 		expiryNote:   "El enlace vence en 24 horas y solo puede usarse una vez.",
-		securityNote: "Si no creaste una cuenta en Yottu, puedes ignorar este mensaje.",
+		securityNote: "Si no creaste una cuenta en Yotuvia, puedes ignorar este mensaje.",
 	}
 	contextPasswordReset = emailContext{
 		heading:      "Restablece tu contraseña",
-		intro:        "Recibimos una solicitud para restablecer la contraseña de tu cuenta en Yottu.",
+		intro:        "Recibimos una solicitud para restablecer la contraseña de tu cuenta en Yotuvia.",
 		buttonLabel:  "Crear contraseña nueva",
 		expiryNote:   "El enlace vence en 1 hora y solo puede usarse una vez.",
 		securityNote: "Si no solicitaste este cambio, ignora este mensaje: tu contraseña no cambiará.",
@@ -141,7 +141,7 @@ func displayName(firstName string) string {
 	return strings.TrimSpace(firstName)
 }
 
-// emailLayout renders the shared table-based HTML shell with the Yottu gold
+// emailLayout renders the shared table-based HTML shell with the Yotuvia gold
 // accent. All interpolated values are HTML-escaped.
 func emailLayout(ctx emailContext, name, link string) string {
 	e := html.EscapeString
@@ -159,7 +159,7 @@ func emailLayout(ctx emailContext, name, link string) string {
         <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#ffffff;border-radius:12px;overflow:hidden;">
           <tr>
             <td style="background-color:#121212;padding:20px 28px;">
-              <span style="font-size:20px;font-weight:bold;color:#CFB53B;letter-spacing:1px;">YOTTU</span>
+              <span style="font-size:20px;font-weight:bold;color:#CFB53B;letter-spacing:1px;">YOTUVIA</span>
             </td>
           </tr>
           <tr>

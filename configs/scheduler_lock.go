@@ -9,7 +9,7 @@ import (
 
 // schedulerAdvisoryLockKey is the stable Postgres advisory-lock key that
 // arbitrates a scheduler tick across API replicas. 0x594F545455 is ASCII
-// "YOTTU" — readable and collision-safe. Every replica MUST use this same key
+// "Ytv" — readable and collision-safe. Every replica MUST use this same key
 // for the lock to serialize ticks.
 const schedulerAdvisoryLockKey int64 = 0x594F545455
 
