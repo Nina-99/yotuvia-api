@@ -394,6 +394,11 @@ func SeedDemoCenters() {
 	var count int64
 	DB.Model(&models.BeautyCenter{}).Where("referral_code LIKE 'DEMO%'").Count(&count)
 	if count >= 16 {
+		// Existing demo centers predate the verification gate; mark them verified
+		// so claims and referrals remain testable in development.
+		DB.Model(&models.BeautyCenter{}).
+			Where("referral_code LIKE 'DEMO%' AND verified_at IS NULL").
+			Update("verified_at", time.Now().UTC())
 		// Backfill services for existing demo centers that lack them
 		var ids []uint
 		DB.Model(&models.BeautyCenter{}).Where("referral_code LIKE 'DEMO%'").Pluck("id", &ids)
@@ -557,6 +562,7 @@ func SeedDemoCenters() {
 			Currency:     "BOB",
 			IsActive:     true,
 			ReferralCode: fmt.Sprintf("DEMO%03d", i+1),
+			VerifiedAt:   &now,
 		}
 		// First 3 demo centers require seña so the deposit flow is testable.
 		if i < 3 {
@@ -732,4 +738,45 @@ func clampFloat(v, min, max float64) float64 {
 		return max
 	}
 	return v
+}
+
+// BackfillReferralCodes gives every center an unambiguous referral code. Social
+// sign-ups used to create centers with an empty code, which the unique index
+// would eventually reject. Idempotent: only empty/NULL rows are touched.
+func BackfillReferralCodes() {
+	var centers []models.BeautyCenter
+	if err := DB.Where("referral_code = ? OR referral_code IS NULL", "").Find(&centers).Error; err != nil {
+		utils.Log.Errorf("[SEED] failed to list centers without a referral code: %v", err)
+		return
+	}
+	for _, center := range centers {
+		code, err := uniqueReferralCode()
+		if err != nil {
+			utils.Log.Errorf("[SEED] failed to generate a referral code for center %d: %v", center.ID, err)
+			continue
+		}
+		if err := DB.Model(&models.BeautyCenter{}).Where("id = ?", center.ID).
+			Update("referral_code", code).Error; err != nil {
+			utils.Log.Errorf("[SEED] failed to set referral code for center %d: %v", center.ID, err)
+			continue
+		}
+		utils.Log.Infof("[SEED] Backfilled referral code for center %d", center.ID)
+	}
+}
+
+func uniqueReferralCode() (string, error) {
+	for i := 0; i < 10; i++ {
+		code, err := utils.GenerateReferralCode()
+		if err != nil {
+			return "", err
+		}
+		var count int64
+		if err := DB.Model(&models.BeautyCenter{}).Where("referral_code = ?", code).Count(&count).Error; err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return code, nil
+		}
+	}
+	return "", fmt.Errorf("could not generate a unique referral code")
 }

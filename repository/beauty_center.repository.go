@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/Nina-99/yotuvia-api/models"
+	"gorm.io/gorm"
 )
 
 // RankingRow is one rank of the beauty-center leaderboard. Score is the
@@ -74,6 +75,9 @@ type BeautyCenterRepository interface {
 	// Returns transitioned=false when the center was already verified;
 	// referrerID is nil when no referral links the center.
 	VerifyCenter(centerID uint) (transitioned bool, referrerID *uint, err error)
+	// MarkWelcomeBonusPaidTx flips welcome_bonus_paid under a guard (false →
+	// true) inside the caller's transaction. false means it was already paid.
+	MarkWelcomeBonusPaidTx(tx *gorm.DB, centerID uint) (bool, error)
 	// FindRanking returns beauty centers ranked by a composite score within
 	// the given time window. from is nil for all-time ranking.
 	FindRanking(from *time.Time, limit int) ([]RankingRow, error)

@@ -12,21 +12,24 @@ type BeautyCenter struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 
-	Name         string  `gorm:"size:50;not null" json:"name"`
-	Address      string  `gorm:"size:255" json:"address"`
-	Email        string  `gorm:"size:70;not null;uniqueIndex" json:"email"`
-	Phone        string  `gorm:"size:20;not null" json:"phone"`
-	Url          string  `gorm:"unique_index" json:"url"`
-	Description  string  `gorm:"size:255" json:"description"`
+	Name        string `gorm:"size:50;not null" json:"name"`
+	Address     string `gorm:"size:255" json:"address"`
+	Email       string `gorm:"size:70;not null;uniqueIndex" json:"email"`
+	Phone       string `gorm:"size:20;not null" json:"phone"`
+	Url         string `gorm:"unique_index" json:"url"`
+	Description string `gorm:"size:255" json:"description"`
 	// Per-locale overrides; reads resolve by `lang` with fallback to the base.
 	NameI18n        map[string]string `gorm:"serializer:json" json:"name_i18n,omitempty"`
 	DescriptionI18n map[string]string `gorm:"serializer:json" json:"description_i18n,omitempty"`
-	Latitude     float64 `gorm:"default:0;index:idx_bc_location" json:"latitude"`
-	Longitude    float64 `gorm:"default:0;index:idx_bc_location,priority:2" json:"longitude"`
-	Password     string  `gorm:"size:255" json:"-"`
-	Currency     string  `gorm:"size:3;default:USD" json:"currency"`
-	IsActive     bool    `gorm:"default:true" json:"is_active"`
-	ReferralCode string  `gorm:"size:20;uniqueIndex" json:"referral_code"`
+	Latitude        float64           `gorm:"default:0;index:idx_bc_location" json:"latitude"`
+	Longitude       float64           `gorm:"default:0;index:idx_bc_location,priority:2" json:"longitude"`
+	Password        string            `gorm:"size:255" json:"-"`
+	Currency        string            `gorm:"size:3;default:USD" json:"currency"`
+	IsActive        bool              `gorm:"default:true" json:"is_active"`
+	ReferralCode    string            `gorm:"size:20;uniqueIndex" json:"referral_code"`
+	// WelcomeBonusPaid guards the one-time verification welcome bonus: the flag
+	// flips in the same transaction as the credit, so it can never pay twice.
+	WelcomeBonusPaid bool `gorm:"default:false" json:"-"`
 
 	// VerifiedAt stamps platform-ops verification of the center's business
 	// documentation (feat-token-missions D5). NULL = pending verification;

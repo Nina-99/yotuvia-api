@@ -206,6 +206,11 @@ func TestTrigger_ReferralVerification(t *testing.T) {
 	referral := &models.Referral{ReferrerID: 1, ReferredID: 2, Status: "pending"}
 	assert.NoError(t, db.Create(referral).Error)
 
+	// Verification now requires a complete profile.
+	for _, id := range []uint{1, 2, 3} {
+		completeCenterProfile(t, db, id)
+	}
+
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	svc := service.NewBeautyCenterServiceImpl(centerRepo, missionSvc, validator.New(), nil)
 

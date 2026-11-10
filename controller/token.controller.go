@@ -259,6 +259,18 @@ func (c *TokenController) ClaimMission(ctx *gin.Context) {
 		return
 	}
 
+	// Reward integrity: unbacked mission rewards are only claimable once the
+	// platform has validated the center. Fake/unverified centers cannot farm them.
+	center, err := c.centerRepo.FindByID(centerID.(uint))
+	if err != nil || center == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "beauty center not found"})
+		return
+	}
+	if center.VerifiedAt == nil {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "center must be verified to claim rewards"})
+		return
+	}
+
 	missionID, err := strconv.Atoi(ctx.Param("id"))
 	if err != nil || missionID <= 0 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid mission ID"})

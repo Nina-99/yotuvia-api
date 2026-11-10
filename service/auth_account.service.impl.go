@@ -315,6 +315,25 @@ func (s *AuthAccountServiceImpl) tryLoginAllTypes(identifier, password string) (
 //  REGISTER
 // ──────────────────────────────────────────────
 
+// generateUniqueReferralCode retries the random generator until it finds a code
+// no center owns, so the unique index is a safety net, not the failure path.
+func (s *AuthAccountServiceImpl) generateUniqueReferralCode() (string, error) {
+	for i := 0; i < 10; i++ {
+		code, err := utils.GenerateReferralCode()
+		if err != nil {
+			return "", err
+		}
+		existing, err := s.CenterRepo.FindByReferralCode(code)
+		if err != nil {
+			return "", err
+		}
+		if existing == nil {
+			return code, nil
+		}
+	}
+	return "", errors.New("failed to generate a unique referral code")
+}
+
 func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResult, error) {
 	if err := s.Validate.Struct(req); err != nil {
 		return AuthResult{}, fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
@@ -402,10 +421,10 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		if existingEmail != nil {
 			return AuthResult{}, apperrors.ErrEmailTaken
 		}
-		// Generate unique referral code
-		refCode, err := utils.GenerateReferralCode()
+		// Generate a collision-safe unique referral code
+		refCode, err := s.generateUniqueReferralCode()
 		if err != nil {
-			return AuthResult{}, errors.New("failed to generate referral code")
+			return AuthResult{}, err
 		}
 		center := models.BeautyCenter{
 			Name:         req.FirstName,
@@ -431,17 +450,6 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		username = center.Name
 		firstName = center.Name
 		lastName = ""
-
-		// ── Welcome bonus: 25 free Ytv ──
-		if s.TokenAccountSvc != nil {
-			if _, err := s.TokenAccountSvc.GetOrCreate(center.ID, center.Currency); err != nil {
-				utils.Log.Errorf("[AUTH] Failed to create token account for center %d: %v", center.ID, err)
-			} else if err := s.TokenAccountSvc.AddTokens(center.ID, utils.ToMilli(25), "bonus", 0, "Welcome bonus: 25 free Ytv"); err != nil {
-				utils.Log.Errorf("[AUTH] Failed to add welcome Ytv for center %d: %v", center.ID, err)
-			} else {
-				utils.Log.Infof("[AUTH] Welcome bonus: 25 Ytv credited to center %d", center.ID)
-			}
-		}
 
 	default:
 		return AuthResult{}, errors.New("invalid user type")
@@ -564,10 +572,15 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (Au
 		newAccount.PersonnelID = &personnel.ID
 
 	case "beauty_center":
+		refCode, err := s.generateUniqueReferralCode()
+		if err != nil {
+			return AuthResult{}, err
+		}
 		center := models.BeautyCenter{
-			Name:     firstName + " " + lastName,
-			Email:    email,
-			IsActive: false,
+			Name:         firstName + " " + lastName,
+			Email:        email,
+			IsActive:     false,
+			ReferralCode: refCode,
 			BeautyCenterImage: []models.BeautyCenterImage{
 				{
 					ImageUrl: picture,

@@ -41,7 +41,8 @@ func PlatformRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 		repository.NewReferralRepositoryImpl(db), centerRepo, nil, accountRepo,
 	)
 	beautyCenterSvc := service.NewBeautyCenterServiceImpl(
-		centerRepo, missionSvc, validate, repository.NewTimeBlockRepositoryImpl(db), referralSvc,
+		centerRepo, missionSvc, validate, repository.NewTimeBlockRepositoryImpl(db),
+		service.BeautyCenterDeps{ReferralService: referralSvc, TokenAccountRepo: accountRepo},
 	)
 	ctrl := controller.NewPlatformController(accountSvc, topUpRepo, centerRepo, paymentSvc, uploadCtrl, beautyCenterSvc)
 

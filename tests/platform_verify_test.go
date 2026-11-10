@@ -24,6 +24,7 @@ func TestPlatformVerifyCenter_CreditsReferralOnce(t *testing.T) {
 
 	require.NoError(t, db.Create(&models.TokenAccount{BeautyCenterID: 1, Balance: 0, Currency: "BOB"}).Error)
 	require.NoError(t, db.Create(&models.TokenAccount{BeautyCenterID: 2, Balance: 0, Currency: "BOB"}).Error)
+	completeCenterProfile(t, db, 2)
 	require.NoError(t, db.Create(&models.Referral{
 		ReferrerID: 1, ReferredID: 2, Status: "pending",
 		RewardReferrer: 20_000, RewardReferred: 10_000,
@@ -34,13 +35,14 @@ func TestPlatformVerifyCenter_CreditsReferralOnce(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	assert.Equal(t, int64(20_000), balanceOf(t, accountRepo, 1))
-	assert.Equal(t, int64(10_000), balanceOf(t, accountRepo, 2))
+	// Referred center: 10 Ytv referral + 25 Ytv one-time welcome bonus.
+	assert.Equal(t, int64(35_000), balanceOf(t, accountRepo, 2))
 
 	// Idempotent: a second verification answers 200 and moves nothing.
 	w = do(r, http.MethodPut, "/api/admin/platform/centers/2/verify", token, "")
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, int64(20_000), balanceOf(t, accountRepo, 1))
-	assert.Equal(t, int64(10_000), balanceOf(t, accountRepo, 2))
+	assert.Equal(t, int64(35_000), balanceOf(t, accountRepo, 2))
 
 	var referral models.Referral
 	require.NoError(t, db.First(&referral).Error)

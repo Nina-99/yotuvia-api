@@ -14,7 +14,13 @@ import (
 	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
 )
+
+type BeautyCenterDeps struct {
+	ReferralService  ReferralService
+	TokenAccountRepo repository.TokenAccountRepository
+}
 
 type BeautyCenterServiceImpl struct {
 	repo           repository.BeautyCenterRepository
@@ -26,19 +32,23 @@ type BeautyCenterServiceImpl struct {
 	// referralService credits pending referrals when a center is verified.
 	// OPTIONAL: nil skips referral crediting (mission trigger still runs).
 	referralService ReferralService
+	// accountRepo pays the one-time welcome bonus at verification.
+	// OPTIONAL: nil skips the bonus.
+	accountRepo repository.TokenAccountRepository
 }
 
-func NewBeautyCenterServiceImpl(repo repository.BeautyCenterRepository, missionService TokenMissionService, validate *validator.Validate, timeBlockRepo repository.TimeBlockRepository, referralSvc ...ReferralService) BeautyCenterService {
-	var referral ReferralService
-	if len(referralSvc) > 0 {
-		referral = referralSvc[0]
+func NewBeautyCenterServiceImpl(repo repository.BeautyCenterRepository, missionService TokenMissionService, validate *validator.Validate, timeBlockRepo repository.TimeBlockRepository, deps ...BeautyCenterDeps) BeautyCenterService {
+	var d BeautyCenterDeps
+	if len(deps) > 0 {
+		d = deps[0]
 	}
 	return &BeautyCenterServiceImpl{
 		repo:            repo,
 		missionService:  missionService,
 		Validate:        validate,
 		timeBlockRepo:   timeBlockRepo,
-		referralService: referral,
+		referralService: d.ReferralService,
+		accountRepo:     d.TokenAccountRepo,
 	}
 }
 
@@ -225,17 +235,40 @@ func (s *BeautyCenterServiceImpl) Update(id, actorCenterID uint, req request.Upd
 // mission best-effort after the transition commits. Idempotent: already
 // verified centers return without side effects.
 func (s *BeautyCenterServiceImpl) MarkVerified(id uint) error {
+	center, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	if center == nil {
+		return apperrors.ErrNotFound
+	}
+
+	// Validate the information BEFORE the first verification. Re-verifying an
+	// already-verified center skips the checklist so later edits never unverify.
+	if center.VerifiedAt == nil {
+		complete, err := s.profileComplete(center)
+		if err != nil {
+			return err
+		}
+		if !complete {
+			return fmt.Errorf("%w: complete the center profile before verification", apperrors.ErrValidation)
+		}
+	}
+
+	// Pay the one-time welcome bonus BEFORE stamping verification: if the credit
+	// fails the center stays unverified and the admin can retry.
+	if err := s.creditWelcomeBonus(center); err != nil {
+		return err
+	}
+
 	transitioned, referrerID, err := s.repo.VerifyCenter(id)
 	if err != nil {
 		return err
 	}
-	if !transitioned {
-		return nil
-	}
 
 	// Credit the referral exactly once, atomically, when the referred center is
-	// verified. Best-effort: a credit failure logs and leaves it pending for a
-	// retry; verification itself already committed.
+	// verified. ProcessReferralReward is idempotent, so a retry after a transient
+	// failure can still pay it.
 	if s.referralService != nil {
 		if err := s.referralService.ProcessReferralReward(id); err != nil {
 			utils.Log.Errorf("[REFERRAL] credit failed for verified center %d: %v", id, err)
@@ -243,12 +276,44 @@ func (s *BeautyCenterServiceImpl) MarkVerified(id uint) error {
 	}
 
 	// The referrer's mission fires on the same transition, exactly once.
-	if referrerID != nil && s.missionService != nil {
+	if transitioned && referrerID != nil && s.missionService != nil {
 		if err := s.missionService.TriggerCheck(*referrerID, "referral"); err != nil {
 			utils.Log.Errorf("[MISSION] referral trigger failed for referrer %d: %v", *referrerID, err)
 		}
 	}
 	return nil
+}
+
+// creditWelcomeBonus pays the 25 Ytv welcome bonus exactly once, guarded by
+// welcome_bonus_paid in the same transaction as the ledger credit.
+func (s *BeautyCenterServiceImpl) creditWelcomeBonus(center *models.BeautyCenter) error {
+	if s.accountRepo == nil || center.WelcomeBonusPaid {
+		return nil
+	}
+
+	account, err := s.accountRepo.FindByBeautyCenterID(center.ID)
+	if err != nil {
+		return err
+	}
+	if account == nil {
+		account = &models.TokenAccount{BeautyCenterID: center.ID, Currency: center.Currency}
+		if err := s.accountRepo.Create(account); err != nil {
+			return err
+		}
+	}
+
+	return s.accountRepo.Transaction(func(tx *gorm.DB) error {
+		claimed, err := s.repo.MarkWelcomeBonusPaidTx(tx, center.ID)
+		if err != nil {
+			return err
+		}
+		if !claimed {
+			return nil // already paid
+		}
+		_, err = s.accountRepo.AddTokensInTx(tx, account.ID, utils.ToMilli(25),
+			"bonus", "Welcome bonus: 25 free Ytv", nil)
+		return err
+	})
 }
 
 // Delete implements BeautyCenterService. Ownership is enforced against the

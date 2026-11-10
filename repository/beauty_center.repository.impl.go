@@ -366,6 +366,18 @@ func (r *BeautyCenterRepositoryImpl) HasImages(centerID uint) (bool, error) {
 	return count > 0, err
 }
 
+// MarkWelcomeBonusPaidTx flips welcome_bonus_paid exactly once, in the caller's
+// transaction, so the welcome credit and its guard commit together.
+func (r *BeautyCenterRepositoryImpl) MarkWelcomeBonusPaidTx(tx *gorm.DB, centerID uint) (bool, error) {
+	res := tx.Model(&models.BeautyCenter{}).
+		Where("id = ? AND welcome_bonus_paid = ?", centerID, false).
+		Update("welcome_bonus_paid", true)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
 // VerifyCenter stamps verified_at on the first verification (NULL → set) and
 // resolves the referrer from an active referral row in the same transaction.
 // Already-verified centers return transitioned=false without touching data;

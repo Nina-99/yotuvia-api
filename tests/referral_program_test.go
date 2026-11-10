@@ -153,6 +153,7 @@ func TestReferral_FailedCreditLeavesPending(t *testing.T) {
 func TestBeautyCenter_MarkVerifiedCreditsReferral(t *testing.T) {
 	svc, db, accountRepo := referralSUT(t)
 	seedReferralAccounts(t, db, 1, 2)
+	completeCenterProfile(t, db, 2)
 	require.NoError(t, svc.CreateReferralByCode(2, "REF001"))
 
 	centerSvc := service.NewBeautyCenterServiceImpl(
@@ -160,7 +161,7 @@ func TestBeautyCenter_MarkVerifiedCreditsReferral(t *testing.T) {
 		nil, // mission engine not needed here
 		validator.New(),
 		nil,
-		svc,
+		service.BeautyCenterDeps{ReferralService: svc},
 	)
 	require.NoError(t, centerSvc.MarkVerified(2))
 

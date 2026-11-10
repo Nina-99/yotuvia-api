@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Nina-99/yotuvia-api/models"
@@ -40,6 +41,9 @@ func NewReferralServiceImpl(
 }
 
 func (s *ReferralServiceImpl) CreateReferralByCode(enteredByCenterID uint, code string) error {
+	// Codes are uppercase; normalize user input so lowercase/space input works.
+	code = strings.ToUpper(strings.TrimSpace(code))
+
 	// Resolve code to the referrer (owner of the code)
 	referrer, err := s.centerRepo.FindByReferralCode(code)
 	if err != nil {

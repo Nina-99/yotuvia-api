@@ -95,6 +95,7 @@ func DBConnection() {
 
 	SeedDefaultMissions()
 	SeedMarketConfigs()
+	BackfillReferralCodes()
 	SeedTreatmentTaxonomy()
 	BackfillLegacyVideos()
 	SeedDemoCenters()
