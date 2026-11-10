@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Nina-99/yotuvia-api/apperrors"
+	"github.com/Nina-99/yotuvia-api/data/request"
 	"github.com/Nina-99/yotuvia-api/models"
 	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/Nina-99/yotuvia-api/service"
@@ -60,4 +61,25 @@ func TestMarkVerified_PaysWelcomeBonusOnce(t *testing.T) {
 	require.NoError(t, db.First(&center, 1).Error)
 	assert.NotNil(t, center.VerifiedAt)
 	assert.True(t, center.WelcomeBonusPaid)
+	assert.True(t, center.IsActive, "verification activates the center")
+}
+
+// TestBeautyCenter_UnverifiedCannotActivate — flipping is_active on an
+// unverified center is rejected, so a fake center cannot publish itself.
+func TestBeautyCenter_UnverifiedCannotActivate(t *testing.T) {
+	utils.Log = zap.NewNop().Sugar()
+	db := setupRouterAuthzDB(t)
+	seedDashboardCenter(t, db, 1, "Inactive Center", "inactive@test.com", false)
+
+	svc := service.NewBeautyCenterServiceImpl(
+		repository.NewBeautyCenterRepositoryImpl(db), nil, validator.New(), nil,
+	)
+
+	active := true
+	_, err := svc.Update(1, 1, request.UpdateBeautyCenterRequest{IsActive: &active})
+	assert.ErrorIs(t, err, apperrors.ErrValidation)
+
+	var center models.BeautyCenter
+	require.NoError(t, db.First(&center, 1).Error)
+	assert.False(t, center.IsActive)
 }

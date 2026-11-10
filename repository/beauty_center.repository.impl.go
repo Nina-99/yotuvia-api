@@ -388,7 +388,10 @@ func (r *BeautyCenterRepositoryImpl) VerifyCenter(centerID uint) (bool, *uint, e
 	err := r.db.Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&models.BeautyCenter{}).
 			Where("id = ? AND verified_at IS NULL", centerID).
-			Update("verified_at", time.Now().UTC())
+			Updates(map[string]interface{}{
+				"verified_at": time.Now().UTC(),
+				"is_active":   true,
+			})
 		if res.Error != nil {
 			return res.Error
 		}

@@ -52,6 +52,11 @@ func (s *ReferralServiceImpl) CreateReferralByCode(enteredByCenterID uint, code 
 	if referrer == nil {
 		return errors.New("invalid referral code")
 	}
+	// Only validated centers can refer; fake/unverified centers cannot farm the
+	// referral program.
+	if referrer.VerifiedAt == nil {
+		return errors.New("referrer is not verified")
+	}
 
 	// The center entering a code is the referred
 	referredID := enteredByCenterID

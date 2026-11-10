@@ -29,8 +29,11 @@ func referralSUT(t *testing.T) (service.ReferralService, *gorm.DB, repository.To
 
 func seedReferralAccounts(t *testing.T, db *gorm.DB, centerIDs ...uint) {
 	t.Helper()
+	now := time.Now().UTC()
 	for _, id := range centerIDs {
 		seedDashboardCenter(t, db, id, fmt.Sprintf("Center %d", id), fmt.Sprintf("c%d@test.com", id), true)
+		require.NoError(t, db.Model(&models.BeautyCenter{}).Where("id = ?", id).
+			Update("verified_at", now).Error)
 		require.NoError(t, db.Create(&models.TokenAccount{
 			BeautyCenterID: id, Balance: 0, Currency: "BOB",
 		}).Error)
@@ -146,6 +149,23 @@ func TestReferral_FailedCreditLeavesPending(t *testing.T) {
 	assert.Equal(t, int64(0), balanceOf(t, accountRepo, 1))
 	assert.Equal(t, int64(0), balanceOf(t, accountRepo, 2))
 	assert.Equal(t, int64(0), referralLedgerRows(t, db))
+}
+
+// TestReferral_RequiresVerifiedReferrer — an unverified center cannot generate
+// referral attribution; once verified, the same code works.
+func TestReferral_RequiresVerifiedReferrer(t *testing.T) {
+	svc, db, _ := referralSUT(t)
+	seedDashboardCenter(t, db, 3, "Unverified Referrer", "u3@test.com", true)
+	seedDashboardCenter(t, db, 4, "Referred", "r4@test.com", true)
+
+	err := svc.CreateReferralByCode(4, "REF003")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not verified")
+
+	require.NoError(t, db.Model(&models.BeautyCenter{}).Where("id = ?", 3).
+		Update("verified_at", time.Now().UTC()).Error)
+
+	require.NoError(t, svc.CreateReferralByCode(4, "REF003"))
 }
 
 // TestBeautyCenter_MarkVerifiedCreditsReferral — the verification transition is

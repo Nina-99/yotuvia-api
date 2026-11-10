@@ -124,6 +124,12 @@ func (s *BeautyCenterServiceImpl) Update(id, actorCenterID uint, req request.Upd
 		center.Currency = req.Currency
 	}
 	if req.IsActive != nil {
+		// Visibility is platform-gated: an unverified center cannot publish
+		// itself by flipping is_active. Verification turns it active instead.
+		if *req.IsActive && center.VerifiedAt == nil {
+			return response.BeautyCenterResponse{}, fmt.Errorf(
+				"%w: center must be verified before activation", apperrors.ErrValidation)
+		}
 		center.IsActive = *req.IsActive
 	}
 	if req.Latitude != nil {
