@@ -77,6 +77,53 @@ func balanceMilli(t *testing.T, svc TokenAccountService, centerID uint) int64 {
 	return balance
 }
 
+// TestBoostService_SweepEndedReleasesRemainder — a campaign past its window is
+// closed by the sweep and its unspent hold returns to the wallet.
+func TestBoostService_SweepEndedReleasesRemainder(t *testing.T) {
+	db := setupBoostTestDB(t)
+	createTestCenter(db, 1)
+	tokenSvc := fundCenter(t, db, 1, 100)
+	postID := createFeedPost(t, db, 1)
+	svc := NewBoostServiceImpl(repository.NewBoostCampaignRepositoryImpl(db), repository.NewFeedPostRepositoryImpl(db), tokenSvc, repository.NewTokenAccountRepositoryImpl(db), nil)
+
+	now := time.Now()
+	campaign, err := svc.CreateCampaign(1, postID, utils.ToMilli(20), 1000, now.Add(-2*time.Hour), now.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("CreateCampaign: %v", err)
+	}
+	_, reservedBefore, _, _, err := tokenSvc.GetBalance(1)
+	if err != nil {
+		t.Fatalf("GetBalance: %v", err)
+	}
+	if reservedBefore != utils.ToMilli(20) {
+		t.Fatalf("expected the budget to be held, got %d", reservedBefore)
+	}
+
+	closed, err := svc.SweepEnded(now)
+	if err != nil {
+		t.Fatalf("SweepEnded: %v", err)
+	}
+	if closed != 1 {
+		t.Fatalf("expected one closed campaign, got %d", closed)
+	}
+
+	_, reservedAfter, _, _, err := tokenSvc.GetBalance(1)
+	if err != nil {
+		t.Fatalf("GetBalance: %v", err)
+	}
+	if reservedAfter != 0 {
+		t.Fatalf("unspent hold must be released, got %d", reservedAfter)
+	}
+
+	var stored models.BoostCampaign
+	if err := db.First(&stored, campaign.ID).Error; err != nil {
+		t.Fatalf("load campaign: %v", err)
+	}
+	if stored.Status != BoostStatusEnded || stored.ReleasedMilli != utils.ToMilli(20) {
+		t.Fatalf("campaign must end and release the hold: status=%s released=%d", stored.Status, stored.ReleasedMilli)
+	}
+}
+
 func TestBoostService_CreateReservesBudgetUpFront(t *testing.T) {
 	db := setupBoostTestDB(t)
 	createTestCenter(db, 1)

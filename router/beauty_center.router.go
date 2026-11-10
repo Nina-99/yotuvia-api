@@ -15,6 +15,7 @@ func BeautyCenterRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Va
 	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
 	referralSvc := service.NewReferralServiceImpl(
 		repository.NewReferralRepositoryImpl(db), repo, nil, accountRepo,
+		service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db)),
 	)
 	svc := service.NewBeautyCenterServiceImpl(repo,
 		service.NewTokenMissionServiceImpl(

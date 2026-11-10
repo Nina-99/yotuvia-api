@@ -19,9 +19,9 @@ type BoostService interface {
 	// hold at the auction price; the campaign is marked `exhausted` once spent
 	// reaches budget.
 	SettleImpressions(campaignID uint, impressions, priceCPMMilli int64) error
-	// SweepEnded releases the remaining hold of campaigns past their window and
-	// marks them ended.
-	SweepEnded(now time.Time) error
+	// SweepEnded releases the remaining hold of campaigns past their window,
+	// marks them ended and returns how many campaigns it closed.
+	SweepEnded(now time.Time) (int, error)
 	// ImpressionToken signs the one-view billing token for a served promoted
 	// slot. The price is inside the signature.
 	ImpressionToken(campaignID uint, priceCPMMilli int64) (string, error)

@@ -15,18 +15,23 @@ type EconomyConfig struct {
 	BoostReserveCapPct    float64
 	BoostReserveCPMMilli  int64
 	BoostQualificationPct float64
+
+	ReferralRewardReferrerMilli int64
+	ReferralRewardReferredMilli int64
 }
 
 // Canonical defaults applied when a currency has no market_config row — the
 // Bolivia launch values (feat-token-economy-config D2).
 var defaultEconomy = EconomyConfig{
-	Currency:              "BOB",
-	YtvToFiatRate:         1.0,
-	CommissionPct:         3.5,
-	MinChargeMilli:        350,
-	BoostReserveCapPct:    0.50,
-	BoostReserveCPMMilli:  1000,
-	BoostQualificationPct: 50,
+	Currency:                    "BOB",
+	YtvToFiatRate:               1.0,
+	CommissionPct:               3.5,
+	MinChargeMilli:              350,
+	BoostReserveCapPct:          0.50,
+	BoostReserveCPMMilli:        1000,
+	BoostQualificationPct:       50,
+	ReferralRewardReferrerMilli: 20_000,
+	ReferralRewardReferredMilli: 10_000,
 }
 
 type MarketConfigService interface {
@@ -54,12 +59,14 @@ func (s *MarketConfigServiceImpl) GetEconomyForCurrency(currency string) Economy
 		return defaultEconomy
 	}
 	return EconomyConfig{
-		Currency:              row.Currency,
-		YtvToFiatRate:         row.YtvToFiatRate,
-		CommissionPct:         row.CommissionPct,
-		MinChargeMilli:        row.MinChargeMilli,
-		BoostReserveCapPct:    row.BoostReserveCapPct,
-		BoostReserveCPMMilli:  row.BoostReserveCPMMilli,
-		BoostQualificationPct: row.BoostQualificationPct,
+		Currency:                    row.Currency,
+		YtvToFiatRate:               row.YtvToFiatRate,
+		CommissionPct:               row.CommissionPct,
+		MinChargeMilli:              row.MinChargeMilli,
+		BoostReserveCapPct:          row.BoostReserveCapPct,
+		BoostReserveCPMMilli:        row.BoostReserveCPMMilli,
+		BoostQualificationPct:       row.BoostQualificationPct,
+		ReferralRewardReferrerMilli: row.ReferralRewardReferrerMilli,
+		ReferralRewardReferredMilli: row.ReferralRewardReferredMilli,
 	}
 }

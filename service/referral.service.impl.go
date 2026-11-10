@@ -20,10 +20,11 @@ const (
 )
 
 type ReferralServiceImpl struct {
-	referralRepo repository.ReferralRepository
-	centerRepo   repository.BeautyCenterRepository
-	accountSvc   TokenAccountService
-	accountRepo  repository.TokenAccountRepository
+	referralRepo    repository.ReferralRepository
+	centerRepo      repository.BeautyCenterRepository
+	accountSvc      TokenAccountService
+	accountRepo     repository.TokenAccountRepository
+	marketConfigSvc MarketConfigService
 }
 
 func NewReferralServiceImpl(
@@ -31,12 +32,18 @@ func NewReferralServiceImpl(
 	centerRepo repository.BeautyCenterRepository,
 	accountSvc TokenAccountService,
 	accountRepo repository.TokenAccountRepository,
+	marketConfigSvc ...MarketConfigService,
 ) ReferralService {
+	var market MarketConfigService
+	if len(marketConfigSvc) > 0 {
+		market = marketConfigSvc[0]
+	}
 	return &ReferralServiceImpl{
-		referralRepo: referralRepo,
-		centerRepo:   centerRepo,
-		accountSvc:   accountSvc,
-		accountRepo:  accountRepo,
+		referralRepo:    referralRepo,
+		centerRepo:      centerRepo,
+		accountSvc:      accountSvc,
+		accountRepo:     accountRepo,
+		marketConfigSvc: market,
 	}
 }
 
@@ -84,12 +91,29 @@ func (s *ReferralServiceImpl) CreateReferralByCode(enteredByCenterID uint, code 
 		return errors.New("referrer's monthly referral limit reached (max 10)")
 	}
 
+	// Snapshot the configured rewards for the referrer's currency. Storing them
+	// on the row means a later config change never rewrites an in-flight referral.
+	rewardReferrer, rewardReferred := referralRewardReferrer, referralRewardReferred
+	if s.marketConfigSvc != nil {
+		currency := referrer.Currency
+		if currency == "" {
+			currency = defaultEconomy.Currency
+		}
+		economy := s.marketConfigSvc.GetEconomyForCurrency(currency)
+		if economy.ReferralRewardReferrerMilli > 0 {
+			rewardReferrer = economy.ReferralRewardReferrerMilli
+		}
+		if economy.ReferralRewardReferredMilli > 0 {
+			rewardReferred = economy.ReferralRewardReferredMilli
+		}
+	}
+
 	referral := &models.Referral{
 		ReferrerID:     referrer.ID,
 		ReferredID:     referredID,
 		Status:         "pending",
-		RewardReferrer: referralRewardReferrer,
-		RewardReferred: referralRewardReferred,
+		RewardReferrer: rewardReferrer,
+		RewardReferred: rewardReferred,
 	}
 
 	// Entry only records the pending referral. Rewards are credited when the

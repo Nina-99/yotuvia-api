@@ -368,19 +368,21 @@ func (s *BoostServiceImpl) SettleImpression(viewerID uint, token string, watchPe
 // SweepEnded releases the remaining hold of campaigns whose window closed and
 // marks them ended. It is idempotent: those rows leave the active/paused set on
 // the first pass.
-func (s *BoostServiceImpl) SweepEnded(now time.Time) error {
+func (s *BoostServiceImpl) SweepEnded(now time.Time) (int, error) {
 	expired, err := s.repo.FindExpired(now)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	closed := 0
 	for i := range expired {
 		campaign := &expired[i]
 		campaign.Status = BoostStatusEnded
 		if err := s.releaseAndUpdate(campaign); err != nil {
-			return err
+			return closed, err
 		}
+		closed++
 	}
-	return nil
+	return closed, nil
 }
 
 func (s *BoostServiceImpl) ListByCenter(centerID uint) ([]models.BoostCampaign, error) {
@@ -394,7 +396,7 @@ func (s *BoostServiceImpl) SelectWinners(now time.Time, slots int, reserveCPMMil
 	}
 	// Release closed campaigns before auctioning so their hold returns to the
 	// center. Best-effort: an auction must not fail because a sweep did.
-	_ = s.SweepEnded(now)
+	_, _ = s.SweepEnded(now)
 
 	// Reserve price: the caller may pass an explicit floor; when it does not, the
 	// configured per-currency floor applies (BOB launch default). The auction is

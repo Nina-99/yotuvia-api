@@ -168,6 +168,34 @@ func TestReferral_RequiresVerifiedReferrer(t *testing.T) {
 	require.NoError(t, svc.CreateReferralByCode(4, "REF003"))
 }
 
+// TestReferral_RewardsComeFromMarketConfig — the 20/10 defaults are replaced by
+// the referrer currency's configured values and snapshotted on the row.
+func TestReferral_RewardsComeFromMarketConfig(t *testing.T) {
+	_, db, _ := referralSUT(t)
+	seedReferralAccounts(t, db, 1, 2)
+	if err := db.Create(&models.MarketConfig{
+		Currency:                    "USD",
+		ReferralRewardReferrerMilli: 30_000,
+		ReferralRewardReferredMilli: 15_000,
+	}).Error; err != nil {
+		t.Fatalf("seed market config: %v", err)
+	}
+
+	svc := service.NewReferralServiceImpl(
+		repository.NewReferralRepositoryImpl(db),
+		repository.NewBeautyCenterRepositoryImpl(db),
+		nil,
+		repository.NewTokenAccountRepositoryImpl(db),
+		service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db)),
+	)
+	require.NoError(t, svc.CreateReferralByCode(2, "REF001"))
+
+	var referral models.Referral
+	require.NoError(t, db.First(&referral).Error)
+	assert.Equal(t, int64(30_000), referral.RewardReferrer)
+	assert.Equal(t, int64(15_000), referral.RewardReferred)
+}
+
 // TestReferral_ExpirePendingBefore — stale pending referrals are expired and
 // stop counting against the monthly cap.
 func TestReferral_ExpirePendingBefore(t *testing.T) {

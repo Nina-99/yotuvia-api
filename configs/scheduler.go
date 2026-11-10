@@ -35,6 +35,7 @@ type schedulerSweeps struct {
 	expireHolds      func(now time.Time) (int, error)
 	sweepOffers      func(now time.Time) (int, error)
 	expireReferrals  func(now time.Time) (int64, error)
+	sweepBoosts      func(now time.Time) (int, error)
 }
 
 // runSchedulerTick executes all four sweeps for one tick. Every sweep stays
@@ -66,6 +67,11 @@ func runSchedulerTick(s schedulerSweeps, now time.Time) {
 		utils.Log.Errorf("[SCHEDULER] referral expiry failed: %v", err)
 	} else if n > 0 {
 		utils.Log.Infof("[SCHEDULER] expired %d pending referrals", n)
+	}
+	if n, err := s.sweepBoosts(now); err != nil {
+		utils.Log.Errorf("[SCHEDULER] boost sweep failed: %v", err)
+	} else if n > 0 {
+		utils.Log.Infof("[SCHEDULER] closed %d expired boost campaigns", n)
 	}
 }
 
@@ -127,6 +133,22 @@ func StartBackgroundScheduler(db *gorm.DB) {
 		validate,
 	)
 
+	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
+	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
+	missionSvc := service.NewTokenMissionServiceImpl(
+		repository.NewTokenMissionRepositoryImpl(db), nil, accountRepo,
+	)
+	accountSvc := service.NewTokenAccountServiceImpl(
+		accountRepo, repository.NewTokenTopUpRepositoryImpl(db), centerRepo, missionSvc, notifSvc,
+	)
+	boostSvc := service.NewBoostServiceImpl(
+		repository.NewBoostCampaignRepositoryImpl(db),
+		repository.NewFeedPostRepositoryImpl(db),
+		accountSvc,
+		accountRepo,
+		service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db)),
+	)
+
 	sweeps := schedulerSweeps{
 		sendDueReminders: reservationSvc.SendDueReminders,
 		sweepNoShows:     reservationSvc.SweepNoShows,
@@ -136,6 +158,7 @@ func StartBackgroundScheduler(db *gorm.DB) {
 			cutoff := now.AddDate(0, 0, -referralExpiryDays())
 			return repository.NewReferralRepositoryImpl(db).ExpirePendingBefore(cutoff)
 		},
+		sweepBoosts: boostSvc.SweepEnded,
 	}
 
 	go func() {

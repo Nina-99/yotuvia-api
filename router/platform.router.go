@@ -39,6 +39,7 @@ func PlatformRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 	uploadCtrl := controller.NewUploadController()
 	referralSvc := service.NewReferralServiceImpl(
 		repository.NewReferralRepositoryImpl(db), centerRepo, nil, accountRepo,
+		service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db)),
 	)
 	beautyCenterSvc := service.NewBeautyCenterServiceImpl(
 		centerRepo, missionSvc, validate, repository.NewTimeBlockRepositoryImpl(db),

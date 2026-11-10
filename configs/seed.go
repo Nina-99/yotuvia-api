@@ -177,13 +177,15 @@ func SeedMarketConfigs() {
 		// Bolivia — launch market. 1 Ytv = 1 BOB; commission 3.5%;
 		// floor 0.35 Ytv (= commission of a 10 BOB reference ticket).
 		{
-			Currency:              "BOB",
-			YtvToFiatRate:         1.0,
-			CommissionPct:         3.5,
-			MinChargeMilli:        350,
-			BoostReserveCapPct:    0.50,
-			BoostReserveCPMMilli:  1000,
-			BoostQualificationPct: 50,
+			Currency:                    "BOB",
+			YtvToFiatRate:               1.0,
+			CommissionPct:               3.5,
+			MinChargeMilli:              350,
+			BoostReserveCapPct:          0.50,
+			BoostReserveCPMMilli:        1000,
+			BoostQualificationPct:       50,
+			ReferralRewardReferrerMilli: 20_000,
+			ReferralRewardReferredMilli: 10_000,
 		},
 	}
 
@@ -202,14 +204,18 @@ func SeedMarketConfigs() {
 			existing.MinChargeMilli != cfg.MinChargeMilli ||
 			existing.BoostReserveCapPct != cfg.BoostReserveCapPct ||
 			existing.BoostReserveCPMMilli != cfg.BoostReserveCPMMilli ||
-			existing.BoostQualificationPct != cfg.BoostQualificationPct {
+			existing.BoostQualificationPct != cfg.BoostQualificationPct ||
+			existing.ReferralRewardReferrerMilli != cfg.ReferralRewardReferrerMilli ||
+			existing.ReferralRewardReferredMilli != cfg.ReferralRewardReferredMilli {
 			if err := DB.Model(&existing).Updates(map[string]interface{}{
-				"ytv_to_fiat_rate":        cfg.YtvToFiatRate,
-				"commission_pct":          cfg.CommissionPct,
-				"min_charge_milli":        cfg.MinChargeMilli,
-				"boost_reserve_cap_pct":   cfg.BoostReserveCapPct,
-				"boost_reserve_cpm_milli": cfg.BoostReserveCPMMilli,
-				"boost_qualification_pct": cfg.BoostQualificationPct,
+				"ytv_to_fiat_rate":               cfg.YtvToFiatRate,
+				"commission_pct":                 cfg.CommissionPct,
+				"min_charge_milli":               cfg.MinChargeMilli,
+				"boost_reserve_cap_pct":          cfg.BoostReserveCapPct,
+				"boost_reserve_cpm_milli":        cfg.BoostReserveCPMMilli,
+				"boost_qualification_pct":        cfg.BoostQualificationPct,
+				"referral_reward_referrer_milli": cfg.ReferralRewardReferrerMilli,
+				"referral_reward_referred_milli": cfg.ReferralRewardReferredMilli,
 			}).Error; err != nil {
 				utils.Log.Errorf("[SEED] Failed to heal market config %s: %v", cfg.Currency, err)
 			} else {

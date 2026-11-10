@@ -35,4 +35,8 @@ type MarketConfig struct {
 	// BoostQualificationPct is the watch threshold that makes an impression
 	// billable (50 = the recommender's signal).
 	BoostQualificationPct float64 `gorm:"default:50" json:"boost_qualification_pct"`
+
+	// Referral rewards, in milli-Ytv, snapshot on each referral row at creation.
+	ReferralRewardReferrerMilli int64 `gorm:"default:20000" json:"referral_reward_referrer_milli"`
+	ReferralRewardReferredMilli int64 `gorm:"default:10000" json:"referral_reward_referred_milli"`
 }
