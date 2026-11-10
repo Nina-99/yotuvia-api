@@ -16,6 +16,17 @@ import (
 // striking a no-show (client may be paying at the desk).
 const noShowGraceMinutes = 30
 
+// referralExpiryDays is how long a pending referral waits for the referred
+// center to verify before it expires and frees the monthly slot.
+func referralExpiryDays() int {
+	if raw := os.Getenv("REFERRAL_EXPIRY_DAYS"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 30
+}
+
 // schedulerSweeps is the per-tick maintenance work, expressed as functions so
 // the tick is testable without a live scheduler or a full service graph.
 type schedulerSweeps struct {
@@ -23,6 +34,7 @@ type schedulerSweeps struct {
 	sweepNoShows     func(now time.Time, graceMinutes int) (int, error)
 	expireHolds      func(now time.Time) (int, error)
 	sweepOffers      func(now time.Time) (int, error)
+	expireReferrals  func(now time.Time) (int64, error)
 }
 
 // runSchedulerTick executes all four sweeps for one tick. Every sweep stays
@@ -49,6 +61,11 @@ func runSchedulerTick(s schedulerSweeps, now time.Time) {
 		utils.Log.Errorf("[SCHEDULER] offer sweep failed: %v", err)
 	} else if n > 0 {
 		utils.Log.Infof("[SCHEDULER] passed on %d expired offers", n)
+	}
+	if n, err := s.expireReferrals(now); err != nil {
+		utils.Log.Errorf("[SCHEDULER] referral expiry failed: %v", err)
+	} else if n > 0 {
+		utils.Log.Infof("[SCHEDULER] expired %d pending referrals", n)
 	}
 }
 
@@ -115,6 +132,10 @@ func StartBackgroundScheduler(db *gorm.DB) {
 		sweepNoShows:     reservationSvc.SweepNoShows,
 		expireHolds:      reservationSvc.ExpireHolds,
 		sweepOffers:      waitlistSvc.SweepExpiredOffers,
+		expireReferrals: func(now time.Time) (int64, error) {
+			cutoff := now.AddDate(0, 0, -referralExpiryDays())
+			return repository.NewReferralRepositoryImpl(db).ExpirePendingBefore(cutoff)
+		},
 	}
 
 	go func() {

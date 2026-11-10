@@ -47,9 +47,10 @@ func TestRunSchedulerTick_RunsAllFourSweeps(t *testing.T) {
 		sweepNoShows:     func(time.Time, int) (int, error) { calls = append(calls, "no-shows"); return 0, nil },
 		expireHolds:      func(time.Time) (int, error) { calls = append(calls, "holds"); return 0, nil },
 		sweepOffers:      func(time.Time) (int, error) { calls = append(calls, "offers"); return 0, nil },
+		expireReferrals:  func(time.Time) (int64, error) { calls = append(calls, "referrals"); return 0, nil },
 	}, time.Now())
 
-	assert.Equal(t, []string{"reminders", "no-shows", "holds", "offers"}, calls)
+	assert.Equal(t, []string{"reminders", "no-shows", "holds", "offers", "referrals"}, calls)
 }
 
 // TestRunSchedulerTick_FailingSweepDoesNotStopTheRest is the best-effort
@@ -64,6 +65,7 @@ func TestRunSchedulerTick_FailingSweepDoesNotStopTheRest(t *testing.T) {
 		sweepNoShows:     func(time.Time, int) (int, error) { noShowRan = true; return 0, errors.New("boom") },
 		expireHolds:      func(time.Time) (int, error) { holdsRan = true; return 0, nil },
 		sweepOffers:      func(time.Time) (int, error) { offersRan = true; return 0, nil },
+		expireReferrals:  func(time.Time) (int64, error) { return 0, nil },
 	}, time.Now())
 
 	assert.True(t, noShowRan, "no-show sweep must still run after a failed reminder sweep")

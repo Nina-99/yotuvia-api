@@ -168,6 +168,32 @@ func TestReferral_RequiresVerifiedReferrer(t *testing.T) {
 	require.NoError(t, svc.CreateReferralByCode(4, "REF003"))
 }
 
+// TestReferral_ExpirePendingBefore — stale pending referrals are expired and
+// stop counting against the monthly cap.
+func TestReferral_ExpirePendingBefore(t *testing.T) {
+	_, db, _ := referralSUT(t)
+	seedDashboardCenter(t, db, 1, "Referrer", "r1@test.com", true)
+	seedDashboardCenter(t, db, 2, "Old Referred", "r2@test.com", true)
+	seedDashboardCenter(t, db, 3, "Fresh Referred", "r3@test.com", true)
+
+	old := &models.Referral{ReferrerID: 1, ReferredID: 2, Status: "pending"}
+	fresh := &models.Referral{ReferrerID: 1, ReferredID: 3, Status: "pending"}
+	require.NoError(t, db.Create(old).Error)
+	require.NoError(t, db.Create(fresh).Error)
+	require.NoError(t, db.Model(old).Update("created_at", time.Now().UTC().AddDate(0, 0, -31)).Error)
+
+	repo := repository.NewReferralRepositoryImpl(db)
+	n, err := repo.ExpirePendingBefore(time.Now().UTC().AddDate(0, 0, -30))
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
+
+	var storedOld, storedFresh models.Referral
+	require.NoError(t, db.First(&storedOld, old.ID).Error)
+	require.NoError(t, db.First(&storedFresh, fresh.ID).Error)
+	assert.Equal(t, "expired", storedOld.Status)
+	assert.Equal(t, "pending", storedFresh.Status)
+}
+
 // TestBeautyCenter_MarkVerifiedCreditsReferral — the verification transition is
 // the trigger that credits the referral (service wiring, nil-safe).
 func TestBeautyCenter_MarkVerifiedCreditsReferral(t *testing.T) {

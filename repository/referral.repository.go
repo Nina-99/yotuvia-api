@@ -17,6 +17,9 @@ type ReferralRepository interface {
 	// CountByReferrerIDSince counts referrals created at/after `since` (UTC), so
 	// the monthly cap is a real calendar window instead of a lifetime count.
 	CountByReferrerIDSince(referrerID uint, since time.Time) (int64, error)
+	// ExpirePendingBefore marks pending referrals older than `before` as
+	// expired, freeing the monthly slot. Returns the number of rows affected.
+	ExpirePendingBefore(before time.Time) (int64, error)
 	// MarkCreditedTx flips a pending referral to credited inside the caller's
 	// transaction, guarded by status = pending. Rows affected zero means another
 	// transaction already processed it.

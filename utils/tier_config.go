@@ -9,8 +9,8 @@ import (
 )
 
 type Tier struct {
-	Min       float64 `json:"min"`
-	BonusPct  float64 `json:"bonusPct"`
+	Min      float64 `json:"min"`
+	BonusPct float64 `json:"bonusPct"`
 }
 
 var (
@@ -48,32 +48,29 @@ func loadTierConfig() {
 }
 
 // GetTierConfig returns the tier configuration for a given currency.
-// If the currency is not found, it returns the first available config (fallback).
+// An unknown currency returns (nil, nil): callers must NOT inherit another
+// currency's ladder, because that silently pays the wrong bonus.
 func GetTierConfig(currency string) ([]Tier, error) {
 	loadTierConfig()
 	if loadErr != nil {
 		return nil, loadErr
 	}
 
-	if tiers, ok := tierConfig[currency]; ok {
-		return tiers, nil
-	}
-
-	// Fallback: return first available currency config
-	for _, v := range tierConfig {
-		return v, nil
-	}
-
-	return nil, nil
+	return tierConfig[currency], nil
 }
 
 // CalculateTier calculates tokens and bonus based on amount and currency.
-// It uses the tier configuration loaded from configs/tiers.json.
+// It uses the tier configuration loaded from configs/tiers.json. A currency
+// without a configured ladder receives NO bonus (never another currency's).
 func CalculateTier(amount float64, currency string) (tokens, bonus float64) {
 	tiers, err := GetTierConfig(currency)
-	if err != nil || tiers == nil {
-		// Fallback to hardcoded VES-like tiers if config fails
-		return calculateTierFallback(amount)
+	if err != nil {
+		Log.Errorf("[TIERS] config load failed: %v — no bonus applied", err)
+		return amount, 0
+	}
+	if tiers == nil {
+		Log.Warnf("[TIERS] no tier ladder for currency %s — no bonus applied", currency)
+		return amount, 0
 	}
 
 	var bestBonusPct float64
@@ -86,19 +83,4 @@ func CalculateTier(amount float64, currency string) (tokens, bonus float64) {
 	tokens = amount
 	bonus = amount * bestBonusPct
 	return
-}
-
-func calculateTierFallback(amountBs float64) (tokens, bonus float64) {
-	switch {
-	case amountBs >= 1000:
-		return amountBs, amountBs * 0.25
-	case amountBs >= 500:
-		return amountBs, amountBs * 0.15
-	case amountBs >= 275:
-		return amountBs, amountBs * 0.09
-	case amountBs >= 100:
-		return amountBs, amountBs * 0.05
-	default:
-		return amountBs, 0
-	}
 }

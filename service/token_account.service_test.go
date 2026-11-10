@@ -280,6 +280,10 @@ func TestCalculateTier(t *testing.T) {
 		{"10 USD (+5%)", 10, "USD", 10, 0.5, 10.5},
 		{"50 USD (+15%)", 50, "USD", 50, 7.5, 57.5},
 		{"100 USD (+25%)", 100, "USD", 100, 25, 125},
+		{"100 BOB (+5%)", 100, "BOB", 100, 5, 105},
+		{"500 BOB (+15%)", 500, "BOB", 500, 75, 575},
+		// Unknown currency must NOT inherit another ladder.
+		{"unknown currency (no bonus)", 999, "XYZ", 999, 0, 999},
 	}
 
 	for _, tt := range tests {

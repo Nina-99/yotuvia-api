@@ -68,6 +68,15 @@ func (r *ReferralRepositoryImpl) CountByReferrerIDSince(referrerID uint, since t
 	return count, err
 }
 
+// ExpirePendingBefore closes stale pending referrals so they stop counting
+// against the monthly cap.
+func (r *ReferralRepositoryImpl) ExpirePendingBefore(before time.Time) (int64, error) {
+	res := r.db.Model(&models.Referral{}).
+		Where("status = ? AND created_at < ?", "pending", before).
+		Update("status", "expired")
+	return res.RowsAffected, res.Error
+}
+
 // MarkCreditedTx flips a pending referral to credited in the caller's tx.
 func (r *ReferralRepositoryImpl) MarkCreditedTx(tx *gorm.DB, referralID uint) (int64, error) {
 	now := time.Now()
