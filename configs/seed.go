@@ -186,6 +186,7 @@ func SeedMarketConfigs() {
 			BoostQualificationPct:       50,
 			ReferralRewardReferrerMilli: 20_000,
 			ReferralRewardReferredMilli: 10_000,
+			ReferralLifetimeLimit:       30,
 		},
 	}
 
@@ -206,7 +207,8 @@ func SeedMarketConfigs() {
 			existing.BoostReserveCPMMilli != cfg.BoostReserveCPMMilli ||
 			existing.BoostQualificationPct != cfg.BoostQualificationPct ||
 			existing.ReferralRewardReferrerMilli != cfg.ReferralRewardReferrerMilli ||
-			existing.ReferralRewardReferredMilli != cfg.ReferralRewardReferredMilli {
+			existing.ReferralRewardReferredMilli != cfg.ReferralRewardReferredMilli ||
+			existing.ReferralLifetimeLimit != cfg.ReferralLifetimeLimit {
 			if err := DB.Model(&existing).Updates(map[string]interface{}{
 				"ytv_to_fiat_rate":               cfg.YtvToFiatRate,
 				"commission_pct":                 cfg.CommissionPct,
@@ -216,6 +218,7 @@ func SeedMarketConfigs() {
 				"boost_qualification_pct":        cfg.BoostQualificationPct,
 				"referral_reward_referrer_milli": cfg.ReferralRewardReferrerMilli,
 				"referral_reward_referred_milli": cfg.ReferralRewardReferredMilli,
+				"referral_lifetime_limit":        cfg.ReferralLifetimeLimit,
 			}).Error; err != nil {
 				utils.Log.Errorf("[SEED] Failed to heal market config %s: %v", cfg.Currency, err)
 			} else {

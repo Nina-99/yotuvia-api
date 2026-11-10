@@ -29,6 +29,7 @@ func TestPlatformVerifyCenter_CreditsReferralOnce(t *testing.T) {
 		ReferrerID: 1, ReferredID: 2, Status: "pending",
 		RewardReferrer: 20_000, RewardReferred: 10_000,
 	}).Error)
+	activateReferralCenter(t, db, 2)
 
 	token := roleToken(t, 900, 0, "super_admin")
 	w := do(r, http.MethodPut, "/api/admin/platform/centers/2/verify", token, "")

@@ -17,6 +17,9 @@ const (
 	referralRewardReferrer int64 = 20_000 // 20 Ytv
 	referralRewardReferred int64 = 10_000 // 10 Ytv
 	referralMonthlyLimit   int64 = 10
+	// referralLifetimeLimitDefault bounds how many referrals one center can have
+	// pending+credited when no market config is available.
+	referralLifetimeLimitDefault = 30
 )
 
 type ReferralServiceImpl struct {
@@ -91,6 +94,16 @@ func (s *ReferralServiceImpl) CreateReferralByCode(enteredByCenterID uint, code 
 		return errors.New("referrer's monthly referral limit reached (max 10)")
 	}
 
+	// Lifetime cap: pending + credited referrals. Expired ones free the slot.
+	limit := s.lifetimeLimit(referrer.ID)
+	active, err := s.referralRepo.CountActiveByReferrerID(referrer.ID)
+	if err != nil {
+		return err
+	}
+	if active >= int64(limit) {
+		return errors.New("referrer's lifetime referral limit reached")
+	}
+
 	// Snapshot the configured rewards for the referrer's currency. Storing them
 	// on the row means a later config change never rewrites an in-flight referral.
 	rewardReferrer, rewardReferred := referralRewardReferrer, referralRewardReferred
@@ -132,6 +145,34 @@ func (s *ReferralServiceImpl) ProcessReferralReward(referredID uint) error {
 	if referral == nil || referral.Status != "pending" {
 		return nil // not referred, or already credited
 	}
+
+	// Activation gate: verification alone is not enough. The referred center
+	// must have done its first real action (completed reservation or approved
+	// top-up), so fake/empty centers never pay the referrer.
+	active, err := s.referralRepo.ReferredCenterIsActive(referredID)
+	if err != nil {
+		return err
+	}
+	if !active {
+		return nil
+	}
+
+	// Lifetime cap, enforced again at payment time.
+	limit := s.lifetimeLimit(referral.ReferrerID)
+	credited, err := s.referralRepo.CountByReferrerIDAndStatus(referral.ReferrerID, "credited")
+	if err != nil {
+		return err
+	}
+	if credited >= int64(limit) {
+		referral.Status = "expired"
+		if err := s.referralRepo.Update(referral); err != nil {
+			return err
+		}
+		utils.Log.Warnf("[REFERRAL] Referral %d expired: referrer %d hit the lifetime limit",
+			referral.ID, referral.ReferrerID)
+		return nil
+	}
+
 	if s.accountRepo == nil {
 		return errors.New("referral: token account repository not configured")
 	}
@@ -185,6 +226,45 @@ func (s *ReferralServiceImpl) ProcessReferralReward(referredID uint) error {
 
 func (s *ReferralServiceImpl) GetReferrals(beautyCenterID uint) ([]models.Referral, error) {
 	return s.referralRepo.FindByReferrerID(beautyCenterID)
+}
+
+// ProcessPendingReferrals retries every pending referral; ProcessReferralReward
+// itself skips the ones whose referred center is not active yet.
+func (s *ReferralServiceImpl) ProcessPendingReferrals() (int, error) {
+	pending, err := s.referralRepo.FindPending()
+	if err != nil {
+		return 0, err
+	}
+	processed := 0
+	for _, referral := range pending {
+		if err := s.ProcessReferralReward(referral.ReferredID); err != nil {
+			utils.Log.Errorf("[REFERRAL] pending processing failed for center %d: %v",
+				referral.ReferredID, err)
+			continue
+		}
+		processed++
+	}
+	return processed, nil
+}
+
+// lifetimeLimit resolves the referrer's configured cap (default 30).
+func (s *ReferralServiceImpl) lifetimeLimit(referrerID uint) int {
+	limit := referralLifetimeLimitDefault
+	if s.marketConfigSvc == nil {
+		return limit
+	}
+	center, err := s.centerRepo.FindByID(referrerID)
+	if err != nil || center == nil {
+		return limit
+	}
+	currency := center.Currency
+	if currency == "" {
+		currency = defaultEconomy.Currency
+	}
+	if configured := s.marketConfigSvc.GetEconomyForCurrency(currency).ReferralLifetimeLimit; configured > 0 {
+		limit = configured
+	}
+	return limit
 }
 
 func (s *ReferralServiceImpl) GetReferralInfo(beautyCenterID uint) (code string, count int64, err error) {

@@ -55,6 +55,19 @@ func referralLedgerRows(t *testing.T, db *gorm.DB) int64 {
 	return n
 }
 
+// activateReferralCenter gives the referred center its first real action: an
+// approved top-up. Without it the referral reward must stay pending.
+func activateReferralCenter(t *testing.T, db *gorm.DB, centerID uint) {
+	t.Helper()
+	require.NoError(t, db.Create(&models.TokenTopUp{
+		BeautyCenterID: centerID,
+		AmountBs:       1,
+		TokensReceived: 1_000,
+		ReceiptURL:     "https://cdn.example.com/receipt.jpg",
+		Status:         "approved",
+	}).Error)
+}
+
 // TestReferral_EntryDoesNotMoveMoney — entering a code only records a pending
 // referral; the 20/10 rewards are not credited yet.
 func TestReferral_EntryDoesNotMoveMoney(t *testing.T) {
@@ -107,6 +120,7 @@ func TestReferral_VerificationCreditsBothWalletsOnce(t *testing.T) {
 	svc, db, accountRepo := referralSUT(t)
 	seedReferralAccounts(t, db, 1, 2)
 	require.NoError(t, svc.CreateReferralByCode(2, "REF001"))
+	activateReferralCenter(t, db, 2)
 
 	require.NoError(t, svc.ProcessReferralReward(2))
 
@@ -131,6 +145,7 @@ func TestReferral_FailedCreditLeavesPending(t *testing.T) {
 	svc, db, accountRepo := referralSUT(t)
 	seedReferralAccounts(t, db, 1, 2)
 	require.NoError(t, svc.CreateReferralByCode(2, "REF001"))
+	activateReferralCenter(t, db, 2)
 
 	require.NoError(t, db.Callback().Create().Before("gorm:create").Register(
 		"fail_referral_ledger", func(d *gorm.DB) {
@@ -196,6 +211,54 @@ func TestReferral_RewardsComeFromMarketConfig(t *testing.T) {
 	assert.Equal(t, int64(15_000), referral.RewardReferred)
 }
 
+// TestReferral_RequiresActivation — verification alone does not pay; the
+// referred center must complete a reservation or an approved top-up first.
+func TestReferral_RequiresActivation(t *testing.T) {
+	svc, db, accountRepo := referralSUT(t)
+	seedReferralAccounts(t, db, 1, 2)
+	require.NoError(t, svc.CreateReferralByCode(2, "REF001"))
+
+	require.NoError(t, svc.ProcessReferralReward(2))
+	assert.Equal(t, int64(0), balanceOf(t, accountRepo, 1), "no activation yet: no reward")
+
+	activateReferralCenter(t, db, 2)
+	require.NoError(t, svc.ProcessReferralReward(2))
+	assert.Equal(t, int64(20_000), balanceOf(t, accountRepo, 1))
+	assert.Equal(t, int64(10_000), balanceOf(t, accountRepo, 2))
+}
+
+// TestReferral_LifetimeLimit — pending + credited referrals consume the lifetime
+// cap; the next creation is rejected.
+func TestReferral_LifetimeLimit(t *testing.T) {
+	_, db, _ := referralSUT(t)
+	seedReferralAccounts(t, db, 1)
+	seedDashboardCenter(t, db, 2, "Referred A", "a2@test.com", true)
+	seedDashboardCenter(t, db, 3, "Referred B", "b3@test.com", true)
+	seedDashboardCenter(t, db, 4, "Referred C", "c4@test.com", true)
+
+	require.NoError(t, db.Create(&models.MarketConfig{
+		Currency:                    "USD",
+		ReferralRewardReferrerMilli: 20_000,
+		ReferralRewardReferredMilli: 10_000,
+		ReferralLifetimeLimit:       2,
+	}).Error)
+
+	svc := service.NewReferralServiceImpl(
+		repository.NewReferralRepositoryImpl(db),
+		repository.NewBeautyCenterRepositoryImpl(db),
+		nil,
+		repository.NewTokenAccountRepositoryImpl(db),
+		service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db)),
+	)
+
+	require.NoError(t, svc.CreateReferralByCode(2, "REF001"))
+	require.NoError(t, svc.CreateReferralByCode(3, "REF001"))
+
+	err := svc.CreateReferralByCode(4, "REF001")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lifetime referral limit")
+}
+
 // TestReferral_ExpirePendingBefore — stale pending referrals are expired and
 // stop counting against the monthly cap.
 func TestReferral_ExpirePendingBefore(t *testing.T) {
@@ -229,6 +292,7 @@ func TestBeautyCenter_MarkVerifiedCreditsReferral(t *testing.T) {
 	seedReferralAccounts(t, db, 1, 2)
 	completeCenterProfile(t, db, 2)
 	require.NoError(t, svc.CreateReferralByCode(2, "REF001"))
+	activateReferralCenter(t, db, 2)
 
 	centerSvc := service.NewBeautyCenterServiceImpl(
 		repository.NewBeautyCenterRepositoryImpl(db),

@@ -39,4 +39,7 @@ type MarketConfig struct {
 	// Referral rewards, in milli-Ytv, snapshot on each referral row at creation.
 	ReferralRewardReferrerMilli int64 `gorm:"default:20000" json:"referral_reward_referrer_milli"`
 	ReferralRewardReferredMilli int64 `gorm:"default:10000" json:"referral_reward_referred_milli"`
+	// ReferralLifetimeLimit caps how many referrals one center can have
+	// pending+credited over its lifetime (expired ones free the slot).
+	ReferralLifetimeLimit int `gorm:"default:30" json:"referral_lifetime_limit"`
 }

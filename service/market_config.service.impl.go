@@ -18,6 +18,7 @@ type EconomyConfig struct {
 
 	ReferralRewardReferrerMilli int64
 	ReferralRewardReferredMilli int64
+	ReferralLifetimeLimit       int
 }
 
 // Canonical defaults applied when a currency has no market_config row — the
@@ -32,6 +33,7 @@ var defaultEconomy = EconomyConfig{
 	BoostQualificationPct:       50,
 	ReferralRewardReferrerMilli: 20_000,
 	ReferralRewardReferredMilli: 10_000,
+	ReferralLifetimeLimit:       30,
 }
 
 type MarketConfigService interface {
@@ -68,5 +70,6 @@ func (s *MarketConfigServiceImpl) GetEconomyForCurrency(currency string) Economy
 		BoostQualificationPct:       row.BoostQualificationPct,
 		ReferralRewardReferrerMilli: row.ReferralRewardReferrerMilli,
 		ReferralRewardReferredMilli: row.ReferralRewardReferredMilli,
+		ReferralLifetimeLimit:       row.ReferralLifetimeLimit,
 	}
 }

@@ -20,6 +20,16 @@ type ReferralRepository interface {
 	// ExpirePendingBefore marks pending referrals older than `before` as
 	// expired, freeing the monthly slot. Returns the number of rows affected.
 	ExpirePendingBefore(before time.Time) (int64, error)
+	// CountActiveByReferrerID counts pending + credited referrals, the set that
+	// consumes the lifetime cap (expired rows free the slot).
+	CountActiveByReferrerID(referrerID uint) (int64, error)
+	// CountByReferrerIDAndStatus counts referrals in one status.
+	CountByReferrerIDAndStatus(referrerID uint, status string) (int64, error)
+	// FindPending returns every pending referral for the activation sweep.
+	FindPending() ([]models.Referral, error)
+	// ReferredCenterIsActive reports whether the referred center has done its
+	// first real action: a completed reservation or an approved top-up.
+	ReferredCenterIsActive(centerID uint) (bool, error)
 	// MarkCreditedTx flips a pending referral to credited inside the caller's
 	// transaction, guarded by status = pending. Rows affected zero means another
 	// transaction already processed it.

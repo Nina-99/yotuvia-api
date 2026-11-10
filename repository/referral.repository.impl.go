@@ -77,6 +77,50 @@ func (r *ReferralRepositoryImpl) ExpirePendingBefore(before time.Time) (int64, e
 	return res.RowsAffected, res.Error
 }
 
+// CountActiveByReferrerID counts the referrals that consume the lifetime cap.
+func (r *ReferralRepositoryImpl) CountActiveByReferrerID(referrerID uint) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Referral{}).
+		Where("referrer_id = ? AND status IN ?", referrerID, []string{"pending", "credited"}).
+		Count(&count).Error
+	return count, err
+}
+
+// CountByReferrerIDAndStatus counts referrals in one status.
+func (r *ReferralRepositoryImpl) CountByReferrerIDAndStatus(referrerID uint, status string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Referral{}).
+		Where("referrer_id = ? AND status = ?", referrerID, status).
+		Count(&count).Error
+	return count, err
+}
+
+// FindPending returns every pending referral for the activation sweep.
+func (r *ReferralRepositoryImpl) FindPending() ([]models.Referral, error) {
+	var referrals []models.Referral
+	err := r.db.Where("status = ?", "pending").Order("created_at ASC").Find(&referrals).Error
+	return referrals, err
+}
+
+// ReferredCenterIsActive reports the first real action of the referred center.
+func (r *ReferralRepositoryImpl) ReferredCenterIsActive(centerID uint) (bool, error) {
+	var count int64
+	if err := r.db.Model(&models.Reservation{}).
+		Where("beauty_center_id = ? AND status = ?", centerID, "COMPLETED").
+		Limit(1).Count(&count).Error; err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
+	}
+	if err := r.db.Model(&models.TokenTopUp{}).
+		Where("beauty_center_id = ? AND status = ?", centerID, "approved").
+		Limit(1).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // MarkCreditedTx flips a pending referral to credited in the caller's tx.
 func (r *ReferralRepositoryImpl) MarkCreditedTx(tx *gorm.DB, referralID uint) (int64, error) {
 	now := time.Now()
