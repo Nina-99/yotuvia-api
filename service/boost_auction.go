@@ -45,6 +45,12 @@ func SelectBoostWinners(candidates []BoostCandidate, slots int, reserveCPMMilli 
 		if candidate.RemainingBudgetMilli <= 0 {
 			continue
 		}
+		// A bid below the reserve cannot buy a slot, even when there are more
+		// slots than bidders: the floor is a real price, not just a floor for
+		// the charge.
+		if candidate.BidCPMMilli < reserveCPMMilli {
+			continue
+		}
 		eligible = append(eligible, candidate)
 	}
 	sort.SliceStable(eligible, func(i, j int) bool {

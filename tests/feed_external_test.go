@@ -39,7 +39,7 @@ func (s *stubResolver) Canonicalize(_ context.Context, rawURL string) string {
 	return rawURL
 }
 
-func newExternalFeedSUT(t *testing.T, resolver service.OEmbedResolver) service.FeedPostService {
+func newExternalFeedSUT(t *testing.T, resolver service.OEmbedResolver, missions ...service.TokenMissionService) service.FeedPostService {
 	t.Helper()
 	utils.Log = zap.NewNop().Sugar()
 	db := setupRouterAuthzDB(t)
@@ -59,6 +59,7 @@ func newExternalFeedSUT(t *testing.T, resolver service.OEmbedResolver) service.F
 		nil, // notification service not exercised here
 		validator.New(),
 		resolver,
+		missions...,
 	)
 }
 

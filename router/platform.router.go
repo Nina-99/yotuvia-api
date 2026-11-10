@@ -37,7 +37,13 @@ func PlatformRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 
 	paymentSvc := service.NewPaymentConfigServiceImpl(repository.NewPaymentConfigRepositoryImpl(db))
 	uploadCtrl := controller.NewUploadController()
-	ctrl := controller.NewPlatformController(accountSvc, topUpRepo, centerRepo, paymentSvc, uploadCtrl)
+	referralSvc := service.NewReferralServiceImpl(
+		repository.NewReferralRepositoryImpl(db), centerRepo, nil, accountRepo,
+	)
+	beautyCenterSvc := service.NewBeautyCenterServiceImpl(
+		centerRepo, missionSvc, validate, repository.NewTimeBlockRepositoryImpl(db), referralSvc,
+	)
+	ctrl := controller.NewPlatformController(accountSvc, topUpRepo, centerRepo, paymentSvc, uploadCtrl, beautyCenterSvc)
 
 	platform := rg.Group("/admin/platform")
 	platform.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("super_admin"))
@@ -45,6 +51,7 @@ func PlatformRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 		platform.GET("/tokens/topups", ctrl.ListTopUps)
 		platform.PUT("/tokens/topups/:id", ctrl.ProcessTopUp)
 		platform.GET("/centers", ctrl.ListCenters)
+		platform.PUT("/centers/:centerId/verify", ctrl.VerifyCenter)
 		platform.GET("/centers/:centerId/payment", ctrl.GetCenterPayment)
 		platform.PUT("/centers/:centerId/payment", ctrl.UpdateCenterPayment)
 		platform.POST("/centers/:centerId/payment/qr", ctrl.UploadCenterPaymentQR)

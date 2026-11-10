@@ -22,7 +22,7 @@ func TokenRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate)
 	// Services
 	missionSvc := service.NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
 	txSvc := service.NewTokenTransactionServiceImpl(txRepo)
-	referralSvc := service.NewReferralServiceImpl(referralRepo, centerRepo, nil)
+	referralSvc := service.NewReferralServiceImpl(referralRepo, centerRepo, nil, accountRepo)
 	notifSvc := service.NewNotificationServiceImpl(
 		repository.NewNotificationRepositoryImpl(db),
 		repository.NewPushDeviceRepositoryImpl(db),
@@ -31,13 +31,14 @@ func TokenRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate)
 
 	// Wire circular refs
 	missionSvc = service.NewTokenMissionServiceImpl(missionRepo, accountSvc, accountRepo)
-	referralSvc = service.NewReferralServiceImpl(referralRepo, centerRepo, accountSvc)
+	referralSvc = service.NewReferralServiceImpl(referralRepo, centerRepo, accountSvc, accountRepo)
 
 	uploadCtrl := controller.NewUploadController()
-	ctrl := controller.NewTokenController(accountSvc, txSvc, missionSvc, referralSvc, topUpRepo, centerRepo, uploadCtrl)
+	marketConfigSvc := service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db))
+	ctrl := controller.NewTokenController(accountSvc, txSvc, missionSvc, referralSvc, topUpRepo, centerRepo, uploadCtrl, marketConfigSvc)
 
 	tokens := rg.Group("/tokens")
-	tokens.Use(middleware.JWTAuthMiddleware())
+	tokens.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("beauty_center"))
 	{
 		tokens.GET("/balance", ctrl.GetBalance)
 		tokens.GET("/history", ctrl.GetHistory)

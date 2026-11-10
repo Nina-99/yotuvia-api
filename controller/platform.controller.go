@@ -25,11 +25,12 @@ const platformMaxPageSize = 100
 // one implementation of each business rule and the platform view cannot drift
 // from the centre view.
 type PlatformController struct {
-	topUpSvc   service.TokenAccountService
-	topUpRepo  repository.TokenTopUpRepository
-	centerRepo repository.BeautyCenterRepository
-	paymentSvc service.PaymentConfigService
-	uploadCtrl *UploadController
+	topUpSvc        service.TokenAccountService
+	topUpRepo       repository.TokenTopUpRepository
+	centerRepo      repository.BeautyCenterRepository
+	paymentSvc      service.PaymentConfigService
+	uploadCtrl      *UploadController
+	beautyCenterSvc service.BeautyCenterService
 }
 
 func NewPlatformController(
@@ -38,13 +39,15 @@ func NewPlatformController(
 	centerRepo repository.BeautyCenterRepository,
 	paymentSvc service.PaymentConfigService,
 	uploadCtrl *UploadController,
+	beautyCenterSvc service.BeautyCenterService,
 ) *PlatformController {
 	return &PlatformController{
-		topUpSvc:   topUpSvc,
-		topUpRepo:  topUpRepo,
-		centerRepo: centerRepo,
-		paymentSvc: paymentSvc,
-		uploadCtrl: uploadCtrl,
+		topUpSvc:        topUpSvc,
+		topUpRepo:       topUpRepo,
+		centerRepo:      centerRepo,
+		paymentSvc:      paymentSvc,
+		uploadCtrl:      uploadCtrl,
+		beautyCenterSvc: beautyCenterSvc,
 	}
 }
 
@@ -89,6 +92,28 @@ func (c *PlatformController) resolveExistingCenter(ctx *gin.Context) (uint, bool
 		return 0, false
 	}
 	return centerID, true
+}
+
+// VerifyCenter stamps platform-ops verification for one centre.
+//
+//	PUT /admin/platform/centers/:centerId/verify
+//
+// The write is idempotent (already-verified centres are a no-op) and it is the
+// transition that credits a pending referral and fires the referrer's mission.
+func (c *PlatformController) VerifyCenter(ctx *gin.Context) {
+	centerID, ok := c.resolveExistingCenter(ctx)
+	if !ok {
+		return
+	}
+	if c.beautyCenterSvc == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "verification service not available"})
+		return
+	}
+	if err := c.beautyCenterSvc.MarkVerified(centerID); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"message": "center verified"})
 }
 
 // ListTopUps is the GLOBAL queue: every centre's top-ups in one paginated list.

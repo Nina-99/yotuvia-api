@@ -182,7 +182,7 @@ func TestTokenAccountService_CanConsume(t *testing.T) {
 
 func TestTokenAccountService_Consume(t *testing.T) {
 	// Consume succeeds when balance is 0 but overdraft covers the charge
-	// (new-center tier = -5 YOTTU = 5000 milli).
+	// (new-center tier = -5 Ytv = 5000 milli).
 	t.Run("consume with zero balance and overdraft", func(t *testing.T) {
 		db := setupTokenTestDB(t)
 		createTestCenter(db, 1)
@@ -193,9 +193,9 @@ func TestTokenAccountService_Consume(t *testing.T) {
 		err := svc.Consume(1, 3_000, 0, "test consume")
 		assert.NoError(t, err)
 
-		balance, _, _, err := svc.GetBalance(1)
+		balance, _, _, _, err := svc.GetBalance(1)
 		assert.NoError(t, err)
-		assert.Equal(t, int64(-3_000), balance, "balance should be -3 YOTTUs after consuming with overdraft")
+		assert.Equal(t, int64(-3_000), balance, "balance should be -3 Ytv after consuming with overdraft")
 	})
 
 	// Consume fails when balance + overdraft < charge.
@@ -223,7 +223,7 @@ func TestTokenAccountService_Consume(t *testing.T) {
 		err = svc.Consume(1, 50_000, 0, "test consume positive")
 		assert.NoError(t, err)
 
-		balance, _, _, err := svc.GetBalance(1)
+		balance, _, _, _, err := svc.GetBalance(1)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(50_000), balance)
 	})
@@ -242,7 +242,7 @@ func TestTokenAccountService_AddTokens(t *testing.T) {
 	err := svc.AddTokens(1, 100_000, "topup", 1, "Test top-up")
 	assert.NoError(t, err)
 
-	balance, _, _, err := svc.GetBalance(1)
+	balance, _, _, _, err := svc.GetBalance(1)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(100_000), balance)
 
@@ -250,7 +250,7 @@ func TestTokenAccountService_AddTokens(t *testing.T) {
 	err = svc.AddTokens(1, 50_000, "bonus", 1, "Test bonus")
 	assert.NoError(t, err)
 
-	balance, _, _, err = svc.GetBalance(1)
+	balance, _, _, _, err = svc.GetBalance(1)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(150_000), balance)
 
@@ -309,10 +309,10 @@ func TestTokenAccountService_OverdraftTiers(t *testing.T) {
 
 	// Center 1: New (just created)
 	svc.GetOrCreate(1, "USD")
-	balance, overdraft, _, err := svc.GetBalance(1)
+	balance, _, overdraft, _, err := svc.GetBalance(1)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(0), balance)
-	assert.Equal(t, int64(5000), overdraft) // new tier = -5 YOTTUs
+	assert.Equal(t, int64(5000), overdraft) // new tier = -5 Ytv
 
 	// Center 2: Active (30+ days old)
 	oldAccount := &models.TokenAccount{
@@ -334,9 +334,9 @@ func TestTokenAccountService_OverdraftTiers(t *testing.T) {
 		})
 	}
 
-	balance, overdraft, _, err = svc.GetBalance(2)
+	balance, _, overdraft, _, err = svc.GetBalance(2)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(15_000), overdraft) // active tier = -15 YOTTUs
+	assert.Equal(t, int64(15_000), overdraft) // active tier = -15 Ytv
 
 	// Center 3: Premium (500+ purchased = 500_000+ milli)
 	premAccount := &models.TokenAccount{
@@ -359,7 +359,7 @@ func TestTokenAccountService_OverdraftTiers(t *testing.T) {
 		})
 	}
 
-	balance, overdraft, _, err = svc.GetBalance(3)
+	balance, _, overdraft, _, err = svc.GetBalance(3)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(30_000), overdraft) // premium tier = -30 YOTTUs
+	assert.Equal(t, int64(30_000), overdraft) // premium tier = -30 Ytv
 }

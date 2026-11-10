@@ -46,6 +46,9 @@ type FeedPostServiceImpl struct {
 	// OEmbedResolver enriches external-video posts with a thumbnail and author.
 	// OPTIONAL: nil stores a bare link (see CreateFromExternal).
 	OEmbedResolver OEmbedResolver
+	// MissionService advances the weekly video_published mission after a
+	// successful publish. OPTIONAL: nil disables the trigger.
+	MissionService TokenMissionService
 }
 
 // maxFollowerFanout caps how many followers one new-video publish notifies, so
@@ -75,6 +78,7 @@ func NewFeedPostServiceImpl(
 	notificationSvc NotificationService,
 	validate *validator.Validate,
 	oembed OEmbedResolver,
+	missionSvc ...TokenMissionService,
 ) FeedPostService {
 	requireDeps("NewFeedPostServiceImpl",
 		dep("FeedPostRepository", feedPostRepo),
@@ -89,6 +93,10 @@ func NewFeedPostServiceImpl(
 	if oembed == nil {
 		oembed = NewHTTPOEmbedResolver(nil)
 	}
+	var missions TokenMissionService
+	if len(missionSvc) > 0 {
+		missions = missionSvc[0]
+	}
 	return &FeedPostServiceImpl{
 		FeedPostRepository:        feedPostRepo,
 		BeautyCenterRepository:    beautyCenterRepo,
@@ -101,6 +109,18 @@ func NewFeedPostServiceImpl(
 		NotificationService:       notificationSvc,
 		Validate:                  validate,
 		OEmbedResolver:            oembed,
+		MissionService:            missions,
+	}
+}
+
+// triggerVideoPublished advances the weekly video mission after a successful
+// publish. Best-effort: a mission failure never fails or rolls back the post.
+func (s *FeedPostServiceImpl) triggerVideoPublished(centerID uint) {
+	if s.MissionService == nil {
+		return
+	}
+	if err := s.MissionService.TriggerCheck(centerID, "video_published"); err != nil {
+		utils.Log.Errorf("[FEED] video_published trigger failed for center %d: %v", centerID, err)
 	}
 }
 
@@ -205,6 +225,7 @@ func (s *FeedPostServiceImpl) CreateFromUpload(actor FeedActor, req request.Crea
 	// Best-effort follower fan-out: a notification/push failure must never
 	// fail (or roll back) the post creation.
 	s.notifyFollowers(post)
+	s.triggerVideoPublished(centerID)
 	return s.mapToResponse(post), nil
 }
 
@@ -311,6 +332,7 @@ func (s *FeedPostServiceImpl) CreateFromExternal(actor FeedActor, req request.Cr
 	}
 	utils.Log.Infof("[FEED] external post created by %s %d (center %d, provider %s)", actor.Role, actor.UserID, centerID, provider)
 	s.notifyFollowers(post)
+	s.triggerVideoPublished(centerID)
 	return s.mapToResponse(post), nil
 }
 

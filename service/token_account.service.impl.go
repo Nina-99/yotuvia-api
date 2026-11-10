@@ -59,25 +59,25 @@ func (s *TokenAccountServiceImpl) GetOrCreate(beautyCenterID uint, currency stri
 	return account, nil
 }
 
-func (s *TokenAccountServiceImpl) GetBalance(beautyCenterID uint) (balance, overdraftLimit int64, currency string, err error) {
+func (s *TokenAccountServiceImpl) GetBalance(beautyCenterID uint) (balance, reserved, overdraftLimit int64, currency string, err error) {
 	account, err := s.accountRepo.FindByBeautyCenterID(beautyCenterID)
 	if err != nil {
-		return 0, 0, "", err
+		return 0, 0, 0, "", err
 	}
 	if account == nil {
 		// Auto-create for legacy centers registered before token system
 		center, cerr := s.centerRepo.FindByID(beautyCenterID)
 		if cerr != nil || center == nil {
-			return 0, 0, "", errors.New("beauty center not found")
+			return 0, 0, 0, "", errors.New("beauty center not found")
 		}
 		account, err = s.GetOrCreate(beautyCenterID, center.Currency)
 		if err != nil {
-			return 0, 0, "", err
+			return 0, 0, 0, "", err
 		}
 	}
 
 	overdraftLimit = utils.ToMilli(s.computeOverdraft(beautyCenterID))
-	return account.Balance, overdraftLimit, account.Currency, nil
+	return account.Balance, account.ReservedMilli, overdraftLimit, account.Currency, nil
 }
 
 func (s *TokenAccountServiceImpl) computeOverdraft(beautyCenterID uint) float64 {
@@ -102,7 +102,7 @@ func (s *TokenAccountServiceImpl) computeOverdraft(beautyCenterID uint) float64 
 	createdAt := account.CreatedAt
 	daysActive := int(time.Since(createdAt).Hours() / 24)
 
-	// Premium: 3+ approved top-ups OR 500+ purchased (500 YOTTUs = 500_000 milli)
+	// Premium: 3+ approved top-ups OR 500+ purchased (500 Ytv = 500_000 milli)
 	if approvedCount >= 3 || account.TotalPurchased >= 500_000 {
 		utils.Log.Debugf("[OVERDRAFT] Center %d — Premium tier (-30)", beautyCenterID)
 		return 30
@@ -129,7 +129,9 @@ func (s *TokenAccountServiceImpl) CanConsume(beautyCenterID uint, amountMilli in
 	}
 
 	overdraft := s.computeOverdraft(beautyCenterID)
-	available := account.Balance + utils.ToMilli(overdraft)
+	// Holds are not spendable: available excludes the reserved portion.
+	available := account.Balance - account.ReservedMilli
+	available += utils.ToMilli(overdraft)
 
 	return available >= amountMilli, nil
 }
@@ -157,8 +159,66 @@ func (s *TokenAccountServiceImpl) Consume(beautyCenterID uint, amountMilli int64
 		return err
 	}
 
-	utils.Log.Infof("[TOKEN] Center %d consumed %.2f YOTTUs (with overdraft).",
+	utils.Log.Infof("[TOKEN] Center %d consumed %.2f Ytv (with overdraft).",
 		beautyCenterID, utils.FromMilli(amountMilli))
+	return nil
+}
+
+// Reserve holds funds for a prepaid purchase (e.g. a boost campaign). It moves
+// no money: the balance is untouched and only ReservedMilli grows.
+func (s *TokenAccountServiceImpl) Reserve(beautyCenterID uint, amountMilli int64, capPct float64) error {
+	account, err := s.accountRepo.FindByBeautyCenterID(beautyCenterID)
+	if err != nil {
+		return err
+	}
+	if account == nil {
+		return errors.New("token account not found")
+	}
+	if _, err := s.accountRepo.Reserve(context.Background(), account.ID, amountMilli, capPct); err != nil {
+		return err
+	}
+	utils.Log.Infof("[TOKEN] Center %d reserved %.2f Ytv.", beautyCenterID, utils.FromMilli(amountMilli))
+	return nil
+}
+
+// SettleReserved spends from an existing hold and records the ledger row. It
+// can never take more than is held and never falls back to overdraft.
+func (s *TokenAccountServiceImpl) SettleReserved(beautyCenterID uint, amountMilli int64, txType string, referenceID uint, description string) error {
+	account, err := s.accountRepo.FindByBeautyCenterID(beautyCenterID)
+	if err != nil {
+		return err
+	}
+	if account == nil {
+		return errors.New("token account not found")
+	}
+
+	var refPtr *uint
+	if referenceID != 0 {
+		ref := referenceID
+		refPtr = &ref
+	}
+
+	if _, err := s.accountRepo.SettleReserved(context.Background(), account.ID, amountMilli, txType, description, refPtr); err != nil {
+		return err
+	}
+	utils.Log.Infof("[TOKEN] Center %d settled %.2f Ytv from hold (type=%s).",
+		beautyCenterID, utils.FromMilli(amountMilli), txType)
+	return nil
+}
+
+// ReleaseReserved returns held funds to available without moving money.
+func (s *TokenAccountServiceImpl) ReleaseReserved(beautyCenterID uint, amountMilli int64) error {
+	account, err := s.accountRepo.FindByBeautyCenterID(beautyCenterID)
+	if err != nil {
+		return err
+	}
+	if account == nil {
+		return errors.New("token account not found")
+	}
+	if _, err := s.accountRepo.ReleaseReserved(context.Background(), account.ID, amountMilli); err != nil {
+		return err
+	}
+	utils.Log.Infof("[TOKEN] Center %d released %.2f Ytv from hold.", beautyCenterID, utils.FromMilli(amountMilli))
 	return nil
 }
 
@@ -182,7 +242,7 @@ func (s *TokenAccountServiceImpl) AddTokens(beautyCenterID uint, amountMilli int
 		return err
 	}
 
-	utils.Log.Infof("[TOKEN] Center %d received %.2f YOTTUs (type=%s). Balance: %.2f",
+	utils.Log.Infof("[TOKEN] Center %d received %.2f Ytv (type=%s). Balance: %.2f",
 		beautyCenterID, utils.FromMilli(amountMilli), txType, utils.FromMilli(updated.Balance))
 	return nil
 }
@@ -278,7 +338,7 @@ func (s *TokenAccountServiceImpl) applyTopUpDecision(topup *models.TokenTopUp, a
 		"Recarga aprobada", "Tu recarga fue aprobada",
 		fmt.Sprintf(`{"topup_id":%d}`, topup.ID))
 
-	utils.Log.Infof("[TOPUP] Center %d top-up approved: %.2f + %.2f bonus = %.2f YOTTUs",
+	utils.Log.Infof("[TOPUP] Center %d top-up approved: %.2f + %.2f bonus = %.2f Ytv",
 		topup.BeautyCenterID, utils.FromMilli(topup.TokensReceived), utils.FromMilli(topup.BonusTokens), utils.FromMilli(totalTokens))
 	return nil
 }

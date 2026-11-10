@@ -15,9 +15,13 @@ type TokenAccount struct {
 	BeautyCenterID uint         `gorm:"not null;uniqueIndex" json:"beauty_center_id"`
 	BeautyCenter   BeautyCenter `gorm:"foreignKey:BeautyCenterID" json:"beauty_center,omitempty"`
 
-	Balance        int64   `gorm:"type:bigint;default:0" json:"balance"`
-	TotalPurchased int64   `gorm:"type:bigint;default:0" json:"total_purchased"`
-	TotalConsumed  int64   `gorm:"type:bigint;default:0" json:"total_consumed"`
+	Balance        int64 `gorm:"type:bigint;default:0" json:"balance"`
+	TotalPurchased int64 `gorm:"type:bigint;default:0" json:"total_purchased"`
+	TotalConsumed  int64 `gorm:"type:bigint;default:0" json:"total_consumed"`
+	// ReservedMilli is the part of Balance held for prepaid campaigns. It is not
+	// money movement: Balance still equals the ledger sum, and available funds
+	// are Balance - ReservedMilli.
+	ReservedMilli  int64   `gorm:"type:bigint;default:0" json:"reserved"`
 	OverdraftLimit float64 `gorm:"-" json:"-"` // computed dynamically
 	Currency       string  `gorm:"size:3;default:USD" json:"currency"`
 }

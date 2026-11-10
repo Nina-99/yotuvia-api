@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
 )
@@ -55,4 +57,22 @@ func (r *ReferralRepositoryImpl) CountByReferrerID(referrerID uint) (int64, erro
 	var count int64
 	err := r.db.Model(&models.Referral{}).Where("referrer_id = ?", referrerID).Count(&count).Error
 	return count, err
+}
+
+// CountByReferrerIDSince counts only referrals created this calendar window.
+func (r *ReferralRepositoryImpl) CountByReferrerIDSince(referrerID uint, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Referral{}).
+		Where("referrer_id = ? AND created_at >= ?", referrerID, since).
+		Count(&count).Error
+	return count, err
+}
+
+// MarkCreditedTx flips a pending referral to credited in the caller's tx.
+func (r *ReferralRepositoryImpl) MarkCreditedTx(tx *gorm.DB, referralID uint) (int64, error) {
+	now := time.Now()
+	res := tx.Model(&models.Referral{}).
+		Where("id = ? AND status = ?", referralID, "pending").
+		Updates(map[string]interface{}{"status": "credited", "credited_at": now})
+	return res.RowsAffected, res.Error
 }

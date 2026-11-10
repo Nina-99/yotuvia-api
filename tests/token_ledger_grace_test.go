@@ -26,8 +26,8 @@ func TestTokenLedger_ConsumeFailureReturnsErrorNoGraceRow(t *testing.T) {
 	svc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
 
 	// Deterministic overdraft floor: computeOverdraft grants the Premium tier
-	// (-30 YOTTU = 30_000 milli) to any center with TotalPurchased >= 500_000
-	// milli (500 YOTTU), independent of account age or top-up count. Seeding it
+	// (-30 Ytv = 30_000 milli) to any center with TotalPurchased >= 500_000
+	// milli (500 Ytv), independent of account age or top-up count. Seeding it
 	// pins the floor instead of leaning on the "new center" magic default.
 	//
 	//   floor = balance + overdraft = 5_000 + 30_000 = 35_000 milli
@@ -67,27 +67,27 @@ func TestTokenLedger_ConsumeAtOverdraftFloor(t *testing.T) {
 	notifSvc := service.NewNotificationServiceImpl(repository.NewNotificationRepositoryImpl(db), repository.NewPushDeviceRepositoryImpl(db))
 	svc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
 
-	// Premium tier (-30 YOTTU = 30_000 milli) via TotalPurchased >= 500_000.
+	// Premium tier (-30 Ytv = 30_000 milli) via TotalPurchased >= 500_000.
 	// Balance 5_000 + overdraft 30_000 = floor 35_000; consuming exactly 35_000
 	// lands the balance on -30_000.
 	acct := &models.TokenAccount{BeautyCenterID: 1, Balance: 5000, TotalPurchased: 500_000, Currency: "USD"}
 	assert.NoError(t, accountRepo.Create(acct))
 
-	balance, overdraft, _, err := svc.GetBalance(1)
+	balance, _, overdraft, _, err := svc.GetBalance(1)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(5000), balance)
 	assert.Equal(t, int64(30_000), overdraft)
 
 	// Exactly the floor: accepted, balance becomes the overdraft floor.
 	assert.NoError(t, svc.Consume(1, 35_000, 0, "consume to the floor"))
-	balance, _, _, err = svc.GetBalance(1)
+	balance, _, _, _, err = svc.GetBalance(1)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(-30_000), balance, "balance may go as low as -overdraft, no further")
 
 	// One milli past the floor: rejected, balance unchanged.
 	err = svc.Consume(1, 1, 0, "one milli past the floor")
 	assert.ErrorIs(t, err, apperrors.ErrInsufficientBalance)
-	balance, _, _, err = svc.GetBalance(1)
+	balance, _, _, _, err = svc.GetBalance(1)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(-30_000), balance, "rejected consume must not move the balance")
 }
@@ -126,7 +126,7 @@ func TestTokenLedger_ProcessTopUpCreditsReceivedPlusBonusOnly(t *testing.T) {
 	assert.NoError(t, svc.ProcessTopUp(topup.ID, 1, "approved"))
 
 	// 1000 + 10000 + 2500 = 13500; the grace -500 was NOT re-applied.
-	balance, _, _, err := svc.GetBalance(1)
+	balance, _, _, _, err := svc.GetBalance(1)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(13500), balance)
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type BoostCampaignRepositoryImpl struct {
@@ -22,6 +23,11 @@ func (r *BoostCampaignRepositoryImpl) Create(campaign *models.BoostCampaign) err
 
 func (r *BoostCampaignRepositoryImpl) Update(campaign *models.BoostCampaign) error {
 	return r.Db.Save(campaign).Error
+}
+
+// UpdateInTx persists a campaign inside the caller's transaction.
+func (r *BoostCampaignRepositoryImpl) UpdateInTx(tx *gorm.DB, campaign *models.BoostCampaign) error {
+	return tx.Save(campaign).Error
 }
 
 // Delete is a hard delete, used to roll back a campaign whose budget hold could
@@ -60,4 +66,46 @@ func (r *BoostCampaignRepositoryImpl) FindEligible(now time.Time, limit int) ([]
 		Limit(limit).
 		Find(&campaigns).Error
 	return campaigns, err
+}
+
+// FindExpired returns active/paused campaigns whose window already closed.
+func (r *BoostCampaignRepositoryImpl) FindExpired(now time.Time) ([]models.BoostCampaign, error) {
+	var campaigns []models.BoostCampaign
+	err := r.Db.
+		Where("status IN ? AND ends_at < ?", []string{"active", "paused"}, now).
+		Find(&campaigns).Error
+	return campaigns, err
+}
+
+// AddSpendInTx books impressions with ONE conditional UPDATE: the row is only
+// charged while `spent + cost <= budget`, so concurrent settlements can never
+// overspend. Returns false when the budget no longer covers the cost.
+func (r *BoostCampaignRepositoryImpl) AddSpendInTx(tx *gorm.DB, campaignID uint, impressions, costMilli int64) (bool, error) {
+	res := tx.Exec(`UPDATE boost_campaigns
+		SET spent_milli = spent_milli + ?, impressions = impressions + ?, updated_at = ?
+		WHERE id = ? AND spent_milli + ? <= budget_milli`,
+		costMilli, impressions, time.Now(), campaignID, costMilli)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// MarkExhaustedInTx flips an active campaign to exhausted once its spend
+// reached the budget.
+func (r *BoostCampaignRepositoryImpl) MarkExhaustedInTx(tx *gorm.DB, campaignID uint) error {
+	return tx.Exec(`UPDATE boost_campaigns
+		SET status = ?, updated_at = ?
+		WHERE id = ? AND status = ? AND spent_milli >= budget_milli`,
+		"exhausted", time.Now(), campaignID, "active").Error
+}
+
+// CreateImpressionInTx inserts the billing dedupe row. A conflicting unique key
+// means the view was already billed, so it reports false instead of erroring.
+func (r *BoostCampaignRepositoryImpl) CreateImpressionInTx(tx *gorm.DB, impression *models.BoostImpression) (bool, error) {
+	res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(impression)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
 }

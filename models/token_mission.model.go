@@ -6,8 +6,11 @@ type TokenMission struct {
 	gorm.Model
 	Name         string `gorm:"size:100;not null" json:"name"`
 	Description  string `gorm:"size:255" json:"description"`
-	TriggerType  string `gorm:"size:50;not null" json:"trigger_type"` // reservation_completed, profile_completed, review_responded, referral
+	TriggerType  string `gorm:"size:50;not null" json:"trigger_type"` // reservation_completed, profile_completed, review_responded, referral, video_published
 	TriggerCount int    `gorm:"not null" json:"trigger_count"`        // how many times to trigger
+	// Period bounds the mission window: once | weekly | monthly. Empty/legacy
+	// rows behave exactly like "once".
+	Period       string `gorm:"size:10;not null;default:'once'" json:"period"`
 	RewardTokens int64  `gorm:"type:bigint;not null" json:"reward_tokens"`
 	Icon         string `gorm:"size:50" json:"icon"`
 	IsActive     bool   `gorm:"default:true" json:"is_active"`

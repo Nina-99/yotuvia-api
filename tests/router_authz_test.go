@@ -172,6 +172,7 @@ func TestRouterAuthz_NoToken401(t *testing.T) {
 		{"notifications center count", "GET", "/api/notifications/center/count", []string{"beauty_center"}, "client", "", 0},
 		{"notification center read", "PATCH", "/api/notifications/center/1/read", []string{"beauty_center"}, "client", "", 0},
 		{"topup process", "PUT", "/api/admin/tokens/topups/1", []string{"beauty_center"}, "client", "", 0},
+		{"tokens balance", "GET", "/api/tokens/balance", []string{"beauty_center"}, "client", "", 0},
 	}
 
 	for _, rt := range routes {
@@ -217,6 +218,7 @@ func TestRouterAuthz_RoleGates(t *testing.T) {
 		{"notifications center count", "GET", "/api/notifications/center/count", []string{"beauty_center"}, "client", "", 200},
 		{"notification center read", "PATCH", "/api/notifications/center/1/read", []string{"beauty_center"}, "client", "", 404},
 		{"topup process", "PUT", "/api/admin/tokens/topups/1", []string{"beauty_center"}, "client", "", 0},
+		{"tokens balance", "GET", "/api/tokens/balance", []string{"beauty_center"}, "client", "", 0},
 	}
 
 	for _, rt := range routes {
@@ -284,7 +286,7 @@ func TestRouterAuthz_PersonnelVerifyQRWiden(t *testing.T) {
 	r, db := authzTestRouter(t)
 
 	// The real token-account chain needs an account with balance for the
-	// 3.5% charge (TotalPrice 100 → 3.5 YOTTUs → 3500 milli).
+	// 3.5% charge (TotalPrice 100 → 3.5 Ytv → 3500 milli).
 	if err := db.Create(&models.TokenAccount{BeautyCenterID: 1, Balance: 100000}).Error; err != nil {
 		t.Fatalf("failed to seed token account: %v", err)
 	}

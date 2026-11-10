@@ -85,7 +85,8 @@ func (r *TokenMissionRepositoryImpl) MarkClaimed(tx *gorm.DB, progressID uint) (
 
 func (r *TokenMissionRepositoryImpl) UpsertProgress(progress *models.TokenMissionProgress) error {
 	var existing models.TokenMissionProgress
-	err := r.db.Where("beauty_center_id = ? AND mission_id = ?", progress.BeautyCenterID, progress.MissionID).First(&existing).Error
+	err := r.db.Where("beauty_center_id = ? AND mission_id = ? AND period_key = ?",
+		progress.BeautyCenterID, progress.MissionID, progress.PeriodKey).First(&existing).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return r.db.Create(progress).Error
@@ -97,9 +98,12 @@ func (r *TokenMissionRepositoryImpl) UpsertProgress(progress *models.TokenMissio
 	return r.db.Save(progress).Error
 }
 
-func (r *TokenMissionRepositoryImpl) FindProgress(beautyCenterID, missionID uint) (*models.TokenMissionProgress, error) {
+// FindProgress returns the progress row for one mission window, preloading the
+// mission so response mapping never needs an extra query.
+func (r *TokenMissionRepositoryImpl) FindProgress(beautyCenterID, missionID uint, periodKey string) (*models.TokenMissionProgress, error) {
 	var progress models.TokenMissionProgress
-	err := r.db.Where("beauty_center_id = ? AND mission_id = ?", beautyCenterID, missionID).First(&progress).Error
+	err := r.db.Where("beauty_center_id = ? AND mission_id = ? AND period_key = ?",
+		beautyCenterID, missionID, periodKey).Preload("Mission").First(&progress).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
@@ -109,8 +113,33 @@ func (r *TokenMissionRepositoryImpl) FindProgress(beautyCenterID, missionID uint
 	return &progress, nil
 }
 
-func (r *TokenMissionRepositoryImpl) FindProgressByCenter(beautyCenterID uint) ([]models.TokenMissionProgress, error) {
-	var progress []models.TokenMissionProgress
-	err := r.db.Where("beauty_center_id = ?", beautyCenterID).Preload("Mission").Find(&progress).Error
-	return progress, err
+// FindOrCreateProgress returns the current window row, creating it when the
+// period rolled over (or on first use). A unique-key race re-reads the winner
+// instead of surfacing a database error.
+func (r *TokenMissionRepositoryImpl) FindOrCreateProgress(progress *models.TokenMissionProgress) (*models.TokenMissionProgress, error) {
+	if progress.PeriodKey == "" {
+		progress.PeriodKey = "once"
+	}
+
+	var existing models.TokenMissionProgress
+	err := r.db.Where("beauty_center_id = ? AND mission_id = ? AND period_key = ?",
+		progress.BeautyCenterID, progress.MissionID, progress.PeriodKey).
+		Preload("Mission").First(&existing).Error
+	if err == nil {
+		return &existing, nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return nil, err
+	}
+
+	if err := r.db.Create(progress).Error; err != nil {
+		// Another request created the same window first: read it.
+		if e2 := r.db.Where("beauty_center_id = ? AND mission_id = ? AND period_key = ?",
+			progress.BeautyCenterID, progress.MissionID, progress.PeriodKey).
+			Preload("Mission").First(&existing).Error; e2 == nil {
+			return &existing, nil
+		}
+		return nil, err
+	}
+	return progress, nil
 }

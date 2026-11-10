@@ -48,6 +48,13 @@ func (c *VideoWatchEventController) RecordWatch(ctx *gin.Context) {
 		return
 	}
 
+	// Billing: a boosted post reports its signed impression token here and the
+	// charge happens only if the view qualifies. Best-effort — a billing failure
+	// must never fail the watch record.
+	if req.ImpressionToken != "" && c.boostService != nil {
+		_ = c.boostService.SettleImpression(clientID.(uint), req.ImpressionToken, req.WatchPercentage, req.Completed)
+	}
+
 	ctx.JSON(http.StatusCreated, gin.H{"message": "watch recorded"})
 }
 
@@ -81,9 +88,10 @@ func (c *VideoWatchEventController) GetPersonalizedFeed(ctx *gin.Context) {
 	}
 
 	// Promoted slots: auction over eligible campaigns, capped at one per
-	// boostSlotDensity positions. Only posts on this page (active) can win, and
-	// each served slot is settled against its campaign's budget.
-	promotedIDs := c.servePromotedPosts(ids, postMap)
+	// boostSlotDensity positions. Serving a slot NO LONGER bills it: the winning
+	// post carries a signed impression token and the charge happens only when the
+	// client reports a qualified view.
+	promotedIDs, impressionTokens := c.servePromotedPosts(ids, postMap)
 
 	ordered, promotedSet := service.MergePromotedIDs(ids, promotedIDs, boostSlotDensity)
 
@@ -92,6 +100,9 @@ func (c *VideoWatchEventController) GetPersonalizedFeed(ctx *gin.Context) {
 	for _, id := range ordered {
 		if p, ok := postMap[id]; ok {
 			p.IsBoosted = promotedSet[id]
+			if token, ok := impressionTokens[id]; ok {
+				p.ImpressionToken = token
+			}
 			posts = append(posts, p)
 		}
 	}
@@ -100,28 +111,31 @@ func (c *VideoWatchEventController) GetPersonalizedFeed(ctx *gin.Context) {
 }
 
 // servePromotedPosts runs the boost auction for one page and returns the
-// promoted post ids that are actually renderable here (present in `postMap`).
-// Settlement of one impression per served slot is a best-effort side effect; a
-// nil boost service (feature off) yields no promoted slots.
-func (c *VideoWatchEventController) servePromotedPosts(ids []uint, postMap map[uint]response.FeedPostResponse) []uint {
+// promoted post ids that are renderable here plus a signed impression token per
+// slot. It intentionally does NOT settle: billing is deferred to the qualified
+// view report. A nil boost service (feature off) yields no promoted slots.
+func (c *VideoWatchEventController) servePromotedPosts(ids []uint, postMap map[uint]response.FeedPostResponse) ([]uint, map[uint]string) {
 	if c.boostService == nil {
-		return nil
+		return nil, nil
 	}
 	slots := len(ids) / boostSlotDensity
 	if slots <= 0 {
-		return nil
+		return nil, nil
 	}
 	winners, err := c.boostService.SelectWinners(time.Now(), slots, 0)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	promoted := make([]uint, 0, len(winners))
+	tokens := make(map[uint]string, len(winners))
 	for _, winner := range winners {
 		if _, ok := postMap[winner.PostID]; !ok {
 			continue
 		}
 		promoted = append(promoted, winner.PostID)
-		_ = c.boostService.SettleImpressions(winner.CampaignID, 1, winner.PriceCPMMilli)
+		if token, err := c.boostService.ImpressionToken(winner.CampaignID, winner.PriceCPMMilli); err == nil {
+			tokens[winner.PostID] = token
+		}
 	}
-	return promoted
+	return promoted, tokens
 }

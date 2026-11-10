@@ -1218,8 +1218,80 @@ func (s *ReservationServiceImpl) updateStatus(reservation *models.Reservation, s
 		return apperrors.ErrConflict
 	}
 
+	// Manual completion must pay the commission too: the status flip and the
+	// token debit commit atomically, so a booking closed without a QR scan can
+	// never become COMPLETED unpaid.
+	if status == "COMPLETED" {
+		return s.completeWithCharge(reservation)
+	}
+
 	reservation.Status = status
 	return s.ReservationRepository.Update(reservation)
+}
+
+// completeWithCharge is the non-QR completion path (owner or staff marks the
+// booking done). It mirrors VerifyQR's money movement without the QR/loyalty
+// side effects: guarded completion + commission debit in ONE transaction, then
+// a best-effort mission trigger.
+func (s *ReservationServiceImpl) completeWithCharge(reservation *models.Reservation) error {
+	if s.TokenAccountService == nil || s.TokenAccountRepo == nil {
+		return fmt.Errorf("reservation: manual completion requires the token account service")
+	}
+
+	_, _, overdraftMilli, currency, err := s.TokenAccountService.GetBalance(reservation.BeautyCenterID)
+	if err != nil {
+		return err
+	}
+
+	economy := defaultEconomy
+	if s.MarketConfigService != nil {
+		economy = s.MarketConfigService.GetEconomyForCurrency(currency)
+	}
+	totalMilli := utils.ToMilli(reservation.TotalPrice)
+	charge := ComputeChargeMilli(totalMilli, economy.CommissionPct, economy.MinChargeMilli)
+
+	account, err := s.TokenAccountService.GetOrCreate(reservation.BeautyCenterID, currency)
+	if err != nil {
+		return err
+	}
+
+	var alreadyCompleted bool
+	err = s.ReservationRepository.Transact(func(tx *gorm.DB) error {
+		completed, txErr := s.ReservationRepository.CompleteVerificationTx(tx, reservation.ID)
+		if txErr != nil {
+			return txErr
+		}
+		if !completed {
+			alreadyCompleted = true // concurrent completion won: free no-op
+			return nil
+		}
+		return s.TokenAccountRepo.DebitInTx(
+			tx, account.ID, charge, overdraftMilli,
+			"consumption",
+			fmt.Sprintf("Reservation #%d completed manually — %.2f%% of %.2f", reservation.ID, economy.CommissionPct, reservation.TotalPrice),
+			&reservation.ID,
+		)
+	})
+	if err != nil {
+		utils.Log.Errorf("[TOKEN] Manual completion charge failed for reservation %d (rolled back): %v", reservation.ID, err)
+		return err
+	}
+
+	reservation.Status = "COMPLETED"
+	reservation.VerificationToken = nil
+	reservation.TokenExpiresAt = nil
+	if alreadyCompleted {
+		return nil
+	}
+
+	// A manually completed booking counts toward the reservation ladder; the
+	// trigger is best-effort and never fails the completion.
+	if s.MissionService != nil {
+		if err := s.MissionService.TriggerCheck(reservation.BeautyCenterID, "reservation_completed"); err != nil {
+			utils.Log.Errorf("[MISSION] Failed to trigger after manual completion %d: %v", reservation.ID, err)
+		}
+	}
+	return nil
 }
 
 // ──────────────────────────────────────────────
@@ -2102,7 +2174,7 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 	// ONE transaction. A debit failure rolls back the completion — no more
 	// completed turns that never paid.
 
-	_, overdraftMilli, currency, err := s.TokenAccountService.GetBalance(authBeautyCenterID)
+	_, _, overdraftMilli, currency, err := s.TokenAccountService.GetBalance(authBeautyCenterID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -2188,7 +2260,7 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 		}
 	}
 
-	utils.Log.Infof("[QR VERIFIED] Reservation ID %d marked as COMPLETED. Charged %.2f YOTTUs. Added stamps for %d services",
+	utils.Log.Infof("[QR VERIFIED] Reservation ID %d marked as COMPLETED. Charged %.2f Ytv. Added stamps for %d services",
 		reservation.ID, charge, len(reservation.ReservationServices))
 	return reservation, false, nil
 }
@@ -2265,7 +2337,7 @@ func (s *ReservationServiceImpl) lastScanReward(reservation *models.Reservation)
 }
 
 // ComputeChargeMilli resolves the token charge for a reservation in integer
-// milli-YOTTU (feat-token-economy-config D3/D5): percentage of the total with
+// milli-Ytv (feat-token-economy-config D3/D5): percentage of the total with
 // a per-market floor, exact integer math (pct treated at 2-decimal precision).
 func ComputeChargeMilli(totalMilli int64, commissionPct float64, minChargeMilli int64) int64 {
 	bp := int64(math.Round(commissionPct * 100)) // 3.5% → 350 basis points

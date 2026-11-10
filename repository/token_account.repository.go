@@ -41,6 +41,38 @@ type TokenAccountRepository interface {
 	DebitInTx(tx *gorm.DB, accountID uint, amountMilli int64, overdraftMilli int64,
 		txnType string, description string, referenceID *uint) error
 
+	// ReserveInTx holds amountMilli from the account's available funds
+	// (balance - reserved). It never moves money and never writes a ledger row.
+	// It fails with ErrInsufficientBalance when available funds do not cover the
+	// amount (overdraft is NOT usable for holds) and with ErrConflict when the
+	// resulting hold would exceed capPct of the balance (capPct <= 0 disables the
+	// cap). The guard is a single conditional UPDATE, so concurrent reserves
+	// cannot overshoot.
+	ReserveInTx(tx *gorm.DB, accountID uint, amountMilli int64, capPct float64) error
+
+	// Reserve is the transaction-owning variant of ReserveInTx. It returns the
+	// updated account.
+	Reserve(ctx context.Context, accountID uint, amountMilli int64, capPct float64) (*models.TokenAccount, error)
+
+	// SettleReservedInTx spends amountMilli from an existing hold: it decrements
+	// balance and reserved, accumulates TotalConsumed and inserts the ledger row
+	// in the CALLER's transaction. It fails with ErrInsufficientBalance when the
+	// hold no longer covers the amount, and never falls back to overdraft.
+	SettleReservedInTx(tx *gorm.DB, accountID uint, amountMilli int64,
+		txnType string, description string, referenceID *uint) error
+
+	// SettleReserved is the transaction-owning variant of SettleReservedInTx.
+	SettleReserved(ctx context.Context, accountID uint, amountMilli int64,
+		txnType string, description string, referenceID *uint) (*models.TokenAccount, error)
+
+	// ReleaseReservedInTx returns held funds to available without moving money or
+	// writing a ledger row. Releasing zero is a no-op; releasing more than the
+	// current hold fails with ErrConflict instead of silently clamping.
+	ReleaseReservedInTx(tx *gorm.DB, accountID uint, amountMilli int64) error
+
+	// ReleaseReserved is the transaction-owning variant of ReleaseReservedInTx.
+	ReleaseReserved(ctx context.Context, accountID uint, amountMilli int64) (*models.TokenAccount, error)
+
 	// Transaction executes fn inside a GORM transaction, committing on
 	// nil return or rolling back on error. Used by composite operations
 	// that must atomically combine a status flip with a token debit.

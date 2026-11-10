@@ -15,8 +15,10 @@ type TokenMissionRepository interface {
 	// reservation ladder) and all of them must progress together.
 	FindActiveMissionsByType(triggerType string) ([]models.TokenMission, error)
 	UpsertProgress(progress *models.TokenMissionProgress) error
-	FindProgress(beautyCenterID, missionID uint) (*models.TokenMissionProgress, error)
-	FindProgressByCenter(beautyCenterID uint) ([]models.TokenMissionProgress, error)
+	FindProgress(beautyCenterID, missionID uint, periodKey string) (*models.TokenMissionProgress, error)
+	// FindOrCreateProgress returns the row for (center, mission, period_key),
+	// creating it on first use. Unique-key safe: a concurrent create is re-read.
+	FindOrCreateProgress(progress *models.TokenMissionProgress) (*models.TokenMissionProgress, error)
 	// IncrementProgress advances current_count by exactly one step toward
 	// target_count in a single atomic statement (D2): LEAST caps overshoot,
 	// completed_at freezes once set. No-op when already completed.

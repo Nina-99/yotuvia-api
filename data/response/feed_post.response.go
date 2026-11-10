@@ -45,6 +45,11 @@ type FeedPostResponse struct {
 	// label a true value as "Promocionado" wherever it renders.
 	IsBoosted bool `json:"is_boosted"`
 
+	// ImpressionToken is the signed billing token for a served promoted slot.
+	// The client echoes it on the qualified-view report; it is absent on organic
+	// posts and never survives a re-serve.
+	ImpressionToken string `json:"impression_token,omitempty"`
+
 	// Creator avatars (the `is_profile` image). The card shows the credited
 	// professional's photo when the post is theirs, otherwise the center's;
 	// either may be empty and the client falls back to an initial.

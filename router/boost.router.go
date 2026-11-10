@@ -28,7 +28,8 @@ func BoostRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate)
 	missionSvc := service.NewTokenMissionServiceImpl(missionRepo, nil, accountRepo)
 	accountSvc := service.NewTokenAccountServiceImpl(accountRepo, topUpRepo, centerRepo, missionSvc, notifSvc)
 
-	boostSvc := service.NewBoostServiceImpl(boostRepo, feedRepo, accountSvc)
+	boostSvc := service.NewBoostServiceImpl(boostRepo, feedRepo, accountSvc, accountRepo,
+		service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db)))
 	ctrl := controller.NewBoostController(boostSvc)
 
 	campaigns := rg.Group("/boost-campaigns")

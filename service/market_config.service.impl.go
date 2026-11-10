@@ -7,19 +7,26 @@ import (
 
 // EconomyConfig is the resolved token-economy parameter set for a currency.
 type EconomyConfig struct {
-	Currency          string
-	YotuviaToFiatRate float64
-	CommissionPct     float64
-	MinChargeMilli    int64
+	Currency       string
+	YtvToFiatRate  float64
+	CommissionPct  float64
+	MinChargeMilli int64
+
+	BoostReserveCapPct    float64
+	BoostReserveCPMMilli  int64
+	BoostQualificationPct float64
 }
 
 // Canonical defaults applied when a currency has no market_config row — the
 // Bolivia launch values (feat-token-economy-config D2).
 var defaultEconomy = EconomyConfig{
-	Currency:          "BOB",
-	YotuviaToFiatRate: 1.0,
-	CommissionPct:     3.5,
-	MinChargeMilli:    350,
+	Currency:              "BOB",
+	YtvToFiatRate:         1.0,
+	CommissionPct:         3.5,
+	MinChargeMilli:        350,
+	BoostReserveCapPct:    0.50,
+	BoostReserveCPMMilli:  1000,
+	BoostQualificationPct: 50,
 }
 
 type MarketConfigService interface {
@@ -47,9 +54,12 @@ func (s *MarketConfigServiceImpl) GetEconomyForCurrency(currency string) Economy
 		return defaultEconomy
 	}
 	return EconomyConfig{
-		Currency:          row.Currency,
-		YotuviaToFiatRate: row.YotuviaToFiatRate,
-		CommissionPct:     row.CommissionPct,
-		MinChargeMilli:    row.MinChargeMilli,
+		Currency:              row.Currency,
+		YtvToFiatRate:         row.YtvToFiatRate,
+		CommissionPct:         row.CommissionPct,
+		MinChargeMilli:        row.MinChargeMilli,
+		BoostReserveCapPct:    row.BoostReserveCapPct,
+		BoostReserveCPMMilli:  row.BoostReserveCPMMilli,
+		BoostQualificationPct: row.BoostQualificationPct,
 	}
 }

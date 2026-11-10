@@ -205,13 +205,15 @@ func (s *DashboardServiceImpl) GetStats(centerID uint) (*response.DashboardStats
 	// ── Token balance (feat-token-economy) ──
 	var (
 		balanceMilli   int64
+		reservedMilli  int64
 		overdraftMilli int64
 	)
 	if s.tokenAccountSvc != nil {
 		var tokenErr error
-		balanceMilli, overdraftMilli, _, tokenErr = s.tokenAccountSvc.GetBalance(centerID)
+		balanceMilli, reservedMilli, overdraftMilli, _, tokenErr = s.tokenAccountSvc.GetBalance(centerID)
 		if tokenErr != nil {
 			balanceMilli = 0
+			reservedMilli = 0
 			overdraftMilli = 0
 		}
 	}
@@ -239,7 +241,7 @@ func (s *DashboardServiceImpl) GetStats(centerID uint) (*response.DashboardStats
 		UpcomingReservations: []response.UpcomingReservationDTO{},
 		Balance:              utils.FromMilli(balanceMilli),
 		OverdraftLimit:       utils.FromMilli(overdraftMilli),
-		AvailableBalance:     utils.FromMilli(balanceMilli + overdraftMilli),
+		AvailableBalance:     utils.FromMilli(balanceMilli - reservedMilli + overdraftMilli),
 	}
 
 	for _, row := range topServices {
@@ -339,13 +341,15 @@ func (s *DashboardServiceImpl) GetStatsWithRange(centerID uint, from, to time.Ti
 	// ── Token balance (feat-token-economy) ──
 	var (
 		balanceMilli   int64
+		reservedMilli  int64
 		overdraftMilli int64
 	)
 	if s.tokenAccountSvc != nil {
 		var tokenErr error
-		balanceMilli, overdraftMilli, _, tokenErr = s.tokenAccountSvc.GetBalance(centerID)
+		balanceMilli, reservedMilli, overdraftMilli, _, tokenErr = s.tokenAccountSvc.GetBalance(centerID)
 		if tokenErr != nil {
 			balanceMilli = 0
+			reservedMilli = 0
 			overdraftMilli = 0
 		}
 	}
@@ -572,7 +576,7 @@ func (s *DashboardServiceImpl) GetStatsWithRange(centerID uint, from, to time.Ti
 
 		Balance:          utils.FromMilli(balanceMilli),
 		OverdraftLimit:   utils.FromMilli(overdraftMilli),
-		AvailableBalance: utils.FromMilli(balanceMilli + overdraftMilli),
+		AvailableBalance: utils.FromMilli(balanceMilli - reservedMilli + overdraftMilli),
 	}
 
 	for _, row := range topServicesByRevenue {

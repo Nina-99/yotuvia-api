@@ -38,7 +38,7 @@ func TestMarketConfig_FallbackOnMissing(t *testing.T) {
 	cfg := svc.GetEconomyForCurrency("USD")
 	assert.Equal(t, 3.5, cfg.CommissionPct)
 	assert.Equal(t, int64(350), cfg.MinChargeMilli)
-	assert.Equal(t, 1.0, cfg.YotuviaToFiatRate)
+	assert.Equal(t, 1.0, cfg.YtvToFiatRate)
 }
 
 // TestMarketConfig_HitReturnsRow covers the configured path.
@@ -47,10 +47,10 @@ func TestMarketConfig_HitReturnsRow(t *testing.T) {
 	svc, db := newMarketConfigSUT(t)
 
 	assert.NoError(t, db.Create(&models.MarketConfig{
-		Currency:          "BOB",
-		YotuviaToFiatRate: 1.0,
-		CommissionPct:     3.5,
-		MinChargeMilli:    350,
+		Currency:       "BOB",
+		YtvToFiatRate:  1.0,
+		CommissionPct:  3.5,
+		MinChargeMilli: 350,
 	}).Error)
 
 	cfg := svc.GetEconomyForCurrency("BOB")
@@ -128,7 +128,7 @@ func newEconomyVerifySUT(t *testing.T) (*gorm.DB, service.ReservationService) {
 	seedDashboardService(t, db, 1, 1, "Svc", true)
 	seedDashboardClient(t, db, 1, "Client", "One")
 
-	account := &models.TokenAccount{BeautyCenterID: 1, Balance: 100_000, Currency: "BOB"} // 100 YOTTU
+	account := &models.TokenAccount{BeautyCenterID: 1, Balance: 100_000, Currency: "BOB"} // 100 Ytv
 	if err := db.Create(account).Error; err != nil {
 		t.Fatalf("failed to seed token account: %v", err)
 	}
@@ -211,20 +211,20 @@ func TestEconomy_ChargeFollowsConfigAndFloor(t *testing.T) {
 	db, svc := newEconomyVerifySUT(t)
 
 	assert.NoError(t, db.Create(&models.MarketConfig{
-		Currency:          "BOB",
-		YotuviaToFiatRate: 1.0,
-		CommissionPct:     3.5,
-		MinChargeMilli:    350,
+		Currency:       "BOB",
+		YtvToFiatRate:  1.0,
+		CommissionPct:  3.5,
+		MinChargeMilli: 350,
 	}).Error)
 
-	// Big ticket: 200 Bs -> pct charge 7 YOTTU.
+	// Big ticket: 200 Bs -> pct charge 7 Ytv.
 	seedVerifiableReservation(t, db, 101, 200)
 	if _, _, err := svc.VerifyQR("tok-101", 1); err != nil {
 		t.Fatalf("verify big ticket: %v", err)
 	}
-	assert.Equal(t, int64(93_000), accountBalance(t, db), "100 - 7 = 93 YOTTU")
+	assert.Equal(t, int64(93_000), accountBalance(t, db), "100 - 7 = 93 Ytv")
 
-	// Small ticket: 5 Bs -> floor 0.35 YOTTU.
+	// Small ticket: 5 Bs -> floor 0.35 Ytv.
 	seedVerifiableReservation(t, db, 102, 5)
 	if _, _, err := svc.VerifyQR("tok-102", 1); err != nil {
 		t.Fatalf("verify small ticket: %v", err)
@@ -250,7 +250,7 @@ func TestEconomy_InsufficientRollsBackCompletion(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
 	db, svc := newEconomyVerifySUT(t)
 
-	// New-center overdraft is 5 YOTTU (5000 milli). Force balance down to
+	// New-center overdraft is 5 Ytv (5000 milli). Force balance down to
 	// 1000 milli -> allowance 6000 milli. A 700 Bs ticket charges
 	// 24500 milli > allowance -> guard must reject INSIDE the transaction.
 	db.Model(&models.TokenAccount{}).Where("beauty_center_id = 1").
@@ -276,7 +276,7 @@ func TestEconomy_RescanNeverDoubleCharges(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
 	db, svc := newEconomyVerifySUT(t)
 
-	seedVerifiableReservation(t, db, 202, 150) // charge 5.25 YOTTU
+	seedVerifiableReservation(t, db, 202, 150) // charge 5.25 Ytv
 
 	if _, _, err := svc.VerifyQR("tok-202", 1); err != nil {
 		t.Fatalf("first scan: %v", err)

@@ -27,15 +27,20 @@ func TestMission_SeedIdempotency(t *testing.T) {
 
 	var missions []models.TokenMission
 	assert.NoError(t, db.Find(&missions).Error)
-	assert.Len(t, missions, 7, "5 original + 10-reservation + referral")
+	assert.Len(t, missions, 10, "7 lifetime + 3 weekly")
 
 	counts := map[string]int{}
+	weeklyRewards := int64(0)
 	for _, m := range missions {
-		counts[m.TriggerType+"|"+strconv.Itoa(m.TriggerCount)]++
+		counts[m.TriggerType+"|"+strconv.Itoa(m.TriggerCount)+"|"+m.Period]++
+		if m.Period == "weekly" {
+			weeklyRewards += m.RewardTokens
+		}
 	}
 	for key, n := range counts {
 		assert.Equal(t, 1, n, "duplicate seed for %s", key)
 	}
+	assert.Equal(t, int64(6000), weeklyRewards, "weekly set must pay 6 Ytv max")
 
 	var legacyActive int64
 	assert.NoError(t, db.Model(&models.TokenMission{}).

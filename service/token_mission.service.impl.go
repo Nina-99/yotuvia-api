@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"time"
 
 	"github.com/Nina-99/yotuvia-api/apperrors"
 	"github.com/Nina-99/yotuvia-api/models"
@@ -14,6 +15,17 @@ type TokenMissionServiceImpl struct {
 	missionRepo repository.TokenMissionRepository
 	accountSvc  TokenAccountService
 	accountRepo repository.TokenAccountRepository
+	// Now is the clock used to resolve period keys. Defaults to time.Now; tests
+	// can override it to simulate week/month rollover.
+	Now func() time.Time
+}
+
+// clock resolves the current time, falling back to time.Now.
+func (s *TokenMissionServiceImpl) clock() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 func NewTokenMissionServiceImpl(
@@ -38,23 +50,23 @@ func (s *TokenMissionServiceImpl) GetProgress(beautyCenterID uint) ([]models.Tok
 		return nil, err
 	}
 
-	// Ensure progress exists for all active missions
+	// Resolve the CURRENT window for each mission: a rolled-over weekly/monthly
+	// mission starts at 0 while the previous window stays as history.
+	progress := make([]models.TokenMissionProgress, 0, len(missions))
 	for _, mission := range missions {
-		existing, err := s.missionRepo.FindProgress(beautyCenterID, mission.ID)
+		row, err := s.missionRepo.FindOrCreateProgress(&models.TokenMissionProgress{
+			BeautyCenterID: beautyCenterID,
+			MissionID:      mission.ID,
+			PeriodKey:      MissionPeriodKey(mission.Period, s.clock()),
+			CurrentCount:   0,
+			TargetCount:    mission.TriggerCount,
+		})
 		if err != nil {
 			continue
 		}
-		if existing == nil {
-			_ = s.missionRepo.UpsertProgress(&models.TokenMissionProgress{
-				BeautyCenterID: beautyCenterID,
-				MissionID:      mission.ID,
-				CurrentCount:   0,
-				TargetCount:    mission.TriggerCount,
-			})
-		}
+		progress = append(progress, *row)
 	}
-
-	return s.missionRepo.FindProgressByCenter(beautyCenterID)
+	return progress, nil
 }
 
 // TriggerCheck advances EVERY active mission matching the trigger type (D1 —
@@ -72,20 +84,15 @@ func (s *TokenMissionServiceImpl) TriggerCheck(beautyCenterID uint, triggerType 
 	}
 
 	for _, mission := range missions {
-		progress, err := s.missionRepo.FindProgress(beautyCenterID, mission.ID)
+		progress, err := s.missionRepo.FindOrCreateProgress(&models.TokenMissionProgress{
+			BeautyCenterID: beautyCenterID,
+			MissionID:      mission.ID,
+			PeriodKey:      MissionPeriodKey(mission.Period, s.clock()),
+			CurrentCount:   0,
+			TargetCount:    mission.TriggerCount,
+		})
 		if err != nil {
 			return err
-		}
-		if progress == nil {
-			progress = &models.TokenMissionProgress{
-				BeautyCenterID: beautyCenterID,
-				MissionID:      mission.ID,
-				CurrentCount:   0,
-				TargetCount:    mission.TriggerCount,
-			}
-			if err := s.missionRepo.UpsertProgress(progress); err != nil {
-				return err
-			}
 		}
 		if progress.CompletedAt != nil {
 			continue // already completed — frozen until claim
@@ -113,7 +120,7 @@ func (s *TokenMissionServiceImpl) ClaimReward(beautyCenterID, missionID uint) er
 		return errors.New("mission not found")
 	}
 
-	progress, err := s.missionRepo.FindProgress(beautyCenterID, missionID)
+	progress, err := s.missionRepo.FindProgress(beautyCenterID, missionID, MissionPeriodKey(mission.Period, s.clock()))
 	if err != nil {
 		return err
 	}

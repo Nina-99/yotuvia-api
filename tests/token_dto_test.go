@@ -10,7 +10,7 @@ import (
 )
 
 // TestTokenDTO_TransactionMilliToDecimal — the wire format must present stored
-// milli-YOTTUs as decimal YOTTUs with full precision (spec: "Full stored
+// milli-Ytv as decimal Ytv with full precision (spec: "Full stored
 // precision is preserved on the wire": 25555 milli -> 25.555).
 func TestTokenDTO_TransactionMilliToDecimal(t *testing.T) {
 	tx := models.TokenTransaction{
@@ -30,17 +30,21 @@ func TestTokenDTO_TransactionMilliToDecimal(t *testing.T) {
 	assert.Equal(t, "consumption", resp.Type)
 }
 
-// TestTokenDTO_BalanceMilliToDecimal — 25500 milli must serialize as 25.50.
+// TestTokenDTO_BalanceMilliToDecimal — 25500 milli must serialize as 25.50, and
+// the held portion must be reported separately from available funds.
 func TestTokenDTO_BalanceMilliToDecimal(t *testing.T) {
-	resp := response.NewTokenBalanceResponse(25500, 5000, "USD")
+	resp := response.NewTokenBalanceResponse(25500, 5000, 5000, "USD", 1.0)
 
 	assert.InDelta(t, 25.50, resp.Balance, 1e-9)
+	assert.InDelta(t, 5.0, resp.Reserved, 1e-9)
+	assert.InDelta(t, 25.50, resp.Available, 1e-9) // 25.50 - 5.00 + 5.00
 	assert.InDelta(t, 5.0, resp.OverdraftLimit, 1e-9)
+	assert.InDelta(t, 1.0, resp.FiatRate, 1e-9)
 	assert.Equal(t, "USD", resp.Currency)
 }
 
 // TestTokenDTO_TopUpMilliToDecimal — tokens convert from milli while the
-// bolivar-denominated AmountBs stays untouched (it is not part of the YOTTU
+// bolivar-denominated AmountBs stays untouched (it is not part of the Ytv
 // ledger).
 func TestTokenDTO_TopUpMilliToDecimal(t *testing.T) {
 	topup := models.TokenTopUp{
@@ -55,7 +59,7 @@ func TestTokenDTO_TopUpMilliToDecimal(t *testing.T) {
 
 	assert.InDelta(t, 25.555, resp.TokensReceived, 1e-9)
 	assert.InDelta(t, 0.5, resp.BonusTokens, 1e-9)
-	assert.InDelta(t, 100.5, resp.AmountBs, 1e-9, "AmountBs is bolivares, not YOTTU ledger")
+	assert.InDelta(t, 100.5, resp.AmountBs, 1e-9, "AmountBs is bolivares, not Ytv ledger")
 	assert.Equal(t, "approved", resp.Status)
 }
 

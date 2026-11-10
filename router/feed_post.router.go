@@ -14,6 +14,11 @@ import (
 // needs it (the feed routes and the TikTok import path) shares the same wiring
 // instead of duplicating the dependency list.
 func NewFeedPostService(db *gorm.DB, validate *validator.Validate) service.FeedPostService {
+	missionSvc := service.NewTokenMissionServiceImpl(
+		repository.NewTokenMissionRepositoryImpl(db),
+		nil,
+		repository.NewTokenAccountRepositoryImpl(db),
+	)
 	return service.NewFeedPostServiceImpl(
 		repository.NewFeedPostRepositoryImpl(db),
 		repository.NewBeautyCenterRepositoryImpl(db),
@@ -29,6 +34,7 @@ func NewFeedPostService(db *gorm.DB, validate *validator.Validate) service.FeedP
 		),
 		validate,
 		nil,
+		missionSvc,
 	)
 }
 

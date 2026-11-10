@@ -8,23 +8,34 @@ import (
 	"github.com/Nina-99/yotuvia-api/models"
 	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/Nina-99/yotuvia-api/utils"
+	"gorm.io/gorm"
+)
+
+// Referral economics and the monthly creation cap (reward values are milli-Ytv).
+const (
+	referralRewardReferrer int64 = 20_000 // 20 Ytv
+	referralRewardReferred int64 = 10_000 // 10 Ytv
+	referralMonthlyLimit   int64 = 10
 )
 
 type ReferralServiceImpl struct {
 	referralRepo repository.ReferralRepository
 	centerRepo   repository.BeautyCenterRepository
 	accountSvc   TokenAccountService
+	accountRepo  repository.TokenAccountRepository
 }
 
 func NewReferralServiceImpl(
 	referralRepo repository.ReferralRepository,
 	centerRepo repository.BeautyCenterRepository,
 	accountSvc TokenAccountService,
+	accountRepo repository.TokenAccountRepository,
 ) ReferralService {
 	return &ReferralServiceImpl{
 		referralRepo: referralRepo,
 		centerRepo:   centerRepo,
 		accountSvc:   accountSvc,
+		accountRepo:  accountRepo,
 	}
 }
 
@@ -54,12 +65,13 @@ func (s *ReferralServiceImpl) CreateReferralByCode(enteredByCenterID uint, code 
 		return errors.New("this center has already been referred")
 	}
 
-	// Check monthly limit on the referrer (max 10 outgoing referrals per month)
-	count, err := s.referralRepo.CountByReferrerID(referrer.ID)
+	// Real monthly cap: count only referrals created since the start of the
+	// current calendar month (UTC), not the lifetime total.
+	count, err := s.referralRepo.CountByReferrerIDSince(referrer.ID, startOfMonthUTC(time.Now()))
 	if err != nil {
 		return err
 	}
-	if count >= 10 {
+	if count >= referralMonthlyLimit {
 		return errors.New("referrer's monthly referral limit reached (max 10)")
 	}
 
@@ -67,49 +79,73 @@ func (s *ReferralServiceImpl) CreateReferralByCode(enteredByCenterID uint, code 
 		ReferrerID:     referrer.ID,
 		ReferredID:     referredID,
 		Status:         "pending",
-		RewardReferrer: 20000, // 20 YOTTUs in milli
-		RewardReferred: 10000, // 10 YOTTUs in milli
+		RewardReferrer: referralRewardReferrer,
+		RewardReferred: referralRewardReferred,
 	}
 
-	if err := s.referralRepo.Create(referral); err != nil {
-		return err
-	}
-
-	// Auto-process reward
-	return s.ProcessReferralReward(referredID)
+	// Entry only records the pending referral. Rewards are credited when the
+	// referred center is VERIFIED (ProcessReferralReward from MarkVerified).
+	return s.referralRepo.Create(referral)
 }
 
+// ProcessReferralReward credits both wallets exactly once, atomically. The
+// status guard and the credits share ONE transaction: a failure leaves the
+// referral pending and writes no partial ledger rows.
 func (s *ReferralServiceImpl) ProcessReferralReward(referredID uint) error {
 	referral, err := s.referralRepo.FindByReferredID(referredID)
 	if err != nil {
 		return err
 	}
-	if referral == nil {
-		return nil // not referred by anyone
+	if referral == nil || referral.Status != "pending" {
+		return nil // not referred, or already credited
 	}
-	if referral.Status != "pending" {
-		return nil // already processed
+	if s.accountRepo == nil {
+		return errors.New("referral: token account repository not configured")
 	}
 
-	referral.Status = "credited"
-	now := time.Now()
-	referral.CreditedAt = &now
+	referrerAccount, err := s.accountRepo.FindByBeautyCenterID(referral.ReferrerID)
+	if err != nil {
+		return err
+	}
+	if referrerAccount == nil {
+		return errors.New("referral: referrer token account not found")
+	}
+	referredAccount, err := s.accountRepo.FindByBeautyCenterID(referredID)
+	if err != nil {
+		return err
+	}
+	if referredAccount == nil {
+		return errors.New("referral: referred token account not found")
+	}
 
-	if err := s.referralRepo.Update(referral); err != nil {
+	refID := referral.ID
+	err = s.accountRepo.Transaction(func(tx *gorm.DB) error {
+		rows, err := s.referralRepo.MarkCreditedTx(tx, referral.ID)
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return nil // concurrent processing won: no second credit
+		}
+
+		if _, err := s.accountRepo.AddTokensInTx(tx, referrerAccount.ID,
+			referral.RewardReferrer, "referral",
+			"Referral reward: center "+fmt.Sprint(referredID), &refID); err != nil {
+			return err
+		}
+		if _, err := s.accountRepo.AddTokensInTx(tx, referredAccount.ID,
+			referral.RewardReferred, "referral",
+			"Welcome bonus: you were referred!", &refID); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		utils.Log.Errorf("[REFERRAL] Failed to credit referral %d (left pending): %v", referral.ID, err)
 		return err
 	}
 
-	// Reward referrer
-	if err := s.accountSvc.AddTokens(referral.ReferrerID, referral.RewardReferrer, "referral", referral.ID, "Referral reward: center "+fmt.Sprint(referredID)); err != nil {
-		utils.Log.Errorf("[REFERRAL] Failed to reward referrer %d: %v", referral.ReferrerID, err)
-	}
-
-	// Reward referred
-	if err := s.accountSvc.AddTokens(referredID, referral.RewardReferred, "referral", referral.ID, "Welcome bonus: you were referred!"); err != nil {
-		utils.Log.Errorf("[REFERRAL] Failed to reward referred %d: %v", referredID, err)
-	}
-
-	utils.Log.Infof("[REFERRAL] Referral %d credited: referrer +%.0f, referred +%.0f YOTTUs",
+	utils.Log.Infof("[REFERRAL] Referral %d credited: referrer +%.0f, referred +%.0f Ytv",
 		referral.ID, utils.FromMilli(referral.RewardReferrer), utils.FromMilli(referral.RewardReferred))
 	return nil
 }

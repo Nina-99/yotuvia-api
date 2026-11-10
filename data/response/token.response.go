@@ -9,10 +9,15 @@ import (
 
 type TokenBalanceResponse struct {
 	Balance        float64 `json:"balance"`
+	Reserved       float64 `json:"reserved"`
+	Available      float64 `json:"available"`
 	OverdraftLimit float64 `json:"overdraft_limit"`
 	TotalPurchased float64 `json:"total_purchased"`
 	TotalConsumed  float64 `json:"total_consumed"`
 	Currency       string  `json:"currency"`
+	// FiatRate is the reference conversion for the center's currency:
+	// 1 Ytv = FiatRate <Currency>. Display only; accounting never uses it.
+	FiatRate float64 `json:"fiat_rate"`
 }
 
 type TokenTransactionResponse struct {
@@ -64,15 +69,20 @@ type ReferralResponse struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// The wire format stays decimal YOTTUs; these constructors convert the stored
-// int64 milli-YOTTUs to decimal on serialization so clients never see millis.
+// The wire format stays decimal Ytv; these constructors convert the stored
+// int64 milli-Ytv to decimal on serialization so clients never see millis.
 
-// NewTokenBalanceResponse builds a balance payload from milli values.
-func NewTokenBalanceResponse(balanceMilli, overdraftMilli int64, currency string) TokenBalanceResponse {
+// NewTokenBalanceResponse builds a balance payload from milli values. Available
+// is what the owner can still spend: balance minus the held portion plus the
+// overdraft limit. FiatRate is 1 Ytv expressed in the center's currency.
+func NewTokenBalanceResponse(balanceMilli, reservedMilli, overdraftMilli int64, currency string, fiatRate float64) TokenBalanceResponse {
 	return TokenBalanceResponse{
 		Balance:        utils.FromMilli(balanceMilli),
+		Reserved:       utils.FromMilli(reservedMilli),
+		Available:      utils.FromMilli(balanceMilli - reservedMilli + overdraftMilli),
 		OverdraftLimit: utils.FromMilli(overdraftMilli),
 		Currency:       currency,
+		FiatRate:       fiatRate,
 	}
 }
 
@@ -90,7 +100,7 @@ func NewTokenTransactionResponse(tx models.TokenTransaction) TokenTransactionRes
 }
 
 // NewTokenTopUpResponse converts tokens to decimal; AmountBs is bolivares, not
-// part of the YOTTU ledger, and stays untouched. BeautyCenterID is carried so
+// part of the Ytv ledger, and stays untouched. BeautyCenterID is carried so
 // the platform-wide queue can tell one centre's row from another's.
 func NewTokenTopUpResponse(topup models.TokenTopUp) TokenTopUpResponse {
 	return TokenTopUpResponse{

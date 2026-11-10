@@ -82,6 +82,48 @@ func SeedDefaultMissions() {
 			IsActive:     true,
 			SortOrder:    7,
 		},
+		// ── Weekly recurring missions (feat-missions-engagement) ──
+		// Budget: 4 + 1 + 1 = 6 Ytv/week (~26/month) at full completion.
+		{
+			Name:         "Weekly 5 Reservations",
+			Description:  "Complete 5 reservations this week",
+			TriggerType:  "reservation_completed",
+			TriggerCount: 5,
+			Period:       "weekly",
+			RewardTokens: 4000,
+			Icon:         "📅",
+			IsActive:     true,
+			SortOrder:    8,
+		},
+		{
+			Name:         "Weekly 3 Reviews",
+			Description:  "Receive 3 reviews this week",
+			TriggerType:  "review_received",
+			TriggerCount: 3,
+			Period:       "weekly",
+			RewardTokens: 1000,
+			Icon:         "💬",
+			IsActive:     true,
+			SortOrder:    9,
+		},
+		{
+			Name:         "Weekly 1 Video",
+			Description:  "Publish 1 video this week",
+			TriggerType:  "video_published",
+			TriggerCount: 1,
+			Period:       "weekly",
+			RewardTokens: 1000,
+			Icon:         "🎥",
+			IsActive:     true,
+			SortOrder:    10,
+		},
+	}
+
+	// Lifetime seeds default to a one-shot period.
+	for i := range missions {
+		if missions[i].Period == "" {
+			missions[i].Period = "once"
+		}
 	}
 
 	// feat-token-missions D3: review responses don't exist as a product
@@ -95,12 +137,13 @@ func SeedDefaultMissions() {
 
 	for _, mission := range missions {
 		var existing models.TokenMission
-		result := DB.Where("trigger_type = ? AND trigger_count = ?", mission.TriggerType, mission.TriggerCount).First(&existing)
+		result := DB.Where("trigger_type = ? AND trigger_count = ? AND period = ?",
+			mission.TriggerType, mission.TriggerCount, mission.Period).First(&existing)
 		if result.Error != nil {
 			if err := DB.Create(&mission).Error; err != nil {
 				utils.Log.Errorf("[SEED] Failed to create mission %s: %v", mission.Name, err)
 			} else {
-				utils.Log.Infof("[SEED] Created mission: %s (+%.0f YOTTUs)", mission.Name, utils.FromMilli(mission.RewardTokens))
+				utils.Log.Infof("[SEED] Created mission: %s (+%.0f Ytv)", mission.Name, utils.FromMilli(mission.RewardTokens))
 			}
 		} else if existing.Name != mission.Name ||
 			existing.Description != mission.Description ||
@@ -109,7 +152,7 @@ func SeedDefaultMissions() {
 			existing.RewardTokens != mission.RewardTokens ||
 			!existing.IsActive {
 			// Self-heal drifted legacy rows (e.g. reward loaded as whole units
-			// instead of milli-YOTTU) back to the canonical definition.
+			// instead of milli-Ytv) back to the canonical definition.
 			if err := DB.Model(&existing).Updates(map[string]interface{}{
 				"name":          mission.Name,
 				"description":   mission.Description,
@@ -120,7 +163,7 @@ func SeedDefaultMissions() {
 			}).Error; err != nil {
 				utils.Log.Errorf("[SEED] Failed to heal mission %s: %v", mission.Name, err)
 			} else {
-				utils.Log.Infof("[SEED] Healed drifted mission %s → %.0f YOTTUs", mission.Name, utils.FromMilli(mission.RewardTokens))
+				utils.Log.Infof("[SEED] Healed drifted mission %s → %.0f Ytv", mission.Name, utils.FromMilli(mission.RewardTokens))
 			}
 		}
 	}
@@ -131,13 +174,16 @@ func SeedDefaultMissions() {
 // missions: missing rows are created, drifted rows are restored to canonical.
 func SeedMarketConfigs() {
 	configs := []models.MarketConfig{
-		// Bolivia — launch market. 1 YOTTU = 1 BOB; commission 3.5%;
-		// floor 0.35 YOTTU (= commission of a 10 BOB reference ticket).
+		// Bolivia — launch market. 1 Ytv = 1 BOB; commission 3.5%;
+		// floor 0.35 Ytv (= commission of a 10 BOB reference ticket).
 		{
-			Currency:          "BOB",
-			YotuviaToFiatRate: 1.0,
-			CommissionPct:     3.5,
-			MinChargeMilli:    350,
+			Currency:              "BOB",
+			YtvToFiatRate:         1.0,
+			CommissionPct:         3.5,
+			MinChargeMilli:        350,
+			BoostReserveCapPct:    0.50,
+			BoostReserveCPMMilli:  1000,
+			BoostQualificationPct: 50,
 		},
 	}
 
@@ -148,16 +194,22 @@ func SeedMarketConfigs() {
 			if err := DB.Create(&cfg).Error; err != nil {
 				utils.Log.Errorf("[SEED] Failed to create market config %s: %v", cfg.Currency, err)
 			} else {
-				utils.Log.Infof("[SEED] Created market config %s: %.2f%% / floor %.2f YOTTUs",
+				utils.Log.Infof("[SEED] Created market config %s: %.2f%% / floor %.2f Ytv",
 					cfg.Currency, cfg.CommissionPct, utils.FromMilli(cfg.MinChargeMilli))
 			}
-		} else if existing.YotuviaToFiatRate != cfg.YotuviaToFiatRate ||
+		} else if existing.YtvToFiatRate != cfg.YtvToFiatRate ||
 			existing.CommissionPct != cfg.CommissionPct ||
-			existing.MinChargeMilli != cfg.MinChargeMilli {
+			existing.MinChargeMilli != cfg.MinChargeMilli ||
+			existing.BoostReserveCapPct != cfg.BoostReserveCapPct ||
+			existing.BoostReserveCPMMilli != cfg.BoostReserveCPMMilli ||
+			existing.BoostQualificationPct != cfg.BoostQualificationPct {
 			if err := DB.Model(&existing).Updates(map[string]interface{}{
-				"yotuvia_to_fiat_rate": cfg.YotuviaToFiatRate,
-				"commission_pct":       cfg.CommissionPct,
-				"min_charge_milli":     cfg.MinChargeMilli,
+				"ytv_to_fiat_rate":        cfg.YtvToFiatRate,
+				"commission_pct":          cfg.CommissionPct,
+				"min_charge_milli":        cfg.MinChargeMilli,
+				"boost_reserve_cap_pct":   cfg.BoostReserveCapPct,
+				"boost_reserve_cpm_milli": cfg.BoostReserveCPMMilli,
+				"boost_qualification_pct": cfg.BoostQualificationPct,
 			}).Error; err != nil {
 				utils.Log.Errorf("[SEED] Failed to heal market config %s: %v", cfg.Currency, err)
 			} else {

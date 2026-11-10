@@ -52,6 +52,7 @@ func platformAllRoutes() []platformRoute {
 		{"global topup queue", http.MethodGet, "/api/admin/platform/tokens/topups", ""},
 		{"platform process topup", http.MethodPut, "/api/admin/platform/tokens/topups/1", `{"status":"approved"}`},
 		{"center picker", http.MethodGet, "/api/admin/platform/centers", ""},
+		{"platform verify center", http.MethodPut, "/api/admin/platform/centers/1/verify", ""},
 		{"platform payment read", http.MethodGet, "/api/admin/platform/centers/1/payment", ""},
 		{"platform payment update", http.MethodPut, "/api/admin/platform/centers/1/payment", `{"payment_phone":"x"}`},
 		{"platform payment qr", http.MethodPost, "/api/admin/platform/centers/1/payment/qr", ""},

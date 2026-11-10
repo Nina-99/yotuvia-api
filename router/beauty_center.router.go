@@ -12,11 +12,15 @@ import (
 
 func BeautyCenterRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
 	repo := repository.NewBeautyCenterRepositoryImpl(db)
+	accountRepo := repository.NewTokenAccountRepositoryImpl(db)
+	referralSvc := service.NewReferralServiceImpl(
+		repository.NewReferralRepositoryImpl(db), repo, nil, accountRepo,
+	)
 	svc := service.NewBeautyCenterServiceImpl(repo,
 		service.NewTokenMissionServiceImpl(
 			repository.NewTokenMissionRepositoryImpl(db), nil,
-			repository.NewTokenAccountRepositoryImpl(db),
-		), validate, repository.NewTimeBlockRepositoryImpl(db))
+			accountRepo,
+		), validate, repository.NewTimeBlockRepositoryImpl(db), referralSvc)
 	ctrl := controller.NewBeautyCenterController(svc)
 
 	beautyCenter := rg.Group("/beauty-centers")

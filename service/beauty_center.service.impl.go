@@ -23,14 +23,22 @@ type BeautyCenterServiceImpl struct {
 	// timeBlockRepo backs unavailability blocks in GetAvailableSlots. OPTIONAL:
 	// nil disables block subtraction.
 	timeBlockRepo repository.TimeBlockRepository
+	// referralService credits pending referrals when a center is verified.
+	// OPTIONAL: nil skips referral crediting (mission trigger still runs).
+	referralService ReferralService
 }
 
-func NewBeautyCenterServiceImpl(repo repository.BeautyCenterRepository, missionService TokenMissionService, validate *validator.Validate, timeBlockRepo repository.TimeBlockRepository) BeautyCenterService {
+func NewBeautyCenterServiceImpl(repo repository.BeautyCenterRepository, missionService TokenMissionService, validate *validator.Validate, timeBlockRepo repository.TimeBlockRepository, referralSvc ...ReferralService) BeautyCenterService {
+	var referral ReferralService
+	if len(referralSvc) > 0 {
+		referral = referralSvc[0]
+	}
 	return &BeautyCenterServiceImpl{
-		repo:           repo,
-		missionService: missionService,
-		Validate:       validate,
-		timeBlockRepo:  timeBlockRepo,
+		repo:            repo,
+		missionService:  missionService,
+		Validate:        validate,
+		timeBlockRepo:   timeBlockRepo,
+		referralService: referral,
 	}
 }
 
@@ -221,11 +229,24 @@ func (s *BeautyCenterServiceImpl) MarkVerified(id uint) error {
 	if err != nil {
 		return err
 	}
-	if !transitioned || referrerID == nil || s.missionService == nil {
+	if !transitioned {
 		return nil
 	}
-	if err := s.missionService.TriggerCheck(*referrerID, "referral"); err != nil {
-		utils.Log.Errorf("[MISSION] referral trigger failed for referrer %d: %v", *referrerID, err)
+
+	// Credit the referral exactly once, atomically, when the referred center is
+	// verified. Best-effort: a credit failure logs and leaves it pending for a
+	// retry; verification itself already committed.
+	if s.referralService != nil {
+		if err := s.referralService.ProcessReferralReward(id); err != nil {
+			utils.Log.Errorf("[REFERRAL] credit failed for verified center %d: %v", id, err)
+		}
+	}
+
+	// The referrer's mission fires on the same transition, exactly once.
+	if referrerID != nil && s.missionService != nil {
+		if err := s.missionService.TriggerCheck(*referrerID, "referral"); err != nil {
+			utils.Log.Errorf("[MISSION] referral trigger failed for referrer %d: %v", *referrerID, err)
+		}
 	}
 	return nil
 }

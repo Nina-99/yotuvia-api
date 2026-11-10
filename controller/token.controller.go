@@ -18,13 +18,14 @@ import (
 )
 
 type TokenController struct {
-	accountSvc  service.TokenAccountService
-	txSvc       service.TokenTransactionService
-	missionSvc  service.TokenMissionService
-	referralSvc service.ReferralService
-	topUpRepo   repository.TokenTopUpRepository
-	centerRepo  repository.BeautyCenterRepository
-	uploadCtrl  *UploadController
+	accountSvc      service.TokenAccountService
+	txSvc           service.TokenTransactionService
+	missionSvc      service.TokenMissionService
+	referralSvc     service.ReferralService
+	topUpRepo       repository.TokenTopUpRepository
+	centerRepo      repository.BeautyCenterRepository
+	uploadCtrl      *UploadController
+	marketConfigSvc service.MarketConfigService
 }
 
 func NewTokenController(
@@ -35,15 +36,17 @@ func NewTokenController(
 	topUpRepo repository.TokenTopUpRepository,
 	centerRepo repository.BeautyCenterRepository,
 	uploadCtrl *UploadController,
+	marketConfigSvc service.MarketConfigService,
 ) *TokenController {
 	return &TokenController{
-		accountSvc:  accountSvc,
-		txSvc:       txSvc,
-		missionSvc:  missionSvc,
-		referralSvc: referralSvc,
-		topUpRepo:   topUpRepo,
-		centerRepo:  centerRepo,
-		uploadCtrl:  uploadCtrl,
+		accountSvc:      accountSvc,
+		txSvc:           txSvc,
+		missionSvc:      missionSvc,
+		referralSvc:     referralSvc,
+		topUpRepo:       topUpRepo,
+		centerRepo:      centerRepo,
+		uploadCtrl:      uploadCtrl,
+		marketConfigSvc: marketConfigSvc,
 	}
 }
 
@@ -55,13 +58,25 @@ func (c *TokenController) GetBalance(ctx *gin.Context) {
 		return
 	}
 
-	balance, overdraft, currency, err := c.accountSvc.GetBalance(centerID.(uint))
+	balance, reserved, overdraft, currency, err := c.accountSvc.GetBalance(centerID.(uint))
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, response.NewTokenBalanceResponse(balance, overdraft, currency))
+	// The equivalence line is data-driven: the center's own currency and the
+	// per-currency rate from market_config. No fiat symbol is hardcoded here.
+	fiatRate := 1.0
+	fiatCurrency := currency
+	if c.marketConfigSvc != nil {
+		economy := c.marketConfigSvc.GetEconomyForCurrency(currency)
+		fiatRate = economy.YtvToFiatRate
+		if fiatCurrency == "" {
+			fiatCurrency = economy.Currency
+		}
+	}
+
+	ctx.JSON(http.StatusOK, response.NewTokenBalanceResponse(balance, reserved, overdraft, fiatCurrency, fiatRate))
 }
 
 // GET /api/v1/tokens/history

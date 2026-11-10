@@ -72,9 +72,14 @@ func DBConnection() {
 		&models.WaitlistEntry{},
 		&models.PlatformAdmin{},
 		&models.BoostCampaign{},
+		&models.BoostImpression{},
 		&models.TikTokAccount{},
 		&models.TikTokConnectionState{},
 	}
+
+	// Rename the legacy currency-rate column BEFORE AutoMigrate so GORM never
+	// adds a second, empty column next to it.
+	renameYtvColumn(db)
 
 	for _, model := range list_models {
 		if err := db.AutoMigrate(model); err != nil {
@@ -83,6 +88,10 @@ func DBConnection() {
 	}
 
 	DB = db
+
+	// Period-aware missions: drop the legacy (center, mission) unique index and
+	// guarantee the (center, mission, period_key) one before any seeding.
+	MigrateMissionPeriods(db)
 
 	SeedDefaultMissions()
 	SeedMarketConfigs()
@@ -107,4 +116,53 @@ func DBConnection() {
 	// never overwritten); a half-configured or unset env is a logged no-op. This
 	// is the ONLY way the role comes to exist — registration cannot mint it.
 	SeedPlatformAdmin()
+}
+
+// renameYtvColumn renames the legacy market_config currency-rate column in
+// place. It runs before AutoMigrate so GORM does not add a second, empty
+// ytv_to_fiat_rate column next to the old one. No-op on fresh databases.
+func renameYtvColumn(db *gorm.DB) {
+	model := &models.MarketConfig{}
+	if !db.Migrator().HasTable(model) {
+		return
+	}
+	const oldName, newName = "yotuvia_to_fiat_rate", "ytv_to_fiat_rate"
+	if db.Migrator().HasColumn(model, oldName) && !db.Migrator().HasColumn(model, newName) {
+		if err := db.Migrator().RenameColumn(model, oldName, newName); err != nil {
+			utils.Log.Errorf("[MIGRATE] failed to rename market_config.%s: %v", oldName, err)
+			return
+		}
+		utils.Log.Infof("[MIGRATE] renamed market_config.%s → %s", oldName, newName)
+	}
+}
+
+// MigrateMissionPeriods replaces the legacy (center, mission) uniqueness with
+// (center, mission, period_key) so recurring missions can keep one row per
+// window. Idempotent: safe on fresh and already-migrated databases.
+func MigrateMissionPeriods(db *gorm.DB) {
+	model := &models.TokenMissionProgress{}
+	if !db.Migrator().HasTable(model) {
+		return
+	}
+
+	if db.Migrator().HasIndex(model, "idx_mission_center") {
+		if err := db.Migrator().DropIndex(model, "idx_mission_center"); err != nil {
+			utils.Log.Errorf("[MIGRATE] failed to drop idx_mission_center: %v", err)
+		} else {
+			utils.Log.Infof("[MIGRATE] dropped legacy idx_mission_center")
+		}
+	}
+
+	// Existing rows predate periods: they belong to the one-shot mission.
+	if err := db.Model(model).
+		Where("period_key = ? OR period_key IS NULL", "").
+		Update("period_key", "once").Error; err != nil {
+		utils.Log.Errorf("[MIGRATE] failed to backfill period_key: %v", err)
+	}
+
+	if !db.Migrator().HasIndex(model, "idx_mission_center_period") {
+		if err := db.Migrator().CreateIndex(model, "idx_mission_center_period"); err != nil {
+			utils.Log.Errorf("[MIGRATE] failed to create idx_mission_center_period: %v", err)
+		}
+	}
 }
