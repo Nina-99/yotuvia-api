@@ -194,6 +194,7 @@ func (s *AuthAccountServiceImpl) loginByType(identifier, password, userType stri
 	var firstName string
 	var lastName string
 	var passwordHash string
+	active := true
 
 	switch userType {
 	case "client":
@@ -214,6 +215,7 @@ func (s *AuthAccountServiceImpl) loginByType(identifier, password, userType stri
 		firstName = client.FirstName
 		lastName = client.LastName
 		passwordHash = client.Password
+		active = client.IsActive
 
 	case "personnel":
 		personnel, err := s.PersonnelRepo.FindByEmail(identifier)
@@ -227,6 +229,7 @@ func (s *AuthAccountServiceImpl) loginByType(identifier, password, userType stri
 		firstName = personnel.FirstName
 		lastName = personnel.LastName
 		passwordHash = personnel.Password
+		active = personnel.IsActive
 
 	case "beauty_center":
 		center, err := s.CenterRepo.FindByEmail(identifier)
@@ -267,6 +270,11 @@ func (s *AuthAccountServiceImpl) loginByType(identifier, password, userType stri
 
 	if !utils.VerifyPassword(password, passwordHash) {
 		return AuthResult{}, errors.New("invalid credentials")
+	}
+	// Inactive client/personnel accounts cannot log in. Checked AFTER the
+	// password so the message never reveals an account's state to a stranger.
+	if !active {
+		return AuthResult{}, errors.New("account is inactive")
 	}
 
 	utils.Log.Infof("[AUTH] Classic Login successful. UserType: %s, ID: %d", userType, userID)
@@ -657,6 +665,9 @@ func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccoun
 			centerID = 0
 			client, _ := s.ClientRepo.FindById(userID)
 			if client != nil {
+				if !client.IsActive {
+					return AuthResult{}, errors.New("account is inactive")
+				}
 				email = client.Email
 				username = client.Username
 				firstName = client.FirstName
@@ -668,6 +679,11 @@ func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccoun
 			userID = *account.PersonnelID
 			personnel, _ := s.PersonnelRepo.FindByID(userID)
 			if personnel != nil {
+				// Self-registered staff stay inactive until an invitation links
+				// them to a centre; do not mint a staff token before that.
+				if !personnel.IsActive {
+					return AuthResult{}, errors.New("account is inactive")
+				}
 				email = personnel.Email
 				username = personnel.FirstName
 				firstName = personnel.FirstName

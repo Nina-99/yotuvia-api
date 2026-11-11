@@ -107,7 +107,7 @@ func TestRouterWiring_No5xxWithValidToken(t *testing.T) {
 		{"auth register", http.MethodPost, "/api/auth-accounts/register", "client"},
 		{"auth refresh", http.MethodPost, "/api/auth-accounts/refresh", "client"},
 		{"auth logout", http.MethodPost, "/api/auth-accounts/logout", "client"},
-		{"auth register personnel", http.MethodPost, "/api/auth/register-personnel", "client"},
+		{"auth register personnel", http.MethodPost, "/api/auth/register-personnel", "beauty_center"},
 		// ── availability search ──
 		{"availability search", http.MethodGet, "/api/availability/search", "client"},
 		// ── beauty centers ──

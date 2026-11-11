@@ -68,5 +68,5 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	// Routes under /auth (used by mobile admin panel). The limiter runs before
 	// the JWT check so throttling happens before any CPU is spent on the token.
 	auth := rg.Group("/auth")
-	auth.POST("/register-personnel", authLimiter, middleware.JWTAuthMiddleware(), ctrl.RegisterPersonnel)
+	auth.POST("/register-personnel", authLimiter, middleware.JWTAuthMiddleware(), middleware.RequireRole("beauty_center"), ctrl.RegisterPersonnel)
 }

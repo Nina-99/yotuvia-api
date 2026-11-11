@@ -74,6 +74,15 @@ func (c *AuthAccountController) RegisterPersonnel(ctx *gin.Context) {
 		return
 	}
 
+	// The acting centre comes from the JWT, never from the body: an owner can
+	// only create staff for its OWN centre.
+	centerID, exists := ctx.Get("centerID")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "center ID not found in token"})
+		return
+	}
+	req.BeautyCenterID = centerID.(uint)
+
 	if err := c.authAccountService.RegisterPersonnel(req); err != nil {
 		status, msg := apperrors.MapToHTTP(err)
 		ctx.JSON(status, gin.H{"error": msg})

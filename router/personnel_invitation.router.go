@@ -22,9 +22,9 @@ func PersonnelInvitationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *valid
 	rg.GET("/personnel/invite/:token", ctrl.GetByToken)
 	rg.POST("/personnel/accept-invite", ctrl.Accept)
 
-	// Protected routes (JWT required — center only)
+	// Protected routes (owner only): a staff token must not invite or list staff.
 	protected := rg.Group("/personnel/invitations")
-	protected.Use(middleware.JWTAuthMiddleware())
+	protected.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("beauty_center"))
 	{
 		protected.POST("", ctrl.Generate)
 		protected.GET("", ctrl.ListByCenter)
