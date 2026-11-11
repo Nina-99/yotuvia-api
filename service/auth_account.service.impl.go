@@ -346,6 +346,12 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 	if err := s.Validate.Struct(req); err != nil {
 		return AuthResult{}, fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
 	}
+	// Staff accounts are created by the owner (/auth/register-personnel) or by
+	// accepting an invitation. The public endpoint must never mint a staff token.
+	if req.UserType == "personnel" {
+		return AuthResult{}, fmt.Errorf("%w: staff accounts are created via invitation",
+			apperrors.ErrValidation)
+	}
 
 	hashedPassword, err := utils.HashPassword(req.Password)
 	if err != nil {
@@ -498,6 +504,9 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (AuthResult, error) {
 	if err := s.Validate.Struct(req); err != nil {
 		return AuthResult{}, err
+	}
+	if req.UserType == "personnel" {
+		return AuthResult{}, errors.New("staff accounts are created via invitation")
 	}
 
 	var providerID string

@@ -103,23 +103,21 @@ func TestRegister_BeautyCenterTermsRecorded(t *testing.T) {
 	assert.NotNil(t, acct.BeautyCenterID)
 }
 
-// TestRegister_PersonnelSelfRegistrationTermsRecorded — the public register
-// endpoint's personnel branch is a real self-registration surface, so it also
-// records the acceptance. (The admin POST /auth/register-personnel path does
-// NOT — see RegisterPersonnelDecision in the report.)
-func TestRegister_PersonnelSelfRegistrationTermsRecorded(t *testing.T) {
+// TestRegister_PersonnelSelfRegistrationRejected — staff accounts are created
+// by invitation or by the owner; the public endpoint must never mint a staff
+// token for an orphan, inactive personnel row.
+func TestRegister_PersonnelSelfRegistrationRejected(t *testing.T) {
 	db := setupAuthRefreshDB(t)
 	r := authRefreshRouter(t, db)
 
 	body := `{"first_name":"Pam","last_name":"Personnel","email":"staff.terms@test.com","phone":"5550100","password":"password123","user_type":"personnel","terms_accepted":true}`
 	w := do(r, http.MethodPost, "/api/auth-accounts/register", "", body)
-	assert.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 
-	var acct models.AuthAccount
-	err := db.Where("provider = ? AND user_type = ?", "local", "personnel").First(&acct).Error
-	assert.NoError(t, err, "personnel self-registration must persist an acceptance record")
-	assert.NotNil(t, acct.TermsAcceptedAt)
-	assert.NotNil(t, acct.PersonnelID)
+	var count int64
+	assert.NoError(t, db.Model(&models.AuthAccount{}).
+		Where("user_type = ?", "personnel").Count(&count).Error)
+	assert.Zero(t, count, "no staff account must be created by public registration")
 }
 
 // TestRegister_DuplicateEmail409 — the old 500 collapses to a 409 with the
