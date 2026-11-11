@@ -15,7 +15,7 @@ func PersonnelInvitationRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *valid
 	personnelRepo := repository.NewPersonnelRepositoryImpl(db)
 	centerRepo := repository.NewBeautyCenterRepositoryImpl(db)
 	authRepo := repository.NewAuthAccountRepositoryImpl(db)
-	svc := service.NewPersonnelInvitationServiceImpl(invitationRepo, personnelRepo, centerRepo, authRepo, validate)
+	svc := service.NewPersonnelInvitationServiceImpl(invitationRepo, personnelRepo, centerRepo, repository.NewClientRepositoryImpl(db), authRepo, validate)
 	ctrl := controller.NewPersonnelInvitationController(svc)
 
 	// Public routes (no auth required)

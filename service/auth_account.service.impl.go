@@ -342,6 +342,33 @@ func (s *AuthAccountServiceImpl) generateUniqueReferralCode() (string, error) {
 	return "", errors.New("failed to generate a unique referral code")
 }
 
+// emailExistsInAnyRole enforces one account per email across every role.
+func (s *AuthAccountServiceImpl) emailExistsInAnyRole(email string) (bool, error) {
+	if client, err := s.ClientRepo.FindByEmail(email); err != nil {
+		return false, err
+	} else if client != nil {
+		return true, nil
+	}
+	if personnel, err := s.PersonnelRepo.FindByEmail(email); err != nil {
+		return false, err
+	} else if personnel != nil {
+		return true, nil
+	}
+	if center, err := s.CenterRepo.FindByEmail(email); err != nil {
+		return false, err
+	} else if center != nil {
+		return true, nil
+	}
+	if s.PlatformAdminRepo != nil {
+		if admin, err := s.PlatformAdminRepo.FindByEmail(email); err != nil {
+			return false, err
+		} else if admin != nil {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResult, error) {
 	if err := s.Validate.Struct(req); err != nil {
 		return AuthResult{}, fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
@@ -351,6 +378,13 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 	if req.UserType == "personnel" {
 		return AuthResult{}, fmt.Errorf("%w: staff accounts are created via invitation",
 			apperrors.ErrValidation)
+	}
+
+	// One account per email across every role.
+	if taken, err := s.emailExistsInAnyRole(req.Email); err != nil {
+		return AuthResult{}, err
+	} else if taken {
+		return AuthResult{}, apperrors.ErrEmailTaken
 	}
 
 	hashedPassword, err := utils.HashPassword(req.Password)
@@ -547,6 +581,14 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (Au
 		return s.generateTokenForUser(account)
 	}
 
+	// One account per email across every role: a social sign-up must not create
+	// a second account for an email that is already a client/centre/staff.
+	if taken, err := s.emailExistsInAnyRole(email); err != nil {
+		return AuthResult{}, err
+	} else if taken {
+		return AuthResult{}, apperrors.ErrEmailTaken
+	}
+
 	utils.Log.Infof("[AUTH] Social Account not found. Creating new %s via %s", req.UserType, req.Provider)
 	newAccount := models.AuthAccount{
 		Provider:   req.Provider,
@@ -629,9 +671,10 @@ func (s *AuthAccountServiceImpl) RegisterPersonnel(req request.RegisterPersonnel
 		return fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
 	}
 
-	// Check existing email
-	existing, _ := s.PersonnelRepo.FindByEmail(req.Email)
-	if existing != nil {
+	// Check existing email across every role: one account per email.
+	if taken, err := s.emailExistsInAnyRole(req.Email); err != nil {
+		return err
+	} else if taken {
 		return apperrors.ErrEmailTaken
 	}
 

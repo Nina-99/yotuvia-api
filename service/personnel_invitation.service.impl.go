@@ -17,6 +17,7 @@ type PersonnelInvitationServiceImpl struct {
 	InvitationRepo repository.PersonnelInvitationRepository
 	PersonnelRepo  repository.PersonnelRepository
 	CenterRepo     repository.BeautyCenterRepository
+	ClientRepo     repository.ClientRepository
 	AuthRepo       repository.AuthAccountRepository
 	Validate       *validator.Validate
 }
@@ -25,6 +26,7 @@ func NewPersonnelInvitationServiceImpl(
 	invitationRepo repository.PersonnelInvitationRepository,
 	personnelRepo repository.PersonnelRepository,
 	centerRepo repository.BeautyCenterRepository,
+	clientRepo repository.ClientRepository,
 	authRepo repository.AuthAccountRepository,
 	validate *validator.Validate,
 ) PersonnelInvitationService {
@@ -32,9 +34,26 @@ func NewPersonnelInvitationServiceImpl(
 		InvitationRepo: invitationRepo,
 		PersonnelRepo:  personnelRepo,
 		CenterRepo:     centerRepo,
+		ClientRepo:     clientRepo,
 		AuthRepo:       authRepo,
 		Validate:       validate,
 	}
+}
+
+// emailBelongsToOtherRole enforces one account per email: a client or centre
+// email cannot be invited as staff.
+func (s *PersonnelInvitationServiceImpl) emailBelongsToOtherRole(email string) (bool, error) {
+	if client, err := s.ClientRepo.FindByEmail(email); err != nil {
+		return false, err
+	} else if client != nil {
+		return true, nil
+	}
+	if center, err := s.CenterRepo.FindByEmail(email); err != nil {
+		return false, err
+	} else if center != nil {
+		return true, nil
+	}
+	return false, nil
 }
 
 // ──────────────────────────────────────────────
@@ -54,6 +73,12 @@ func (s *PersonnelInvitationServiceImpl) Generate(beautyCenterID uint, email str
 	center, err := s.CenterRepo.FindByID(beautyCenterID)
 	if err != nil || center == nil {
 		return "", errors.New("beauty center not found")
+	}
+	// One account per email: a client or another centre cannot be invited as staff.
+	if taken, err := s.emailBelongsToOtherRole(email); err != nil {
+		return "", err
+	} else if taken {
+		return "", errors.New("email already registered with another account")
 	}
 
 	// If there's a pending invitation, renew it instead of rejecting
@@ -157,6 +182,14 @@ func (s *PersonnelInvitationServiceImpl) Accept(token, firstName, lastName, phon
 	// Validate required fields
 	if firstName == "" || lastName == "" || password == "" {
 		return errors.New("first_name, last_name, and password are required")
+	}
+
+	// One account per email: an invited email must not already be a client or a
+	// centre. (An existing staff row for this email is the intended invitee.)
+	if taken, err := s.emailBelongsToOtherRole(invitation.Email); err != nil {
+		return err
+	} else if taken {
+		return errors.New("email already registered with another account")
 	}
 
 	// Hash password
