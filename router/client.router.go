@@ -12,7 +12,7 @@ import (
 
 func ClientRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate) {
 	repo := repository.NewClientRepositoryImpl(db)
-	svc := service.NewClientServiceImpl(repo, validate)
+	svc := service.NewClientServiceImpl(repo, repository.NewUserSessionRepositoryImpl(db), validate)
 	ctrl := controller.NewClientController(svc)
 
 	client := rg.Group("/client")

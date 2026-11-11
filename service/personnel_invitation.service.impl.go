@@ -11,7 +11,12 @@ import (
 	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
 )
+
+// errInvitationTaken aborts the accept transaction when a concurrent request
+// already claimed the invitation (guarded UPDATE affected zero rows).
+var errInvitationTaken = errors.New("invitation already accepted")
 
 type PersonnelInvitationServiceImpl struct {
 	InvitationRepo repository.PersonnelInvitationRepository
@@ -192,46 +197,80 @@ func (s *PersonnelInvitationServiceImpl) Accept(token, firstName, lastName, phon
 		return errors.New("email already registered with another account")
 	}
 
-	// Hash password
 	hashedPassword, err := utils.HashPassword(password)
 	if err != nil {
 		return err
 	}
 
-	// Check if personnel already exists with this email
 	existingPersonnel, _ := s.PersonnelRepo.FindByEmail(invitation.Email)
-	if existingPersonnel != nil {
-		// Personnel exists but may not have an auth account — update their center
-		existingPersonnel.BeautyCenterID = invitation.BeautyCenterID
-		existingPersonnel.FirstName = firstName
-		existingPersonnel.LastName = lastName
-		existingPersonnel.Phone = phone
-		existingPersonnel.Password = hashedPassword
-		existingPersonnel.IsActive = true
-		if err := s.PersonnelRepo.Update(existingPersonnel); err != nil {
-			return err
-		}
-	} else {
-		// Create new personnel
-		personnel := models.Personnel{
-			BeautyCenterID: invitation.BeautyCenterID,
-			FirstName:      firstName,
-			LastName:       lastName,
-			Email:          invitation.Email,
-			Phone:          phone,
-			Password:       hashedPassword,
-			IsActive:       true,
-		}
-		if err := s.PersonnelRepo.Create(&personnel); err != nil {
-			return err
-		}
-	}
-
-	// Mark invitation as accepted
 	now := time.Now()
-	invitation.Status = "accepted"
-	invitation.UsedAt = &now
-	if err := s.InvitationRepo.Update(invitation); err != nil {
+
+	// Claim the invitation, write the staff row and link the local AuthAccount
+	// in ONE transaction. The guarded UPDATE is the concurrency control: only
+	// the request that flips pending->accepted may create the staff account, so
+	// two simultaneous accepts cannot both succeed.
+	err = s.InvitationRepo.Transact(func(tx *gorm.DB) error {
+		res := tx.Model(&models.PersonnelInvitation{}).
+			Where("id = ? AND status = ?", invitation.ID, "pending").
+			Updates(map[string]any{"status": "accepted", "used_at": now})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return errInvitationTaken
+		}
+
+		var personnel models.Personnel
+		if existingPersonnel != nil {
+			personnel = *existingPersonnel
+			personnel.BeautyCenterID = invitation.BeautyCenterID
+			personnel.FirstName = firstName
+			personnel.LastName = lastName
+			personnel.Phone = phone
+			personnel.Password = hashedPassword
+			personnel.IsActive = true
+			if err := tx.Save(&personnel).Error; err != nil {
+				return err
+			}
+		} else {
+			personnel = models.Personnel{
+				BeautyCenterID: invitation.BeautyCenterID,
+				FirstName:      firstName,
+				LastName:       lastName,
+				Email:          invitation.Email,
+				Phone:          phone,
+				Password:       hashedPassword,
+				IsActive:       true,
+			}
+			if err := tx.Create(&personnel).Error; err != nil {
+				return err
+			}
+		}
+
+		// Ensure a local AuthAccount exists so password recovery works for staff
+		// that were invited (rather than created by the owner).
+		var account models.AuthAccount
+		findErr := tx.Where("provider = ? AND user_type = ? AND personnel_id = ?", "local", "personnel", personnel.ID).
+			First(&account).Error
+		if errors.Is(findErr, gorm.ErrRecordNotFound) {
+			account = models.AuthAccount{
+				Provider:    "local",
+				ProviderID:  personnel.Email,
+				UserType:    "personnel",
+				PersonnelID: &personnel.ID,
+			}
+			if err := tx.Create(&account).Error; err != nil {
+				return err
+			}
+		} else if findErr != nil {
+			return findErr
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errInvitationTaken) {
+			return errors.New("invitation is no longer valid")
+		}
 		return err
 	}
 

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"mime/multipart"
@@ -23,13 +24,27 @@ import (
 
 type ClientServiceImpl struct {
 	ClientRepository repository.ClientRepository
+	SessionRepo      repository.UserSessionRepository
 	Validate         *validator.Validate
 }
 
-func NewClientServiceImpl(clientRepository repository.ClientRepository, validate *validator.Validate) ClientService {
+func NewClientServiceImpl(clientRepository repository.ClientRepository, sessionRepo repository.UserSessionRepository, validate *validator.Validate) ClientService {
 	return &ClientServiceImpl{
 		ClientRepository: clientRepository,
+		SessionRepo:      sessionRepo,
 		Validate:         validate,
+	}
+}
+
+// revokeSessions kills every live session of a client. Called when the account
+// is deactivated or deleted so a deactivated client cannot keep using a token
+// that was minted while it was active.
+func (s *ClientServiceImpl) revokeSessions(clientID uint) {
+	if s.SessionRepo == nil {
+		return
+	}
+	if err := s.SessionRepo.RevokeAllForUser(context.Background(), clientID, "client"); err != nil {
+		utils.Log.Errorf("failed to revoke sessions for client %d: %v", clientID, err)
 	}
 }
 
@@ -99,13 +114,18 @@ func (s *ClientServiceImpl) Update(id uint, actorClientID uint, req request.Upda
 	}
 	// Only when explicitly provided: the mobile client edit never sends
 	// is_active, and a defaulted false would deactivate the account.
+	deactivated := false
 	if req.IsActive != nil {
+		deactivated = client.IsActive && !*req.IsActive
 		client.IsActive = *req.IsActive
 	}
 
 	if err := s.ClientRepository.Update(client); err != nil {
 		utils.Log.Errorf("Update failed: error saving client to database: %v", err)
 		return err
+	}
+	if deactivated {
+		s.revokeSessions(client.ID)
 	}
 	utils.Log.Infof("Client with ID %d updated successfully", id)
 	return nil
@@ -124,7 +144,11 @@ func (s *ClientServiceImpl) Delete(id uint, actorClientID uint) error {
 		}
 		return err
 	}
-	return s.ClientRepository.Delete(user)
+	if err := s.ClientRepository.Delete(user); err != nil {
+		return err
+	}
+	s.revokeSessions(id)
+	return nil
 }
 
 func (s *ClientServiceImpl) FindAllAdmin(centerID uint, page, limit int) ([]response.AdminClientResponse, int64, error) {

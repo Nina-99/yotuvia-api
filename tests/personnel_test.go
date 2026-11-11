@@ -56,7 +56,7 @@ func TestPersonnelCRUD(t *testing.T) {
 	validate := validator.New()
 	db := setupTestDB(t)
 	repo := repository.NewPersonnelRepositoryImpl(db)
-	svc := service.NewPersonnelServiceImpl(repo, repository.NewServiceRepositoryImpl(db), validate)
+	svc := service.NewPersonnelServiceImpl(repo, repository.NewServiceRepositoryImpl(db), nil, validate)
 
 	var personnel models.Personnel
 	if err := db.First(&personnel).Error; err != nil {
@@ -151,7 +151,7 @@ func TestPersonnelService_UpdateMe(t *testing.T) {
 	validate := validator.New()
 	db := setupTestDB(t)
 	repo := repository.NewPersonnelRepositoryImpl(db)
-	svc := service.NewPersonnelServiceImpl(repo, repository.NewServiceRepositoryImpl(db), validate)
+	svc := service.NewPersonnelServiceImpl(repo, repository.NewServiceRepositoryImpl(db), nil, validate)
 
 	var personnel models.Personnel
 	if err := db.First(&personnel).Error; err != nil {

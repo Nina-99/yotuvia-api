@@ -15,6 +15,7 @@ import (
 	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
 )
 
 type AuthAccountServiceImpl struct {
@@ -699,7 +700,24 @@ func (s *AuthAccountServiceImpl) RegisterPersonnel(req request.RegisterPersonnel
 	}
 
 	utils.Log.Infof("[AUTH] New personnel registered via admin. Email: %s, CenterID: %d", req.Email, req.BeautyCenterID)
-	return s.PersonnelRepo.Create(&personnel)
+	if err := s.PersonnelRepo.Create(&personnel); err != nil {
+		return err
+	}
+
+	// Link a local AuthAccount so the staff member can use password recovery.
+	// The owner creates the account, so no Terms acceptance is recorded here
+	// (TermsAcceptedAt stays nil).
+	account := models.AuthAccount{
+		Provider:    "local",
+		ProviderID:  personnel.Email,
+		UserType:    "personnel",
+		PersonnelID: &personnel.ID,
+	}
+	if err := s.AuthRepo.Create(&account); err != nil {
+		utils.Log.Errorf("[AUTH] Failed to create local auth account for personnel %d: %v", personnel.ID, err)
+		return err
+	}
+	return nil
 }
 
 func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccount) (AuthResult, error) {
@@ -796,6 +814,25 @@ func (s *AuthAccountServiceImpl) Refresh(ctx context.Context, rawToken string) (
 		return RefreshResult{}, apperrors.ErrUnauthorized
 	}
 
+	// A refresh token can outlive the account state that minted it. Before
+	// rotating, confirm the owning account is still allowed to authenticate.
+	// If it is not, kill every session of that account and answer 401 — an
+	// inactive client/staff must not keep minting access tokens forever.
+	if current, err := s.SessionRepo.FindByHash(ctx, utils.HashRefreshToken(rawToken)); err == nil && current != nil && !current.IsRevoked {
+		active, err := s.isAccountActive(current.Role, current.UserID, current.Email)
+		if err != nil {
+			return RefreshResult{}, err
+		}
+		if !active {
+			if err := s.SessionRepo.RevokeAllForUser(ctx, current.UserID, current.Role); err != nil {
+				utils.Log.Errorf("[AUTH] failed to revoke sessions of deactivated %s %d: %v",
+					current.Role, current.UserID, err)
+			}
+			utils.Log.Warnf("[AUTH] Refresh rejected: %s %d is inactive", current.Role, current.UserID)
+			return RefreshResult{}, apperrors.ErrUnauthorized
+		}
+	}
+
 	var newRaw string
 	newSession, err := s.SessionRepo.Rotate(ctx, utils.HashRefreshToken(rawToken), func(active *models.UserSession) (*models.UserSession, error) {
 		raw, err := utils.GenerateRefreshToken()
@@ -831,6 +868,47 @@ func (s *AuthAccountServiceImpl) Refresh(ctx context.Context, rawToken string) (
 		return RefreshResult{}, err
 	}
 	return RefreshResult{AccessToken: accessToken, RefreshToken: newRaw}, nil
+}
+
+// isAccountActive reports whether the account behind a session may keep
+// authenticating. beauty_center is deliberately always allowed: an unverified
+// centre must log in to finish onboarding, so IsActive is not a login gate for
+// it. A row that no longer exists (hard delete) counts as inactive.
+func (s *AuthAccountServiceImpl) isAccountActive(role string, userID uint, email string) (bool, error) {
+	switch role {
+	case "client":
+		client, err := s.ClientRepo.FindById(userID)
+		if errors.Is(err, gorm.ErrRecordNotFound) || client == nil {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return client.IsActive, nil
+	case "personnel":
+		personnel, err := s.PersonnelRepo.FindByID(userID)
+		if errors.Is(err, gorm.ErrRecordNotFound) || personnel == nil {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return personnel.IsActive, nil
+	case "super_admin":
+		if s.PlatformAdminRepo == nil {
+			return false, nil
+		}
+		admin, err := s.PlatformAdminRepo.FindByEmail(email)
+		if err != nil {
+			return false, err
+		}
+		if admin == nil {
+			return false, nil
+		}
+		return admin.IsActive, nil
+	default:
+		return true, nil
+	}
 }
 
 // ──────────────────────────────────────────────

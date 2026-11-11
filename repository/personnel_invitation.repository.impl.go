@@ -50,3 +50,7 @@ func (r *PersonnelInvitationRepositoryImpl) FindByEmailAndCenter(email string, b
 	}
 	return &invitation, nil
 }
+
+func (r *PersonnelInvitationRepositoryImpl) Transact(fn func(tx *gorm.DB) error) error {
+	return r.db.Transaction(fn)
+}

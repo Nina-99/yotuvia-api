@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 
 	"github.com/Nina-99/yotuvia-api/apperrors"
@@ -16,11 +17,24 @@ import (
 type PersonnelServiceImpl struct {
 	repo        repository.PersonnelRepository
 	serviceRepo repository.ServiceRepository
+	sessionRepo repository.UserSessionRepository
 	Validate    *validator.Validate
 }
 
-func NewPersonnelServiceImpl(repo repository.PersonnelRepository, serviceRepo repository.ServiceRepository, validate *validator.Validate) PersonnelService {
-	return &PersonnelServiceImpl{repo: repo, serviceRepo: serviceRepo, Validate: validate}
+func NewPersonnelServiceImpl(repo repository.PersonnelRepository, serviceRepo repository.ServiceRepository, sessionRepo repository.UserSessionRepository, validate *validator.Validate) PersonnelService {
+	return &PersonnelServiceImpl{repo: repo, serviceRepo: serviceRepo, sessionRepo: sessionRepo, Validate: validate}
+}
+
+// revokeSessions kills every live session of a staff member. Called when the
+// staff is deactivated or deleted so an inactive account cannot keep using a
+// token minted while it was active.
+func (s *PersonnelServiceImpl) revokeSessions(personnelID uint) {
+	if s.sessionRepo == nil {
+		return
+	}
+	if err := s.sessionRepo.RevokeAllForUser(context.Background(), personnelID, "personnel"); err != nil {
+		utils.Log.Errorf("failed to revoke sessions for personnel %d: %v", personnelID, err)
+	}
 }
 
 // Update implements PersonnelService
@@ -61,6 +75,7 @@ func (s *PersonnelServiceImpl) Update(id uint, req request.UpdatePersonnelReques
 		}
 		personnel.Password = hashed
 	}
+	wasActive := personnel.IsActive
 	personnel.IsActive = req.IsActive
 
 	// Sync images
@@ -70,6 +85,9 @@ func (s *PersonnelServiceImpl) Update(id uint, req request.UpdatePersonnelReques
 
 	if err := s.repo.Update(personnel); err != nil {
 		return response.PersonnelResponse{}, err
+	}
+	if wasActive && !personnel.IsActive {
+		s.revokeSessions(personnel.ID)
 	}
 
 	return s.mapToResponse(*personnel), nil
@@ -144,7 +162,11 @@ func (s *PersonnelServiceImpl) Delete(id uint) error {
 		}
 		return err
 	}
-	return s.repo.Delete(id)
+	if err := s.repo.Delete(id); err != nil {
+		return err
+	}
+	s.revokeSessions(id)
+	return nil
 }
 
 // FindByID implements PersonnelService
