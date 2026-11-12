@@ -29,6 +29,15 @@ type RefreshResult struct {
 	RefreshToken string
 }
 
+// LoginCodeResult is the outcome of verifying a login code. Exactly one side is
+// populated: Session when the email owns an account, or RegistrationTicket when
+// it does not (the caller then finishes registration).
+type LoginCodeResult struct {
+	Session            *AuthResult
+	RegistrationTicket string
+	Email              string
+}
+
 type AuthAccountService interface {
 	Register(req request.RegisterRequest) (AuthResult, error)
 	Login(req request.LoginRequest) (AuthResult, error)
@@ -58,4 +67,15 @@ type AuthAccountService interface {
 	// ResetPassword redeems a single-use reset token, sets the new password and
 	// revokes every session of that account (all devices, all families).
 	ResetPassword(ctx context.Context, req request.ResetPasswordRequest) error
+
+	// RequestLoginCode sends a 6-digit sign-in code. It answers the same way
+	// whether or not the email owns an account, so it is not an existence
+	// oracle, and it throttles per email.
+	RequestLoginCode(ctx context.Context, req request.RequestLoginCodeRequest) error
+	// VerifyLoginCode consumes a challenge and either issues a session (account
+	// exists and is allowed) or returns a signed registration ticket.
+	VerifyLoginCode(ctx context.Context, req request.VerifyLoginCodeRequest) (LoginCodeResult, error)
+	// CompleteRegistration turns a registration ticket into an account. The
+	// email comes from the ticket; only client and beauty_center are allowed.
+	CompleteRegistration(ctx context.Context, req request.CompleteRegistrationRequest) (AuthResult, error)
 }

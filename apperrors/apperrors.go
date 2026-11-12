@@ -40,6 +40,9 @@ var (
 	// is unknown, expired or already used. The three cases collapse into one
 	// client-visible message so a caller cannot probe token state.
 	ErrInvalidToken = errors.New("invalid or expired token")
+	// ErrTooManyRequests signals a per-account throttle (e.g. login-code
+	// requests) exceeded. The middleware limiter still covers per-IP floods.
+	ErrTooManyRequests = errors.New("too many requests")
 )
 
 // MapToHTTP returns the HTTP status code and a client-safe message for err.
@@ -68,6 +71,8 @@ func MapToHTTP(err error) (int, string) {
 		return http.StatusConflict, ErrUsernameTaken.Error()
 	case errors.Is(err, ErrInvalidToken):
 		return http.StatusBadRequest, ErrInvalidToken.Error()
+	case errors.Is(err, ErrTooManyRequests):
+		return http.StatusTooManyRequests, ErrTooManyRequests.Error()
 	case errors.Is(err, ErrFileTooLarge):
 		return http.StatusRequestEntityTooLarge, ErrFileTooLarge.Error()
 	default:

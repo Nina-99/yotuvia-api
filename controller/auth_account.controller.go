@@ -220,6 +220,73 @@ func (c *AuthAccountController) ResetPassword(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "password reset"})
 }
 
+// RequestLoginCode ALWAYS answers 202 for a well-formed email: known and unknown
+// addresses get the same status, body and email, so the endpoint is not an
+// existence oracle. A per-email throttle answers 429.
+func (c *AuthAccountController) RequestLoginCode(ctx *gin.Context) {
+	var req request.RequestLoginCodeRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if err := c.authAccountService.RequestLoginCode(ctx.Request.Context(), req); err != nil {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	ctx.JSON(http.StatusAccepted, gin.H{
+		"message": "if that address can sign in, we sent a code",
+	})
+}
+
+// VerifyLoginCode answers a session for an existing account or a registration
+// ticket for an unknown (but verified) email. A wrong code is a uniform 401.
+func (c *AuthAccountController) VerifyLoginCode(ctx *gin.Context) {
+	var req request.VerifyLoginCodeRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	result, err := c.authAccountService.VerifyLoginCode(ctx.Request.Context(), req)
+	if err != nil {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	if result.Session != nil {
+		ctx.JSON(http.StatusOK, toAuthResponse(*result.Session))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"registration_ticket": result.RegistrationTicket,
+		"email":               result.Email,
+	})
+}
+
+// CompleteRegistration turns a registration ticket into a client or centre
+// account. Staff is invitation-only, so personnel is rejected upstream.
+func (c *AuthAccountController) CompleteRegistration(ctx *gin.Context) {
+	var req request.CompleteRegistrationRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	result, err := c.authAccountService.CompleteRegistration(ctx.Request.Context(), req)
+	if err != nil {
+		status, msg := apperrors.MapToHTTP(err)
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, toAuthResponse(result))
+}
+
 func toAuthResponse(result service.AuthResult) response.AuthResponse {
 	return response.AuthResponse{
 		Token:        result.Token,

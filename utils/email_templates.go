@@ -108,6 +108,34 @@ Si no solicitaste este cambio, puedes ignorar este mensaje: tu contraseña no ca
 	}
 }
 
+// LoginCodeEmail renders the passwordless sign-in message: a 6-digit code plus
+// a one-tap link. The same email serves sign-in and first-time registration, so
+// the copy never claims that an account already exists.
+func LoginCodeEmail(code, link string) EmailContent {
+	subject := "Tu código de acceso a Yotuvia"
+
+	text := fmt.Sprintf(`¡Hola!
+
+Tu código de acceso a Yotuvia es:
+
+    %s
+
+Ingresa el código en la app o abre este enlace:
+%s
+
+El código vence en 10 minutos y solo puede usarse una vez.
+
+Si no solicitaste este código, puedes ignorar este mensaje.
+
+— El equipo de Yotuvia`, code, link)
+
+	return EmailContent{
+		Subject: subject,
+		Text:    text,
+		HTML:    emailCodeLayout(code, link),
+	}
+}
+
 type emailContext struct {
 	heading      string
 	intro        string
@@ -195,4 +223,58 @@ func emailLayout(ctx emailContext, name, link string) string {
   </table>
 </body>
 </html>`, e(ctx.heading), e(ctx.heading), e(name), e(ctx.intro), e(link), e(ctx.buttonLabel), e(link), e(ctx.expiryNote), e(ctx.securityNote))
+}
+
+// emailCodeLayout renders the login-code shell: the 6-digit code is the primary
+// element, with the deep link as a secondary action for one-tap sign-in.
+func emailCodeLayout(code, link string) string {
+	e := html.EscapeString
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tu código de acceso</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#1a1a2e;">
+  <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#ffffff;border-radius:12px;overflow:hidden;">
+          <tr>
+            <td style="background-color:#121212;padding:20px 28px;">
+              <span style="font-size:20px;font-weight:bold;color:#CFB53B;letter-spacing:1px;">YOTUVIA</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px;">
+              <h1 style="margin:0 0 12px;font-size:20px;color:#1a1a2e;">Tu código de acceso</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:22px;color:#444;">Ingresa este código en la app para continuar:</p>
+              <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 20px;">
+                <tr>
+                  <td style="border-radius:8px;background-color:#f4f4f5;border:1px solid #ececec;padding:14px 24px;font-size:28px;font-weight:bold;letter-spacing:8px;color:#121212;">%s</td>
+                </tr>
+              </table>
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="border-radius:8px;background-color:#CFB53B;">
+                    <a href="%s" style="display:inline-block;padding:12px 24px;font-size:15px;font-weight:bold;color:#121212;text-decoration:none;">Abrir en la app</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:24px 0 0;font-size:13px;line-height:20px;color:#666;">El código vence en 10 minutos y solo puede usarse una vez.</p>
+              <p style="margin:8px 0 0;font-size:13px;line-height:20px;color:#666;">Si no solicitaste este código, puedes ignorar este mensaje.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="border-top:1px solid #ececec;padding:16px 28px;">
+              <p style="margin:0;font-size:12px;color:#9a9a9a;">Este es un mensaje automático, por favor no respondas a este correo.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`, e(code), e(link))
 }

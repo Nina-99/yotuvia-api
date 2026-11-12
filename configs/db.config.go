@@ -27,6 +27,7 @@ func DBConnection() {
 	list_models := []interface{}{
 		&models.AuthAccount{},
 		&models.AuthToken{},
+		&models.OtpChallenge{},
 		&models.BeautyCenter{},
 		&models.BeautyCenterImage{},
 		&models.Category{},

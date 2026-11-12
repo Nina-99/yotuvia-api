@@ -25,6 +25,11 @@ type JWTClaim struct {
 	Email    string `json:"email,omitempty"`
 	Username string `json:"username,omitempty"`
 
+	// Purpose is set only on non-session tokens (e.g. the registration ticket).
+	// Access tokens never carry it. ValidateToken rejects any token that has it
+	// so a registration ticket can never be replayed as a bearer credential.
+	Purpose string `json:"purpose,omitempty"`
+
 	jwt.RegisteredClaims
 }
 
@@ -72,6 +77,11 @@ func ValidateToken(signedToken string) (*JWTClaim, error) {
 	claims, ok := token.Claims.(*JWTClaim)
 	if !ok || !token.Valid {
 		return nil, err
+	}
+	// A registration ticket (or any non-session token) must never authenticate
+	// a request. Access tokens always carry a role and never a purpose.
+	if claims.Purpose != "" || claims.Role == "" {
+		return nil, errors.New("invalid token")
 	}
 	return claims, nil
 }

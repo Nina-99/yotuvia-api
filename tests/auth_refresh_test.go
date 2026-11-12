@@ -34,7 +34,7 @@ func authRefreshModels() []interface{} {
 		&models.PostLike{}, &models.PunchHistory{}, &models.Reservation{},
 		&models.ReservationService{}, &models.Review{}, &models.Service{},
 		&models.SocialMedia{}, &models.WorkingHour{}, &models.PersonnelInvitation{}, &models.Notification{}, &models.PushDevice{},
-		&models.UserSession{}, &models.AuthToken{}, &models.PlatformAdmin{},
+		&models.UserSession{}, &models.AuthToken{}, &models.OtpChallenge{}, &models.PlatformAdmin{},
 	}
 }
 

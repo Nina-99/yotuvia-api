@@ -66,6 +66,7 @@ func TestAuthService_Login(t *testing.T) {
 	authService := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo,
 		repository.NewPlatformAdminRepositoryImpl(db),
 		repository.NewUserSessionRepositoryImpl(db), repository.NewAuthTokenRepositoryImpl(db),
+		repository.NewOtpChallengeRepositoryImpl(db),
 		utils.NewFakeMailer(), nil, validate)
 	t.Run("Classic Login Success (Client)", func(t *testing.T) {
 		req := request.LoginRequest{

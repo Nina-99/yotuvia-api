@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"os"
@@ -26,6 +27,7 @@ type AuthAccountServiceImpl struct {
 	PlatformAdminRepo repository.PlatformAdminRepository
 	SessionRepo       repository.UserSessionRepository
 	TokenRepo         repository.AuthTokenRepository
+	OtpRepo           repository.OtpChallengeRepository
 	Mailer            utils.Mailer
 	TokenAccountSvc   TokenAccountService
 	Validate          *validator.Validate
@@ -39,6 +41,7 @@ func NewAuthAccountServiceImpl(
 	platformAdminRepo repository.PlatformAdminRepository,
 	sessionRepo repository.UserSessionRepository,
 	tokenRepo repository.AuthTokenRepository,
+	otpRepo repository.OtpChallengeRepository,
 	mailer utils.Mailer,
 	tokenAccountSvc TokenAccountService,
 	validate *validator.Validate,
@@ -56,6 +59,7 @@ func NewAuthAccountServiceImpl(
 		PlatformAdminRepo: platformAdminRepo,
 		SessionRepo:       sessionRepo,
 		TokenRepo:         tokenRepo,
+		OtpRepo:           otpRepo,
 		Mailer:            mailer,
 		TokenAccountSvc:   tokenAccountSvc,
 		Validate:          validate,
@@ -797,6 +801,315 @@ func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccoun
 		FirstName:       firstName,
 		LastName:        lastName,
 		Role:            account.UserType,
+		SessionsEvicted: evicted,
+	}, nil
+}
+
+// ──────────────────────────────────────────────
+//  PASSWORDLESS EMAIL CODE
+// ──────────────────────────────────────────────
+
+// RequestLoginCode sends a 6-digit code to the address. It deliberately does
+// NOT branch on whether an account exists: the response and the email are the
+// same for known and unknown addresses, so the endpoint cannot be used to
+// enumerate users. Per-email throttling sits on top of the IP limiter.
+func (s *AuthAccountServiceImpl) RequestLoginCode(ctx context.Context, req request.RequestLoginCodeRequest) error {
+	if err := s.Validate.Struct(req); err != nil {
+		return fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
+	}
+	if s.OtpRepo == nil {
+		return errors.New("login codes are not configured")
+	}
+
+	email := strings.TrimSpace(req.Email)
+	now := time.Now()
+
+	recent, err := s.OtpRepo.CountRecent(ctx, email, now.Add(-utils.LoginCodeRequestWindow))
+	if err != nil {
+		return err
+	}
+	if recent >= utils.LoginCodeMaxPerWindow {
+		return apperrors.ErrTooManyRequests
+	}
+
+	// A new code retires any outstanding one, so only the latest verifies.
+	if err := s.OtpRepo.InvalidateOutstanding(ctx, email, now); err != nil {
+		return err
+	}
+
+	code, err := utils.GenerateOTP()
+	if err != nil {
+		return err
+	}
+	challenge := &models.OtpChallenge{
+		Email:     email,
+		CodeHash:  utils.HashOTP(code),
+		ExpiresAt: now.Add(utils.LoginCodeTTL),
+	}
+	if err := s.OtpRepo.Create(ctx, challenge); err != nil {
+		return err
+	}
+
+	content := utils.LoginCodeEmail(code, utils.LoginCodeLink(email, code))
+	if err := s.Mailer.Send(ctx, utils.Message{
+		To:      email,
+		Subject: content.Subject,
+		Text:    content.Text,
+		HTML:    content.HTML,
+	}); err != nil {
+		// A delivery failure must not turn into an existence signal, so the
+		// response stays the neutral 202 either way.
+		utils.Log.Errorf("[AUTH] login code email failed for %s: %v", email, err)
+	}
+	return nil
+}
+
+// VerifyLoginCode consumes the challenge and either signs the account in or
+// returns a registration ticket for a verified email with no account yet.
+func (s *AuthAccountServiceImpl) VerifyLoginCode(ctx context.Context, req request.VerifyLoginCodeRequest) (LoginCodeResult, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return LoginCodeResult{}, fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
+	}
+	if s.OtpRepo == nil {
+		return LoginCodeResult{}, errors.New("login codes are not configured")
+	}
+
+	email := strings.TrimSpace(req.Email)
+	now := time.Now()
+
+	challenge, err := s.OtpRepo.FindActiveByEmail(ctx, email, now)
+	if err != nil {
+		return LoginCodeResult{}, err
+	}
+	if challenge == nil {
+		return LoginCodeResult{}, apperrors.ErrUnauthorized
+	}
+
+	// Constant-time compare on the digests: a wrong code must not leak the
+	// prefix through timing.
+	if subtle.ConstantTimeCompare([]byte(utils.HashOTP(req.Code)), []byte(challenge.CodeHash)) != 1 {
+		attempts, incErr := s.OtpRepo.IncrementAttempts(ctx, challenge.ID)
+		if incErr != nil {
+			return LoginCodeResult{}, incErr
+		}
+		if attempts >= utils.LoginCodeMaxAttempts {
+			// Burn the challenge so the final wrong attempt cannot be retried.
+			_, _ = s.OtpRepo.Consume(ctx, challenge.ID)
+		}
+		return LoginCodeResult{}, apperrors.ErrUnauthorized
+	}
+
+	consumed, err := s.OtpRepo.Consume(ctx, challenge.ID)
+	if err != nil {
+		return LoginCodeResult{}, err
+	}
+	if !consumed {
+		// A concurrent request already redeemed this code.
+		return LoginCodeResult{}, apperrors.ErrUnauthorized
+	}
+
+	userType, userID, firstName, found := s.resolveUserByEmail(email)
+	if !found {
+		ticket, err := utils.GenerateRegistrationTicket(email)
+		if err != nil {
+			return LoginCodeResult{}, err
+		}
+		utils.Log.Infof("[AUTH] login code verified for unregistered email; issuing registration ticket")
+		return LoginCodeResult{RegistrationTicket: ticket, Email: email}, nil
+	}
+
+	result, err := s.issueSessionForUser(userType, userID, email, firstName)
+	if err != nil {
+		return LoginCodeResult{}, err
+	}
+	return LoginCodeResult{Session: &result}, nil
+}
+
+// issueSessionForUser mints an access + refresh pair for a resolved account. It
+// applies the same active-account gate as classic login and shares the session
+// cap / rotation machinery through mintSession.
+func (s *AuthAccountServiceImpl) issueSessionForUser(userType string, userID uint, email, firstName string) (AuthResult, error) {
+	var centerID uint
+	var resolvedEmail, username, first, last string
+
+	switch userType {
+	case "client":
+		client, err := s.ClientRepo.FindById(userID)
+		if err != nil || client == nil {
+			return AuthResult{}, apperrors.ErrUnauthorized
+		}
+		if !client.IsActive {
+			return AuthResult{}, apperrors.ErrUnauthorized
+		}
+		resolvedEmail = client.Email
+		username = client.Username
+		first = client.FirstName
+		last = client.LastName
+
+	case "personnel":
+		personnel, err := s.PersonnelRepo.FindByID(userID)
+		if err != nil || personnel == nil {
+			return AuthResult{}, apperrors.ErrUnauthorized
+		}
+		if !personnel.IsActive {
+			return AuthResult{}, apperrors.ErrUnauthorized
+		}
+		centerID = personnel.BeautyCenterID
+		resolvedEmail = personnel.Email
+		username = personnel.FirstName
+		first = personnel.FirstName
+		last = personnel.LastName
+
+	case "beauty_center":
+		center, err := s.CenterRepo.FindByID(userID)
+		if err != nil || center == nil {
+			return AuthResult{}, apperrors.ErrUnauthorized
+		}
+		// A centre may be inactive while onboarding; login stays allowed.
+		centerID = center.ID
+		resolvedEmail = center.Email
+		username = center.Name
+		first = center.Name
+
+	case "super_admin":
+		if s.PlatformAdminRepo == nil {
+			return AuthResult{}, apperrors.ErrUnauthorized
+		}
+		admin, err := s.PlatformAdminRepo.FindByEmail(email)
+		if err != nil || admin == nil || !admin.IsActive {
+			return AuthResult{}, apperrors.ErrUnauthorized
+		}
+		resolvedEmail = admin.Email
+		username = admin.Name
+		first = admin.Name
+
+	default:
+		return AuthResult{}, apperrors.ErrUnauthorized
+	}
+
+	token, err := utils.GenerateJWT(userID, centerID, userType, resolvedEmail, username)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	refreshToken, evicted, err := s.mintSession(userID, centerID, userType, resolvedEmail, username)
+	if err != nil {
+		return AuthResult{}, err
+	}
+
+	return AuthResult{
+		Token:           token,
+		RefreshToken:    refreshToken,
+		UserID:          userID,
+		Email:           resolvedEmail,
+		FirstName:       first,
+		LastName:        last,
+		Role:            userType,
+		SessionsEvicted: evicted,
+	}, nil
+}
+
+// CompleteRegistration creates an account from a verified-email ticket. The
+// email is the ticket's, never the body's; only client and beauty_center are
+// allowed (staff stays invitation-only).
+func (s *AuthAccountServiceImpl) CompleteRegistration(ctx context.Context, req request.CompleteRegistrationRequest) (AuthResult, error) {
+	if err := s.Validate.Struct(req); err != nil {
+		return AuthResult{}, fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
+	}
+
+	email, err := utils.ParseRegistrationTicket(req.RegistrationTicket)
+	if err != nil {
+		return AuthResult{}, apperrors.ErrUnauthorized
+	}
+
+	if req.UserType == "client" {
+		if req.FirstName == "" || req.LastName == "" || req.Phone == "" {
+			return AuthResult{}, apperrors.ErrValidation
+		}
+	} else if req.UserType == "beauty_center" {
+		if req.Name == "" || req.Phone == "" {
+			return AuthResult{}, apperrors.ErrValidation
+		}
+	} else {
+		return AuthResult{}, apperrors.ErrValidation
+	}
+
+	// One account per email across every role.
+	if taken, err := s.emailExistsInAnyRole(email); err != nil {
+		return AuthResult{}, err
+	} else if taken {
+		return AuthResult{}, apperrors.ErrEmailTaken
+	}
+
+	var userID, centerID uint
+	var username, firstName, lastName string
+
+	switch req.UserType {
+	case "client":
+		client := models.Client{
+			FirstName: req.FirstName,
+			LastName:  req.LastName,
+			Username:  email,
+			Email:     email,
+			Phone:     req.Phone,
+			IsActive:  true,
+		}
+		if err := s.ClientRepo.Create(&client); err != nil {
+			return AuthResult{}, err
+		}
+		if _, err := s.recordTermsAcceptance("client", email, &client.ID, nil, nil); err != nil {
+			return AuthResult{}, err
+		}
+		userID = client.ID
+		username = client.Username
+		firstName = client.FirstName
+		lastName = client.LastName
+
+	case "beauty_center":
+		refCode, err := s.generateUniqueReferralCode()
+		if err != nil {
+			return AuthResult{}, err
+		}
+		center := models.BeautyCenter{
+			Name:         req.Name,
+			Address:      req.Address,
+			Email:        email,
+			Phone:        req.Phone,
+			Url:          email,
+			Latitude:     req.Latitude,
+			Longitude:    req.Longitude,
+			IsActive:     false,
+			ReferralCode: refCode,
+		}
+		if err := s.CenterRepo.Create(&center); err != nil {
+			return AuthResult{}, err
+		}
+		if _, err := s.recordTermsAcceptance("beauty_center", email, nil, nil, &center.ID); err != nil {
+			return AuthResult{}, err
+		}
+		userID = center.ID
+		centerID = center.ID
+		username = center.Name
+		firstName = center.Name
+	}
+
+	utils.Log.Infof("[AUTH] New %s completed passwordless registration. ID: %d, Email: %s", req.UserType, userID, email)
+	token, err := utils.GenerateJWT(userID, centerID, req.UserType, email, username)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	refreshToken, evicted, err := s.mintSession(userID, centerID, req.UserType, email, username)
+	if err != nil {
+		return AuthResult{}, err
+	}
+
+	return AuthResult{
+		Token:           token,
+		RefreshToken:    refreshToken,
+		UserID:          userID,
+		Email:           email,
+		FirstName:       firstName,
+		LastName:        lastName,
+		Role:            req.UserType,
 		SessionsEvicted: evicted,
 	}, nil
 }

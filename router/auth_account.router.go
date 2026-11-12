@@ -23,6 +23,7 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	platformAdminRepo := repository.NewPlatformAdminRepositoryImpl(db)
 	sessionRepo := repository.NewUserSessionRepositoryImpl(db)
 	tokenRepo := repository.NewAuthTokenRepositoryImpl(db)
+	otpRepo := repository.NewOtpChallengeRepositoryImpl(db)
 
 	mailer := utils.GetMailer()
 	if len(mailers) > 0 && mailers[0] != nil {
@@ -41,7 +42,7 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	tokenAccountSvc := service.NewTokenAccountServiceImpl(tokenAccountRepo, tokenTopUpRepo, centerRepo, tokenMissionSvc, tokenNotifSvc)
 	tokenMissionSvc = service.NewTokenMissionServiceImpl(tokenMissionRepo, tokenAccountSvc, tokenAccountRepo)
 
-	svc := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo, platformAdminRepo, sessionRepo, tokenRepo, mailer, tokenAccountSvc, validate)
+	svc := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo, platformAdminRepo, sessionRepo, tokenRepo, otpRepo, mailer, tokenAccountSvc, validate)
 	ctrl := controller.NewAuthAccountController(svc)
 
 	// One limiter shared by every auth route below so a single attacker burns a
@@ -64,6 +65,11 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	authAccount.POST("/resend-verification", ctrl.ResendVerification)
 	authAccount.POST("/forgot-password", ctrl.ForgotPassword)
 	authAccount.POST("/reset-password", ctrl.ResetPassword)
+	// Passwordless email-first flow: request a code, verify it (session or
+	// registration ticket), then finish registration with the ticket.
+	authAccount.POST("/otp/request", ctrl.RequestLoginCode)
+	authAccount.POST("/otp/verify", ctrl.VerifyLoginCode)
+	authAccount.POST("/register/complete", ctrl.CompleteRegistration)
 
 	// Routes under /auth (used by mobile admin panel). The limiter runs before
 	// the JWT check so throttling happens before any CPU is spent on the token.
