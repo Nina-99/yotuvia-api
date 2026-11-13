@@ -28,6 +28,7 @@ type AuthAccountServiceImpl struct {
 	SessionRepo       repository.UserSessionRepository
 	TokenRepo         repository.AuthTokenRepository
 	OtpRepo           repository.OtpChallengeRepository
+	EmailRepo         repository.AccountEmailRepository
 	Mailer            utils.Mailer
 	TokenAccountSvc   TokenAccountService
 	Validate          *validator.Validate
@@ -42,6 +43,7 @@ func NewAuthAccountServiceImpl(
 	sessionRepo repository.UserSessionRepository,
 	tokenRepo repository.AuthTokenRepository,
 	otpRepo repository.OtpChallengeRepository,
+	emailRepo repository.AccountEmailRepository,
 	mailer utils.Mailer,
 	tokenAccountSvc TokenAccountService,
 	validate *validator.Validate,
@@ -60,6 +62,7 @@ func NewAuthAccountServiceImpl(
 		SessionRepo:       sessionRepo,
 		TokenRepo:         tokenRepo,
 		OtpRepo:           otpRepo,
+		EmailRepo:         emailRepo,
 		Mailer:            mailer,
 		TokenAccountSvc:   tokenAccountSvc,
 		Validate:          validate,
@@ -374,6 +377,43 @@ func (s *AuthAccountServiceImpl) emailExistsInAnyRole(email string) (bool, error
 	return false, nil
 }
 
+// reserveEmail claims the email in the global registry. A nil repo (older
+// wiring or unit tests) degrades to the service pre-check only.
+func (s *AuthAccountServiceImpl) reserveEmail(ctx context.Context, email, userType string) (*models.AccountEmail, error) {
+	if s.EmailRepo == nil {
+		return nil, nil
+	}
+	entry, err := s.EmailRepo.Reserve(ctx, email, userType)
+	if err != nil {
+		if errors.Is(err, repository.ErrEmailAlreadyReserved) {
+			return nil, apperrors.ErrEmailTaken
+		}
+		return nil, err
+	}
+	return entry, nil
+}
+
+// finalizeEmail binds the reservation to the freshly created role row.
+func (s *AuthAccountServiceImpl) finalizeEmail(ctx context.Context, entry *models.AccountEmail, userID uint) {
+	if entry == nil || s.EmailRepo == nil {
+		return
+	}
+	if err := s.EmailRepo.BindUser(ctx, entry.ID, userID); err != nil {
+		utils.Log.Errorf("[AUTH] failed to bind email registry #%d to %s #%d: %v",
+			entry.ID, entry.UserType, userID, err)
+	}
+}
+
+// releaseEmail drops a reservation whose account creation did not complete.
+func (s *AuthAccountServiceImpl) releaseEmail(ctx context.Context, entry *models.AccountEmail) {
+	if entry == nil || s.EmailRepo == nil {
+		return
+	}
+	if err := s.EmailRepo.Release(ctx, entry.ID); err != nil {
+		utils.Log.Errorf("[AUTH] failed to release email registry #%d: %v", entry.ID, err)
+	}
+}
+
 func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResult, error) {
 	if err := s.Validate.Struct(req); err != nil {
 		return AuthResult{}, fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
@@ -396,6 +436,18 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 	if err != nil {
 		return AuthResult{}, err
 	}
+
+	// Race-proof claim: the unique index wins over any concurrent registration.
+	reservation, err := s.reserveEmail(context.Background(), req.Email, req.UserType)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			s.releaseEmail(context.Background(), reservation)
+		}
+	}()
 
 	var userID uint
 	var centerID uint
@@ -508,6 +560,9 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 		return AuthResult{}, errors.New("invalid user type")
 	}
 
+	s.finalizeEmail(context.Background(), reservation, userID)
+	committed = true
+
 	// Best-effort verification email: a mail failure must NOT fail
 	// registration. The account is created and usable immediately (login is not
 	// gated on verification); the user can always resend later.
@@ -594,6 +649,18 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (Au
 		return AuthResult{}, apperrors.ErrEmailTaken
 	}
 
+	// Race-proof claim shared with every account-creation path.
+	reservation, err := s.reserveEmail(context.Background(), email, req.UserType)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			s.releaseEmail(context.Background(), reservation)
+		}
+	}()
+
 	utils.Log.Infof("[AUTH] Social Account not found. Creating new %s via %s", req.UserType, req.Provider)
 	newAccount := models.AuthAccount{
 		Provider:   req.Provider,
@@ -663,6 +730,18 @@ func (s *AuthAccountServiceImpl) SocialLogin(req request.SocialLoginRequest) (Au
 		return AuthResult{}, err
 	}
 
+	var newUserID uint
+	switch {
+	case newAccount.ClientID != nil:
+		newUserID = *newAccount.ClientID
+	case newAccount.PersonnelID != nil:
+		newUserID = *newAccount.PersonnelID
+	case newAccount.BeautyCenterID != nil:
+		newUserID = *newAccount.BeautyCenterID
+	}
+	s.finalizeEmail(context.Background(), reservation, newUserID)
+	committed = true
+
 	utils.Log.Infof("[AUTH] Created new social link and logged in. UserType: %s", req.UserType)
 	return s.generateTokenForUser(&newAccount)
 }
@@ -682,6 +761,18 @@ func (s *AuthAccountServiceImpl) RegisterPersonnel(req request.RegisterPersonnel
 	} else if taken {
 		return apperrors.ErrEmailTaken
 	}
+
+	// Race-proof claim shared with every account-creation path.
+	reservation, err := s.reserveEmail(context.Background(), req.Email, "personnel")
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			s.releaseEmail(context.Background(), reservation)
+		}
+	}()
 
 	hashedPassword, err := utils.HashPassword(req.Password)
 	if err != nil {
@@ -721,6 +812,8 @@ func (s *AuthAccountServiceImpl) RegisterPersonnel(req request.RegisterPersonnel
 		utils.Log.Errorf("[AUTH] Failed to create local auth account for personnel %d: %v", personnel.ID, err)
 		return err
 	}
+	s.finalizeEmail(context.Background(), reservation, personnel.ID)
+	committed = true
 	return nil
 }
 
@@ -1040,6 +1133,18 @@ func (s *AuthAccountServiceImpl) CompleteRegistration(ctx context.Context, req r
 		return AuthResult{}, apperrors.ErrEmailTaken
 	}
 
+	// Race-proof claim: the unique index wins over any concurrent registration.
+	reservation, err := s.reserveEmail(ctx, email, req.UserType)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			s.releaseEmail(ctx, reservation)
+		}
+	}()
+
 	var userID, centerID uint
 	var username, firstName, lastName string
 
@@ -1091,6 +1196,9 @@ func (s *AuthAccountServiceImpl) CompleteRegistration(ctx context.Context, req r
 		username = center.Name
 		firstName = center.Name
 	}
+
+	s.finalizeEmail(ctx, reservation, userID)
+	committed = true
 
 	utils.Log.Infof("[AUTH] New %s completed passwordless registration. ID: %d, Email: %s", req.UserType, userID, email)
 	token, err := utils.GenerateJWT(userID, centerID, req.UserType, email, username)

@@ -35,6 +35,7 @@ func setupAuthServiceTestDB(t *testing.T) *gorm.DB {
 		&models.BeautyCenter{},
 		&models.AuthAccount{},
 		&models.UserSession{},
+		&models.AccountEmail{},
 	)
 	if err != nil {
 		t.Fatalf("Falied to migrate database: %v", err)
@@ -66,7 +67,7 @@ func TestAuthService_Login(t *testing.T) {
 	authService := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo,
 		repository.NewPlatformAdminRepositoryImpl(db),
 		repository.NewUserSessionRepositoryImpl(db), repository.NewAuthTokenRepositoryImpl(db),
-		repository.NewOtpChallengeRepositoryImpl(db),
+		repository.NewOtpChallengeRepositoryImpl(db), repository.NewAccountEmailRepositoryImpl(db),
 		utils.NewFakeMailer(), nil, validate)
 	t.Run("Classic Login Success (Client)", func(t *testing.T) {
 		req := request.LoginRequest{

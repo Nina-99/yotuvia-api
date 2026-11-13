@@ -30,6 +30,7 @@ func newTestAuthService(t *testing.T, db *gorm.DB) service.AuthAccountService {
 		repository.NewUserSessionRepositoryImpl(db),
 		repository.NewAuthTokenRepositoryImpl(db),
 		repository.NewOtpChallengeRepositoryImpl(db),
+		repository.NewAccountEmailRepositoryImpl(db),
 		utils.NewFakeMailer(),
 		nil,
 		validator.New(),

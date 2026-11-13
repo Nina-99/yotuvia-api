@@ -24,6 +24,7 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	sessionRepo := repository.NewUserSessionRepositoryImpl(db)
 	tokenRepo := repository.NewAuthTokenRepositoryImpl(db)
 	otpRepo := repository.NewOtpChallengeRepositoryImpl(db)
+	accountEmailRepo := repository.NewAccountEmailRepositoryImpl(db)
 
 	mailer := utils.GetMailer()
 	if len(mailers) > 0 && mailers[0] != nil {
@@ -42,7 +43,7 @@ func AuthAccountRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Val
 	tokenAccountSvc := service.NewTokenAccountServiceImpl(tokenAccountRepo, tokenTopUpRepo, centerRepo, tokenMissionSvc, tokenNotifSvc)
 	tokenMissionSvc = service.NewTokenMissionServiceImpl(tokenMissionRepo, tokenAccountSvc, tokenAccountRepo)
 
-	svc := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo, platformAdminRepo, sessionRepo, tokenRepo, otpRepo, mailer, tokenAccountSvc, validate)
+	svc := service.NewAuthAccountServiceImpl(authRepo, clientRepo, personnelRepo, centerRepo, platformAdminRepo, sessionRepo, tokenRepo, otpRepo, accountEmailRepo, mailer, tokenAccountSvc, validate)
 	ctrl := controller.NewAuthAccountController(svc)
 
 	// One limiter shared by every auth route below so a single attacker burns a

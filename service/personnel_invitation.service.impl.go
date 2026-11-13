@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -24,6 +25,7 @@ type PersonnelInvitationServiceImpl struct {
 	CenterRepo     repository.BeautyCenterRepository
 	ClientRepo     repository.ClientRepository
 	AuthRepo       repository.AuthAccountRepository
+	EmailRepo      repository.AccountEmailRepository
 	Validate       *validator.Validate
 }
 
@@ -33,6 +35,7 @@ func NewPersonnelInvitationServiceImpl(
 	centerRepo repository.BeautyCenterRepository,
 	clientRepo repository.ClientRepository,
 	authRepo repository.AuthAccountRepository,
+	emailRepo repository.AccountEmailRepository,
 	validate *validator.Validate,
 ) PersonnelInvitationService {
 	return &PersonnelInvitationServiceImpl{
@@ -41,7 +44,42 @@ func NewPersonnelInvitationServiceImpl(
 		CenterRepo:     centerRepo,
 		ClientRepo:     clientRepo,
 		AuthRepo:       authRepo,
+		EmailRepo:      emailRepo,
 		Validate:       validate,
+	}
+}
+
+// reserveEmail claims the email in the global registry. A nil repo degrades to
+// the service pre-check only.
+func (s *PersonnelInvitationServiceImpl) reserveEmail(email string) (*models.AccountEmail, error) {
+	if s.EmailRepo == nil {
+		return nil, nil
+	}
+	entry, err := s.EmailRepo.Reserve(context.Background(), email, "personnel")
+	if err != nil {
+		if errors.Is(err, repository.ErrEmailAlreadyReserved) {
+			return nil, errors.New("email already registered with another account")
+		}
+		return nil, err
+	}
+	return entry, nil
+}
+
+func (s *PersonnelInvitationServiceImpl) finalizeEmail(entry *models.AccountEmail, personnelID uint) {
+	if entry == nil || s.EmailRepo == nil {
+		return
+	}
+	if err := s.EmailRepo.BindUser(context.Background(), entry.ID, personnelID); err != nil {
+		utils.Log.Errorf("[INVITE] failed to bind email registry #%d: %v", entry.ID, err)
+	}
+}
+
+func (s *PersonnelInvitationServiceImpl) releaseEmail(entry *models.AccountEmail) {
+	if entry == nil || s.EmailRepo == nil {
+		return
+	}
+	if err := s.EmailRepo.Release(context.Background(), entry.ID); err != nil {
+		utils.Log.Errorf("[INVITE] failed to release email registry #%d: %v", entry.ID, err)
 	}
 }
 
@@ -203,7 +241,25 @@ func (s *PersonnelInvitationServiceImpl) Accept(token, firstName, lastName, phon
 	}
 
 	existingPersonnel, _ := s.PersonnelRepo.FindByEmail(invitation.Email)
+
+	// Reserve the email only when this accept creates a brand-new staff row. An
+	// existing staff row already owns its registry entry (owner-created).
+	var reservation *models.AccountEmail
+	committed := false
+	defer func() {
+		if !committed {
+			s.releaseEmail(reservation)
+		}
+	}()
+	if existingPersonnel == nil {
+		reservation, err = s.reserveEmail(invitation.Email)
+		if err != nil {
+			return err
+		}
+	}
+
 	now := time.Now()
+	var acceptedPersonnel models.Personnel
 
 	// Claim the invitation, write the staff row and link the local AuthAccount
 	// in ONE transaction. The guarded UPDATE is the concurrency control: only
@@ -220,7 +276,7 @@ func (s *PersonnelInvitationServiceImpl) Accept(token, firstName, lastName, phon
 			return errInvitationTaken
 		}
 
-		var personnel models.Personnel
+		personnel := acceptedPersonnel
 		if existingPersonnel != nil {
 			personnel = *existingPersonnel
 			personnel.BeautyCenterID = invitation.BeautyCenterID
@@ -246,6 +302,7 @@ func (s *PersonnelInvitationServiceImpl) Accept(token, firstName, lastName, phon
 				return err
 			}
 		}
+		acceptedPersonnel = personnel
 
 		// Ensure a local AuthAccount exists so password recovery works for staff
 		// that were invited (rather than created by the owner).
@@ -273,6 +330,9 @@ func (s *PersonnelInvitationServiceImpl) Accept(token, firstName, lastName, phon
 		}
 		return err
 	}
+
+	s.finalizeEmail(reservation, acceptedPersonnel.ID)
+	committed = true
 
 	utils.Log.Infof("[INVITE] Invitation %s accepted by %s %s", token[:8], firstName, lastName)
 	return nil

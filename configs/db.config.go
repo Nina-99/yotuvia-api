@@ -8,6 +8,7 @@ import (
 	"github.com/Nina-99/yotuvia-api/utils"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var DB *gorm.DB
@@ -28,6 +29,7 @@ func DBConnection() {
 		&models.AuthAccount{},
 		&models.AuthToken{},
 		&models.OtpChallenge{},
+		&models.AccountEmail{},
 		&models.BeautyCenter{},
 		&models.BeautyCenterImage{},
 		&models.Category{},
@@ -118,6 +120,67 @@ func DBConnection() {
 	// never overwritten); a half-configured or unset env is a logged no-op. This
 	// is the ONLY way the role comes to exist — registration cannot mint it.
 	SeedPlatformAdmin()
+
+	// Populates the global email registry from every role table. Idempotent and
+	// non-destructive: existing rows win, duplicates are logged and skipped so a
+	// legacy cross-role duplicate never blocks boot.
+	MigrateAccountEmails(db)
+}
+
+// MigrateAccountEmails backfills the global email registry from the role
+// tables. It is safe to run on every boot: the unique index plus
+// ON CONFLICT DO NOTHING make it idempotent, and a pre-existing duplicate is
+// logged instead of failing the process.
+func MigrateAccountEmails(db *gorm.DB) {
+	type emailRow struct {
+		Email string
+		ID    uint
+	}
+
+	sources := []struct {
+		table    string
+		userType string
+	}{
+		{"clients", "client"},
+		{"personnel", "personnel"},
+		{"beauty_centers", "beauty_center"},
+		{"platform_admins", "super_admin"},
+	}
+
+	var inserted int
+	for _, src := range sources {
+		if !db.Migrator().HasTable(src.table) {
+			continue
+		}
+
+		var rows []emailRow
+		if err := db.Table(src.table).
+			Select("email, id").
+			Where("email <> '' AND deleted_at IS NULL").
+			Scan(&rows).Error; err != nil {
+			utils.Log.Errorf("[MIGRATE] account_email backfill failed for %s: %v", src.table, err)
+			continue
+		}
+
+		for _, row := range rows {
+			entry := models.AccountEmail{Email: row.Email, UserType: src.userType, UserID: row.ID}
+			res := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&entry)
+			if res.Error != nil {
+				utils.Log.Errorf("[MIGRATE] account_email insert failed for %s: %v", row.Email, res.Error)
+				continue
+			}
+			if res.RowsAffected > 0 {
+				inserted++
+			} else {
+				utils.Log.Warnf("[MIGRATE] duplicate email skipped in registry: %s (%s #%d)",
+					row.Email, src.userType, row.ID)
+			}
+		}
+	}
+
+	if inserted > 0 {
+		utils.Log.Infof("[MIGRATE] account_email registry backfilled %d rows", inserted)
+	}
 }
 
 // renameYtvColumn renames the legacy market_config currency-rate column in

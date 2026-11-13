@@ -26,6 +26,7 @@ func TestInvitationAccept_CreatesAuthAccountAndRejectsSecondAccept(t *testing.T)
 		repository.NewBeautyCenterRepositoryImpl(db),
 		repository.NewClientRepositoryImpl(db),
 		repository.NewAuthAccountRepositoryImpl(db),
+		repository.NewAccountEmailRepositoryImpl(db),
 		validator.New(),
 	)
 
