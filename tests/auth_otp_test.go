@@ -349,3 +349,29 @@ func TestCompleteRegistration_EmailTaken(t *testing.T) {
 	w := do(r, http.MethodPost, "/api/auth-accounts/register/complete", "", string(body))
 	assert.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 }
+
+// TestOTP_PlatformAdminGetsSession — a platform admin email must sign in with a
+// code instead of receiving a registration ticket that can never complete.
+func TestOTP_PlatformAdminGetsSession(t *testing.T) {
+	setHighLimits(t)
+	db := setupAuthRefreshDB(t)
+	r, mailer := otpRouter(t, db)
+
+	seedPlatformAdminRow(t, db, "root-otp@test.com", "S3cret-Passw0rd!")
+
+	doRequestCode(t, r, "root-otp@test.com")
+	res := verifyCode(t, r, "root-otp@test.com", lastCode(t, mailer, "root-otp@test.com"))
+	require.Equal(t, http.StatusOK, res.code, res.body)
+
+	var payload struct {
+		Token string `json:"token"`
+		User  struct {
+			Role  string `json:"role"`
+			Email string `json:"email"`
+		} `json:"user"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(res.body), &payload))
+	assert.NotEmpty(t, payload.Token)
+	assert.Equal(t, "super_admin", payload.User.Role)
+	assert.Equal(t, "root-otp@test.com", payload.User.Email)
+}

@@ -1003,6 +1003,16 @@ func (s *AuthAccountServiceImpl) VerifyLoginCode(ctx context.Context, req reques
 
 	userType, userID, firstName, found := s.resolveUserByEmail(email)
 	if !found {
+		// Platform admins live outside the public role tables. Resolve them
+		// explicitly so a code login does not dead-end in a registration ticket
+		// that can never complete (their email is already registered).
+		if s.PlatformAdminRepo != nil {
+			if admin, err := s.PlatformAdminRepo.FindByEmail(email); err == nil && admin != nil {
+				userType, userID, firstName, found = "super_admin", admin.ID, admin.Name, true
+			}
+		}
+	}
+	if !found {
 		ticket, err := utils.GenerateRegistrationTicket(email)
 		if err != nil {
 			return LoginCodeResult{}, err
