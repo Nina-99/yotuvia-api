@@ -27,8 +27,8 @@ if [ ! -f "$TARGET_DIR/.env" ]; then
   exit 1
 fi
 
-# Writable target -> no sudo; root-owned target -> sudo for the install/move.
-if [ -w "$TARGET_DIR" ]; then
+# root needs no sudo; otherwise sudo is required for the install and restart.
+if [ "$(id -u)" -eq 0 ]; then
   SUDO=""
 else
   SUDO="sudo"
@@ -46,7 +46,7 @@ $SUDO mv -f "$TARGET_DIR/$BIN_NAME.new" "$TARGET_DIR/$BIN_NAME"
 rm -f "/tmp/$BIN_NAME.build"
 
 echo "==> Restarting $SERVICE"
-sudo systemctl restart "$SERVICE"
+$SUDO systemctl restart "$SERVICE"
 
 echo "==> Waiting for $HEALTH_URL"
 for _ in $(seq 1 "$HEALTH_TIMEOUT"); do
@@ -60,5 +60,5 @@ for _ in $(seq 1 "$HEALTH_TIMEOUT"); do
 done
 
 echo "ERROR: $HEALTH_URL did not become healthy within ${HEALTH_TIMEOUT}s." >&2
-sudo systemctl status "$SERVICE" --no-pager -n 30 >&2 || true
+$SUDO systemctl status "$SERVICE" --no-pager -n 30 >&2 || true
 exit 1
