@@ -11,6 +11,11 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// version is stamped at release-build time with
+// `-ldflags "-X main.version=v1.2.3"`. A local `go build` / `go run` keeps the
+// "dev" value, so a logged version always tells you which binary is running.
+var version = "dev"
+
 func main() {
 	// Production default: release mode. Gin's debug mode prints the route table
 	// and verbose request diagnostics at boot; `GIN_MODE=debug` opts back in for
@@ -27,6 +32,7 @@ func main() {
 		Level:  os.Getenv("LOG_LEVEL"),  // "debug", "info"
 		Format: os.Getenv("LOG_FORMAT"), // "console" or "json"
 	})
+	utils.Log.Infof("[BOOT] yotuvia-api %s", version)
 
 	// Transactional email transport. SMTP when SMTP_HOST is configured,
 	// otherwise the log-only dev mailer (the automatic fallback). Log the active
