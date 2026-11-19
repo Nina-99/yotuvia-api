@@ -48,7 +48,7 @@ func (c *BeautyCenterController) Update(ctx *gin.Context) {
 
 	var req request.UpdateBeautyCenterRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -98,18 +98,11 @@ func (c *BeautyCenterController) FindByID(ctx *gin.Context) {
 }
 
 func (c *BeautyCenterController) FindAll(ctx *gin.Context) {
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 || limit > 100 {
-		limit = 20
-	}
+	page, limit := pagination(ctx)
 
 	res, total, err := c.beautyCenterService.FindAll(page, limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -145,7 +138,7 @@ func (c *BeautyCenterController) GetAvailableSlots(ctx *gin.Context) {
 
 	res, err := c.beautyCenterService.GetAvailableSlots(uint(id), date, duration, uint(personnelID))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -160,18 +153,11 @@ func (c *BeautyCenterController) Search(ctx *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 || limit > 100 {
-		limit = 20
-	}
+	page, limit := pagination(ctx)
 
 	res, total, err := c.beautyCenterService.Search(query, page, limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -186,14 +172,11 @@ func (c *BeautyCenterController) Search(ctx *gin.Context) {
 
 // FindTopRated returns top-rated beauty centers
 func (c *BeautyCenterController) FindTopRated(ctx *gin.Context) {
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "10"))
-	if limit < 1 || limit > 50 {
-		limit = 10
-	}
+	limit := queryLimit(ctx, 10, 50)
 
 	res, err := c.beautyCenterService.FindTopRated(limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -215,14 +198,11 @@ func (c *BeautyCenterController) FindNearby(ctx *gin.Context) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "10"))
-	if limit < 1 || limit > 50 {
-		limit = 10
-	}
+	limit := queryLimit(ctx, 10, 50)
 
 	res, err := c.beautyCenterService.FindNearby(lat, lng, limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -248,14 +228,11 @@ func (c *BeautyCenterController) FindRanking(ctx *gin.Context) {
 		period = "all"
 	}
 
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "10"))
-	if limit < 1 || limit > 50 {
-		limit = 10
-	}
+	limit := queryLimit(ctx, 10, 50)
 
 	res, err := c.beautyCenterService.FindRanking(period, limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 

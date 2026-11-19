@@ -21,7 +21,7 @@ func NewTreatmentController(svc service.TreatmentService) *TreatmentController {
 func (c *TreatmentController) Catalog(ctx *gin.Context) {
 	res, err := c.treatmentService.Catalog()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, res)

@@ -19,9 +19,12 @@ func ServiceRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validat
 	services := rg.Group("/services")
 	services.Use(middleware.JWTAuthMiddleware())
 	{
-		services.POST("", ctrl.Create)
-		services.PUT("/:id", ctrl.Update)
-		services.DELETE("/:id", ctrl.Delete)
+		// Writes are centre-admin only. Reads stay open to any authenticated
+		// caller (clients browse catalogs); RequireRole is applied per route so
+		// gating the writes does not lock clients out of the listing.
+		services.POST("", middleware.RequireRole("beauty_center"), ctrl.Create)
+		services.PUT("/:id", middleware.RequireRole("beauty_center"), ctrl.Update)
+		services.DELETE("/:id", middleware.RequireRole("beauty_center"), ctrl.Delete)
 		services.GET("", ctrl.FindAll)
 		services.GET("/templates", ctrl.Templates)
 		services.GET("/:id", ctrl.FindById)

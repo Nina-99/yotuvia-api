@@ -37,7 +37,7 @@ func (c *TikTokController) Connect(ctx *gin.Context) {
 	}
 	url, err := c.tiktokService.ConnectURL(feedActor(ctx))
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"url": url})
@@ -66,7 +66,7 @@ func (c *TikTokController) Callback(ctx *gin.Context) {
 func (c *TikTokController) Account(ctx *gin.Context) {
 	res, err := c.tiktokService.Account(feedActor(ctx))
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, res)
@@ -92,12 +92,12 @@ func (c *TikTokController) Import(ctx *gin.Context) {
 	}
 	var req request.TikTokImportRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	res, err := c.tiktokService.Import(ctx.Request.Context(), feedActor(ctx), req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusCreated, res)
@@ -109,7 +109,7 @@ func (c *TikTokController) Disconnect(ctx *gin.Context) {
 		return
 	}
 	if err := c.tiktokService.Disconnect(ctx.Request.Context(), feedActor(ctx)); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "disconnected"})

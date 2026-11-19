@@ -34,13 +34,21 @@ func NewServiceController(service service.ServiceService) *ServiceController {
 func (c *ServiceController) Create(ctx *gin.Context) {
 	var req request.CreateServiceRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
-	createdID, err := c.serviceService.Create(req)
+	// Owner is the caller's centre, never the body (the service also enforces it).
+	centerID := ctx.GetUint("centerID")
+	if centerID == 0 {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	req.BeautyCenterID = centerID
+
+	createdID, err := c.serviceService.Create(centerID, req)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -70,12 +78,18 @@ func (c *ServiceController) Update(ctx *gin.Context) {
 
 	var req request.UpdateServiceRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
-	if err := c.serviceService.Update(uint(serviceID), req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	centerID := ctx.GetUint("centerID")
+	if centerID == 0 {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	if err := c.serviceService.Update(centerID, uint(serviceID), req); err != nil {
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -100,8 +114,14 @@ func (c *ServiceController) Delete(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.serviceService.Delete(uint(serviceID)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	centerID := ctx.GetUint("centerID")
+	if centerID == 0 {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	if err := c.serviceService.Delete(centerID, uint(serviceID)); err != nil {
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -153,20 +173,13 @@ func (c *ServiceController) FindAll(ctx *gin.Context) {
 		isActive = &val
 	}
 
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 || limit > 100 {
-		limit = 20
-	}
+	page, limit := pagination(ctx)
 
 	lang := ctx.DefaultQuery("lang", "")
 
 	services, total, err := c.serviceService.FindAll(beautyCenterID, categoryID, isActive, page, limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 

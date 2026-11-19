@@ -40,11 +40,11 @@ func (c *PersonnelController) Update(ctx *gin.Context) {
 
 	var req request.UpdatePersonnelRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
-	res, err := c.personnelService.Update(uint(id), req)
+	res, err := c.personnelService.Update(uint(id), ctx.GetUint("centerID"), req)
 	if err != nil {
 		c.writeError(ctx, err)
 		return
@@ -101,7 +101,7 @@ func (c *PersonnelController) Delete(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.personnelService.Delete(uint(id)); err != nil {
+	if err := c.personnelService.Delete(uint(id), ctx.GetUint("centerID")); err != nil {
 		c.writeError(ctx, err)
 		return
 	}
@@ -198,14 +198,7 @@ func (c *PersonnelController) FindAll(ctx *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 || limit > 100 {
-		limit = 20
-	}
+	page, limit := pagination(ctx)
 
 	res, total, err := c.personnelService.FindAll(beautyCenterID, serviceIDs, page, limit)
 	if err != nil {

@@ -260,14 +260,7 @@ func (c *ReservationController) Delete(ctx *gin.Context) {
 // ──────────────────────────────────────────────
 
 func (c *ReservationController) FindAll(ctx *gin.Context) {
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 || limit > 100 {
-		limit = 20
-	}
+	page, limit := pagination(ctx)
 
 	// Scoped to the caller's centerID claim — never the global list.
 	reservations, total, err := c.reservationService.FindAll(page, limit, ctx.GetUint("centerID"))

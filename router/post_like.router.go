@@ -21,13 +21,13 @@ func PostLikeRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 		// List likes is public
 		likes.GET("/post/:post_id", ctrl.GetLikesByPost)
 
-	// Protected routes
-	likes.Use(middleware.JWTAuthMiddleware())
-	{
-		likes.POST("", ctrl.Create)
-		likes.POST("/toggle", ctrl.Toggle)
-		likes.DELETE("/post/:post_id", ctrl.Delete)
-		likes.GET("/post/:post_id/check", ctrl.CheckIfUserLiked)
-	}
+		// Protected routes
+		likes.Use(middleware.JWTAuthMiddleware())
+		{
+			likes.POST("", ctrl.Create)
+			likes.POST("/toggle", ctrl.Toggle)
+			likes.DELETE("/post/:post_id", ctrl.Delete)
+			likes.GET("/post/:post_id/check", ctrl.CheckIfUserLiked)
+		}
 	}
 }

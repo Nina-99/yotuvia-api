@@ -29,6 +29,6 @@ func PaymentConfigRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.V
 	admin.Use(middleware.JWTAuthMiddleware(), middleware.RequireRole("beauty_center"))
 	{
 		admin.PUT("/payment", ctrl.UpdatePaymentConfig)
-		admin.POST("/payment/qr", ctrl.UploadPaymentQR)
+		admin.POST("/payment/qr", middleware.WithUploadGuard(ctrl.UploadPaymentQR)...)
 	}
 }

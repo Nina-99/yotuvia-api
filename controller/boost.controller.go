@@ -25,7 +25,7 @@ func NewBoostController(boostService service.BoostService) *BoostController {
 func (c *BoostController) Create(ctx *gin.Context) {
 	var req request.CreateBoostCampaignRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	if req.EndsAt.IsZero() || !req.EndsAt.After(time.Now()) {
@@ -46,7 +46,7 @@ func (c *BoostController) Create(ctx *gin.Context) {
 		req.EndsAt,
 	)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusCreated, campaign)
@@ -56,7 +56,7 @@ func (c *BoostController) Create(ctx *gin.Context) {
 func (c *BoostController) List(ctx *gin.Context) {
 	campaigns, err := c.boostService.ListByCenter(ctx.GetUint("centerID"))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"campaigns": campaigns})
@@ -70,8 +70,55 @@ func (c *BoostController) Pause(ctx *gin.Context) {
 		return
 	}
 	if err := c.boostService.PauseCampaign(ctx.GetUint("centerID"), uint(id)); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "campaign paused"})
+}
+
+// Performance handles GET /boost-campaigns/:id/performance (owner only).
+//
+// It is the renewal report: delivered views, what was actually paid per
+// thousand, how many auction wins never became a view, and the daily curve.
+func (c *BoostController) Performance(ctx *gin.Context) {
+	id, err := strconv.Atoi(ctx.Param("id"))
+	if err != nil || id <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	perf, err := c.boostService.Performance(ctx.GetUint("centerID"), uint(id))
+	if err != nil {
+		writeInternalError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"campaign_id":   perf.CampaignID,
+		"status":        perf.Status,
+		"currency":      perf.Currency,
+		"budget":        perf.Budget,
+		"spent":         perf.Spent,
+		"remaining":     perf.Remaining,
+		"impressions":   perf.Impressions,
+		"unserved_wins": perf.UnservedWins,
+		"effective_cpm": perf.EffectiveCPM,
+		"delivery_rate": perf.DeliveryRate,
+		"starts_at":     perf.StartsAt,
+		"ends_at":       perf.EndsAt,
+		"daily":         perf.Daily,
+	})
+}
+
+// PlatformOverview handles GET /admin/platform/ads/overview (super_admin).
+//
+// The platform's ad book in one call: totals, the CPM the market is actually
+// clearing at, delivery health and the biggest advertisers.
+func (c *BoostController) PlatformOverview(ctx *gin.Context) {
+	overview, err := c.boostService.PlatformOverview()
+	if err != nil {
+		writeInternalError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, overview)
 }

@@ -29,7 +29,7 @@ func (c *ReviewController) writeError(ctx *gin.Context, err error) {
 func (c *ReviewController) Create(ctx *gin.Context) {
 	var req request.CreateReviewRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -40,7 +40,7 @@ func (c *ReviewController) Create(ctx *gin.Context) {
 	}
 
 	if err := c.service.Create(clientID.(uint), req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -57,7 +57,7 @@ func (c *ReviewController) Update(ctx *gin.Context) {
 
 	var req request.UpdateReviewRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -113,7 +113,7 @@ func (c *ReviewController) CanReview(ctx *gin.Context) {
 
 	canReview, err := c.service.CanReview(clientID.(uint), uint(bcID))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -147,7 +147,7 @@ func (c *ReviewController) FindByBeautyCenter(ctx *gin.Context) {
 
 	reviews, err := c.service.FindByBeautyCenterID(uint(bcID))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 

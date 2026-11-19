@@ -18,9 +18,12 @@ func CategoryRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 	category := rg.Group("/category")
 	category.Use(middleware.JWTAuthMiddleware())
 	{
-		category.POST("", ctrl.Create)
-		category.PUT("/:id", ctrl.Update)
-		category.DELETE("/:id", ctrl.Delete)
+		// Writes are centre-admin only; reads stay open to any authenticated
+		// caller. The service additionally proves the row belongs to the
+		// caller's centre.
+		category.POST("", middleware.RequireRole("beauty_center"), ctrl.Create)
+		category.PUT("/:id", middleware.RequireRole("beauty_center"), ctrl.Update)
+		category.DELETE("/:id", middleware.RequireRole("beauty_center"), ctrl.Delete)
 		category.GET("/templates", ctrl.Templates)
 		category.GET("", ctrl.FindAll)
 		category.GET("/:id", ctrl.FindById)

@@ -365,3 +365,48 @@ func extractIdentifier(ctx *gin.Context, keys []string, maxBody int64) string {
 	}
 	return ""
 }
+
+// GlobalRateLimitConfigFromEnv builds the broad per-IP limiter that fronts the
+// whole API. It is deliberately generous (300 req/min, burst 100): its job is
+// to absorb a flood or a scraping sweep, not to police normal use. Auth routes
+// keep their own, much tighter, shared limiter on top of this one.
+//
+// IdentifierKeys is empty: the global limiter must not read request bodies,
+// both for cost and because it runs on every path (including large uploads).
+func GlobalRateLimitConfigFromEnv() RateLimitConfig {
+	cfg := DefaultRateLimitConfig()
+	cfg.IPRate = rate.Limit(300.0 / 60.0)
+	cfg.IPBurst = 100
+	cfg.IdentifierKeys = nil
+
+	if v, ok := envFloat("GLOBAL_RATE_LIMIT_IP_PER_MIN"); ok && v > 0 {
+		cfg.IPRate = rate.Limit(v / 60.0)
+	}
+	if v, ok := envInt("GLOBAL_RATE_LIMIT_IP_BURST"); ok && v > 0 {
+		cfg.IPBurst = v
+	}
+	return cfg
+}
+
+// PublicSearchRateLimitConfig bounds the expensive public reads (availability
+// search, search/ranking previews).
+//
+// These endpoints are unauthenticated by design — a visitor must be able to see
+// availability before signing up — but they are also the cheapest way to make
+// the server do expensive work: one availability query walks a 14-day window
+// across every eligible centre. A dedicated, tighter budget keeps the feature
+// public without turning it into a free DoS amplifier or a scraping API.
+func PublicSearchRateLimitConfig() RateLimitConfig {
+	cfg := DefaultRateLimitConfig()
+	cfg.IPRate = rate.Limit(30.0 / 60.0) // 30 per minute
+	cfg.IPBurst = 15
+	cfg.IdentifierKeys = nil
+
+	if v, ok := envFloat("RATE_LIMIT_SEARCH_PER_MIN"); ok && v > 0 {
+		cfg.IPRate = rate.Limit(v / 60.0)
+	}
+	if v, ok := envInt("RATE_LIMIT_SEARCH_BURST"); ok && v > 0 {
+		cfg.IPBurst = v
+	}
+	return cfg
+}

@@ -30,7 +30,7 @@ func (c *BeautyCenterImageController) writeError(ctx *gin.Context, err error) {
 		ctx.JSON(status, gin.H{"error": msg})
 		return
 	}
-	ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	writeBadRequest(ctx, err)
 }
 
 func (c *BeautyCenterImageController) Upload(ctx *gin.Context) {
@@ -51,7 +51,7 @@ func (c *BeautyCenterImageController) Upload(ctx *gin.Context) {
 
 	res, err := c.BeautyCenterImageService.Upload(centerID, file, isCover, isProfile)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -79,7 +79,7 @@ func (c *BeautyCenterImageController) Create(ctx *gin.Context) {
 
 	res, err := c.BeautyCenterImageService.Create(req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -124,7 +124,7 @@ func (c *BeautyCenterImageController) Reorder(ctx *gin.Context) {
 	}
 
 	if err := c.BeautyCenterImageService.Reorder(centerID, req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -141,7 +141,7 @@ func (c *BeautyCenterImageController) FindByID(ctx *gin.Context) {
 
 	res, err := c.BeautyCenterImageService.GetByID(uint(id))
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 

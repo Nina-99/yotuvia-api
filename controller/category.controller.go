@@ -23,12 +23,19 @@ func NewCategoryController(service service.CategoryService) *CategoryController 
 func (c *CategoryController) Create(ctx *gin.Context) {
 	var req request.CreateCategoryRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
-	if err := c.categoryService.Create(req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	centerID := ctx.GetUint("centerID")
+	if centerID == 0 {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	req.BeautyCenterID = centerID
+
+	if err := c.categoryService.Create(centerID, req); err != nil {
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -45,12 +52,18 @@ func (c *CategoryController) Update(ctx *gin.Context) {
 	var req request.CreateCategoryRequest
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
-	if err := c.categoryService.Update(uint(categoryID), req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	centerID := ctx.GetUint("centerID")
+	if centerID == 0 {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	if err := c.categoryService.Update(centerID, uint(categoryID), req); err != nil {
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -65,8 +78,14 @@ func (c *CategoryController) Delete(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.categoryService.Delete(uint(categoryID)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	centerID := ctx.GetUint("centerID")
+	if centerID == 0 {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	if err := c.categoryService.Delete(centerID, uint(categoryID)); err != nil {
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "Deleted"})
@@ -83,20 +102,13 @@ func (c *CategoryController) FindAll(ctx *gin.Context) {
 		beautyCenterID = uint(id)
 	}
 
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 || limit > 100 {
-		limit = 20
-	}
+	page, limit := pagination(ctx)
 
 	lang := ctx.DefaultQuery("lang", "")
 
 	categories, total, err := c.categoryService.FindAll(beautyCenterID, page, limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 

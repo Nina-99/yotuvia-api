@@ -7,9 +7,15 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+// maxReceiptBytes is the upload cap for a payment receipt or QR image.
+const maxReceiptBytes = 5 * 1024 * 1024
+
+var errReceiptTooLarge = errors.New("file too large: maximum 5MB")
 
 type UploadController struct {
 	uploadDir string
@@ -38,45 +44,40 @@ func (c *UploadController) UploadReceipt(ctx *gin.Context) {
 
 	url, err := c.saveReceipt(file)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"url": url})
 }
 
+// saveReceipt persists an uploaded image and returns its public path.
+//
+// The stored extension comes from the SNIFFED bytes, never from the client
+// filename or the Content-Type header. Trusting either one lets a caller store
+// `receipt.html` (declaring `Content-Type: image/jpeg`) and have the reverse
+// proxy serve it as text/html from the application origin — stored XSS with
+// direct access to the web app's localStorage tokens.
 func (c *UploadController) saveReceipt(file *multipart.FileHeader) (string, error) {
-	// Validate file type
-	contentType := file.Header.Get("Content-Type")
-	allowedTypes := map[string]bool{
-		"image/jpeg": true,
-		"image/png":  true,
-	}
-	if !allowedTypes[contentType] {
-		return "", errors.New("invalid file type: only JPEG and PNG are allowed")
+	if file.Size > maxReceiptBytes {
+		return "", errReceiptTooLarge
 	}
 
-	// Validate file size (5MB)
-	const maxSize = 5 * 1024 * 1024
-	if file.Size > maxSize {
-		return "", errors.New("file too large: maximum 5MB")
+	src, err := file.Open()
+	if err != nil {
+		return "", errors.New("failed to read file")
+	}
+	_, ext, sniffErr := utils.SniffImage(src)
+	_ = src.Close()
+	if sniffErr != nil {
+		return "", errors.New("invalid file type: only real JPEG, PNG, WebP or GIF images are allowed")
 	}
 
-	// Generate unique filename
-	ext := filepath.Ext(file.Filename)
-	if ext == "" {
-		switch contentType {
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/png":
-			ext = ".png"
-		}
-	}
 	filename := uuid.New().String() + ext
-	filepath := filepath.Join(c.uploadDir, filename)
+	dst := filepath.Join(c.uploadDir, filename)
 
-	// Save file
-	if err := c.saveFile(file, filepath); err != nil {
+	// Reopen: the sniff consumed the first bytes of the reader above.
+	if err := c.saveFile(file, dst); err != nil {
 		return "", errors.New("failed to save file")
 	}
 

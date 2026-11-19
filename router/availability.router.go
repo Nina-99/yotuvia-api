@@ -2,6 +2,7 @@ package router
 
 import (
 	"github.com/Nina-99/yotuvia-api/controller"
+	"github.com/Nina-99/yotuvia-api/middleware"
 	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/Nina-99/yotuvia-api/service"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,10 @@ func AvailabilityRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Va
 	ctrl := controller.NewAvailabilityController(svc)
 
 	availability := rg.Group("/availability")
+	// Public by design (a visitor sees availability before signing up) but
+	// expensive per request: a dedicated budget keeps it from becoming a free
+	// DoS amplifier or a competitor's agenda-scraping API.
+	availability.Use(middleware.RateLimit(middleware.PublicSearchRateLimitConfig()))
 	{
 		availability.GET("/search", ctrl.Search)
 	}

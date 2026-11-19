@@ -30,7 +30,7 @@ func (c *LoyaltyController) writeError(ctx *gin.Context, err error) {
 func (c *LoyaltyController) CreateProgram(ctx *gin.Context) {
 	var req request.CreateLoyaltyProgrmaRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -49,7 +49,7 @@ func (c *LoyaltyController) CreateProgram(ctx *gin.Context) {
 
 	res, err := c.loyaltyService.CreateProgram(req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -158,7 +158,7 @@ func (c *LoyaltyController) UpdateProgram(ctx *gin.Context) {
 
 	var req request.UpdateLoyaltyProgramRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -201,7 +201,7 @@ func (c *LoyaltyController) ToggleProgram(ctx *gin.Context) {
 		IsActive bool `json:"is_active"`
 	}
 	if err := ctx.ShouldBindJSON(&body); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -242,7 +242,7 @@ func (c *LoyaltyController) UpdateCenterSettings(ctx *gin.Context) {
 
 	var req request.UpdateLoyaltySettingsRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 

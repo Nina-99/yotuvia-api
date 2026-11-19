@@ -37,7 +37,7 @@ func (c *PersonnelImageController) Upload(ctx *gin.Context) {
 
 	res, err := c.PersonnelImageService.Upload(personnelID, file, isCover, isProfile)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -53,7 +53,7 @@ func (c *PersonnelImageController) Create(ctx *gin.Context) {
 
 	res, err := c.PersonnelImageService.Create(req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 

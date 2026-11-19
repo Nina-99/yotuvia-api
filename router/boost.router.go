@@ -39,6 +39,8 @@ func BoostRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate)
 			campaigns.POST("", ctrl.Create)
 			campaigns.GET("", ctrl.List)
 			campaigns.PUT("/:id/pause", ctrl.Pause)
+			// Renewal report: delivered views, effective CPM, delivery rate.
+			campaigns.GET("/:id/performance", ctrl.Performance)
 		}
 	}
 }

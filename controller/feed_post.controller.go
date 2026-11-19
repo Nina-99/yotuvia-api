@@ -56,7 +56,7 @@ func (c *FeedPostController) Create(ctx *gin.Context) {
 
 	res, err := c.feedPostService.CreateFromUpload(feedActor(ctx), req, file)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusCreated, res)
@@ -69,12 +69,12 @@ func (c *FeedPostController) Create(ctx *gin.Context) {
 func (c *FeedPostController) CreateExternal(ctx *gin.Context) {
 	var req request.CreateExternalFeedPostRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	res, err := c.feedPostService.CreateFromExternal(feedActor(ctx), req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusCreated, res)
@@ -90,13 +90,13 @@ func (c *FeedPostController) Update(ctx *gin.Context) {
 
 	var req request.UpdateFeedPostRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	res, err := c.feedPostService.Update(feedActor(ctx), uint(id), req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, res)
@@ -158,19 +158,12 @@ func (c *FeedPostController) FindByID(ctx *gin.Context) {
 }
 
 func (c *FeedPostController) FindAll(ctx *gin.Context) {
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-
-	// Cap the public page size server-side. A client could otherwise ask for
+	// Cap the public page size server-side: a client could otherwise ask for
 	// limit=1000000 and force the whole feed through the preloads + COUNT
-	// pipeline. Clamp (rather than reject) so an out-of-range value still gets
-	// a useful page instead of a 400, and echo the effective value back.
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > maxFeedLimit {
-		limit = maxFeedLimit
-	}
+	// pipeline. paginationLimit also bounds `page`, so a huge offset cannot be
+	// turned into a cheap DoS. Clamp rather than reject so an out-of-range value
+	// still gets a useful page, and echo the effective value back.
+	page, limit := paginationLimit(ctx, 20, maxFeedLimit)
 
 	// Optionally extract clientID if JWT is present (feed is public, auth is optional)
 	var clientID *uint
@@ -182,7 +175,7 @@ func (c *FeedPostController) FindAll(ctx *gin.Context) {
 
 	res, total, err := c.feedPostService.FindAll(page, limit, clientID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"posts": res, "total": total, "page": page, "limit": limit})
@@ -192,7 +185,7 @@ func (c *FeedPostController) FindAll(ctx *gin.Context) {
 func (c *FeedPostController) FindMine(ctx *gin.Context) {
 	res, err := c.feedPostService.FindMine(feedActor(ctx))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"posts": res})
@@ -206,7 +199,7 @@ func (c *FeedPostController) FindByBeautyCenterID(ctx *gin.Context) {
 	}
 	res, err := c.feedPostService.FindByBeautyCenterID(uint(id))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, res)
@@ -223,17 +216,7 @@ func (c *FeedPostController) FindByPersonnelID(ctx *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > maxFeedLimit {
-		limit = maxFeedLimit
-	}
+	page, limit := paginationLimit(ctx, 20, maxFeedLimit)
 
 	var clientID *uint
 	if cached, exists := ctx.Get("clientID"); exists {
@@ -244,7 +227,7 @@ func (c *FeedPostController) FindByPersonnelID(ctx *gin.Context) {
 
 	res, total, err := c.feedPostService.FindPersonnelFeed(uint(id), page, limit, clientID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"posts": res, "total": total, "page": page, "limit": limit})
@@ -258,7 +241,7 @@ func (c *FeedPostController) IncrementViews(ctx *gin.Context) {
 		return
 	}
 	if err := c.feedPostService.IncrementViews(uint(id)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "view counted"})
@@ -275,7 +258,7 @@ func (c *FeedPostController) IncrementBookTaps(ctx *gin.Context) {
 		return
 	}
 	if err := c.feedPostService.IncrementBookTaps(uint(id)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "book tap counted"})

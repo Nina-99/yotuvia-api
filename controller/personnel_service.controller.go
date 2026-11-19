@@ -41,7 +41,7 @@ func (c *PersonnelServiceController) writeError(ctx *gin.Context, err error) {
 func (c *PersonnelServiceController) Create(ctx *gin.Context) {
 	var req request.CreatePersonnelServiceRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 

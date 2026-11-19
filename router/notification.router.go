@@ -16,14 +16,21 @@ func NotificationRoutes(rg *gin.RouterGroup, db *gorm.DB) {
 	ctrl := controller.NewNotificationController(svc)
 
 	// Notifications (client auth)
+	//
+	// RequireRole("client") is per-route, not on the group: /personnel and
+	// /center below have their own role gates, and a group-wide client gate
+	// would stack with them. The role gate is what closes the id-collision hole:
+	// user ids are polymorphic, so without it a personnel #5 or a centre #5
+	// passed the numeric `actor == :clientId` check and read CLIENT #5's feed.
 	notifications := rg.Group("/notifications")
 	notifications.Use(middleware.JWTAuthMiddleware())
 	{
-		notifications.GET("/client/:clientId", ctrl.GetByClient)
-		notifications.GET("/client/:clientId/unread", ctrl.GetUnreadByClient)
-		notifications.GET("/client/:clientId/count", ctrl.CountUnread)
-		notifications.PATCH("/:id/read", ctrl.MarkAsRead)
-		notifications.POST("/client/:clientId/read-all", ctrl.MarkAllAsRead)
+		clientOnly := middleware.RequireRole("client")
+		notifications.GET("/client/:clientId", clientOnly, ctrl.GetByClient)
+		notifications.GET("/client/:clientId/unread", clientOnly, ctrl.GetUnreadByClient)
+		notifications.GET("/client/:clientId/count", clientOnly, ctrl.CountUnread)
+		notifications.PATCH("/:id/read", clientOnly, ctrl.MarkAsRead)
+		notifications.POST("/client/:clientId/read-all", clientOnly, ctrl.MarkAllAsRead)
 	}
 
 	// Personnel notifications (personnel auth, design D5). Routes are

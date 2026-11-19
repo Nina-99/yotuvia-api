@@ -45,6 +45,28 @@ func PlatformRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 		centerRepo, missionSvc, validate, repository.NewTimeBlockRepositoryImpl(db),
 		service.BeautyCenterDeps{ReferralService: referralSvc, TokenAccountRepo: accountRepo},
 	)
+	// Ads: the platform needs its own read-only view over the same auction data.
+	boostSvc := service.NewBoostServiceImpl(
+		repository.NewBoostCampaignRepositoryImpl(db),
+		repository.NewFeedPostRepositoryImpl(db),
+		accountSvc,
+		accountRepo,
+		service.NewMarketConfigServiceImpl(repository.NewMarketConfigRepositoryImpl(db)),
+	)
+	boostCtrl := controller.NewBoostController(boostSvc)
+
+	// Feed quality: the platform reads the ranking's own instrument so a change
+	// can be judged on data instead of on opinion.
+	feedWatchSvc := service.NewVideoWatchEventServiceImpl(
+		repository.NewVideoWatchEventRepositoryImpl(db),
+		repository.NewFeedPostRepositoryImpl(db),
+		repository.NewPostLikeRepositoryImpl(db),
+		repository.NewSavedVideoRepositoryImpl(db),
+		repository.NewFeedImpressionRepositoryImpl(db),
+		validate,
+	)
+	feedCtrl := controller.NewVideoWatchEventController(feedWatchSvc, nil, nil)
+
 	ctrl := controller.NewPlatformController(accountSvc, topUpRepo, centerRepo, paymentSvc, uploadCtrl, beautyCenterSvc)
 
 	platform := rg.Group("/admin/platform")
@@ -52,10 +74,16 @@ func PlatformRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Valida
 	{
 		platform.GET("/tokens/topups", ctrl.ListTopUps)
 		platform.PUT("/tokens/topups/:id", ctrl.ProcessTopUp)
+		// Manual money path: pending backlog, aging and ledger drift.
+		platform.GET("/tokens/reconciliation", ctrl.TopUpReconciliation)
 		platform.GET("/centers", ctrl.ListCenters)
+		// Advertising: the platform's revenue view.
+		platform.GET("/ads/overview", boostCtrl.PlatformOverview)
+		// Feed health: engagement per position, the baseline for ranking changes.
+		platform.GET("/feed/metrics", feedCtrl.FeedMetrics)
 		platform.PUT("/centers/:centerId/verify", ctrl.VerifyCenter)
 		platform.GET("/centers/:centerId/payment", ctrl.GetCenterPayment)
 		platform.PUT("/centers/:centerId/payment", ctrl.UpdateCenterPayment)
-		platform.POST("/centers/:centerId/payment/qr", ctrl.UploadCenterPaymentQR)
+		platform.POST("/centers/:centerId/payment/qr", middleware.WithUploadGuard(ctrl.UploadCenterPaymentQR)...)
 	}
 }

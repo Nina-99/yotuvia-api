@@ -15,7 +15,9 @@ func VideoWatchEventRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator
 	feedRepo := repository.NewFeedPostRepositoryImpl(db)
 	likeRepo := repository.NewPostLikeRepositoryImpl(db)
 	savedRepo := repository.NewSavedVideoRepositoryImpl(db)
-	watchSvc := service.NewVideoWatchEventServiceImpl(watchRepo, feedRepo, likeRepo, savedRepo, validate)
+	watchSvc := service.NewVideoWatchEventServiceImpl(
+		watchRepo, feedRepo, likeRepo, savedRepo,
+		repository.NewFeedImpressionRepositoryImpl(db), validate)
 
 	// FeedPostServiceImpl must be wired with the same real repositories as
 	// FeedPostRoutes. FindAll dereferences PostLikeRepository and

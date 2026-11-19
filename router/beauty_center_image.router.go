@@ -24,7 +24,7 @@ func BeautyCenterImageRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validat
 	// claim, and Create scopes the body id to the claim in the controller.
 	beautyCenterImage.Use(middleware.RequireRole("beauty_center"))
 	{
-		beautyCenterImage.POST("/upload", ctrl.Upload)
+		beautyCenterImage.POST("/upload", middleware.WithUploadGuard(ctrl.Upload)...)
 		beautyCenterImage.POST("", ctrl.Create)
 		beautyCenterImage.PATCH("/reorder", ctrl.Reorder)
 		beautyCenterImage.PATCH("/:id", ctrl.Update)

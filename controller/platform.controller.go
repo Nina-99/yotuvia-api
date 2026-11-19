@@ -4,12 +4,14 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Nina-99/yotuvia-api/apperrors"
 	"github.com/Nina-99/yotuvia-api/data/request"
 	"github.com/Nina-99/yotuvia-api/data/response"
 	"github.com/Nina-99/yotuvia-api/repository"
 	"github.com/Nina-99/yotuvia-api/service"
+	"github.com/Nina-99/yotuvia-api/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -51,20 +53,10 @@ func NewPlatformController(
 	}
 }
 
-// platformPagination reads `page`/`limit`, defaulting to 20 and capping at 100.
+// platformPagination reads `page`/`limit`, defaulting to 20 and capping both:
+// the size at platformMaxPageSize and the index at the shared maxPageIndex.
 func platformPagination(ctx *gin.Context) (int, int) {
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 {
-		limit = 20
-	}
-	if limit > platformMaxPageSize {
-		limit = platformMaxPageSize
-	}
-	return page, limit
+	return paginationLimit(ctx, 20, platformMaxPageSize)
 }
 
 // platformPathCenterID parses the `:centerId` path parameter. A missing, zero or
@@ -110,7 +102,7 @@ func (c *PlatformController) VerifyCenter(ctx *gin.Context) {
 		return
 	}
 	if err := c.beautyCenterSvc.MarkVerified(centerID); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "center verified"})
@@ -140,7 +132,7 @@ func (c *PlatformController) ListTopUps(ctx *gin.Context) {
 
 	topups, total, err := c.topUpRepo.FindAllWithFilters(page, limit, centerFilter, status)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -177,7 +169,7 @@ func (c *PlatformController) ProcessTopUp(ctx *gin.Context) {
 
 	var req request.ApproveTopUpRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -186,11 +178,38 @@ func (c *PlatformController) ProcessTopUp(ctx *gin.Context) {
 			ctx.JSON(http.StatusForbidden, gin.H{"error": apperrors.ErrForbidden.Error()})
 			return
 		}
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "top-up " + req.Status})
+}
+
+// TopUpReconciliation returns the manual money path's health for the platform
+// panel: per-status totals, the pending backlog with its age/SLA breach count,
+// and ledger drift (approved top-ups credited a different amount than declared).
+//
+// GET /admin/platform/tokens/reconciliation
+func (c *PlatformController) TopUpReconciliation(ctx *gin.Context) {
+	rec, err := c.topUpRepo.Reconciliation(time.Now())
+	if err != nil {
+		writeInternalError(ctx, err)
+		return
+	}
+	// Explicit wire contract: snake_case, and token amounts as decimal Ytv (the
+	// repository aggregates in milli-Ytv internally).
+	ctx.JSON(http.StatusOK, gin.H{
+		"pending_count":            rec.PendingCount,
+		"pending_amount_bs":        rec.PendingAmountBs,
+		"pending_over_24h":         rec.PendingOver24h,
+		"oldest_pending_age_hours": rec.OldestPendingAge,
+		"approved_count":           rec.ApprovedCount,
+		"approved_amount_bs":       rec.ApprovedAmountBs,
+		"approved_tokens":          utils.FromMilli(rec.ApprovedTokens),
+		"rejected_count":           rec.RejectedCount,
+		"rejected_amount_bs":       rec.RejectedAmountBs,
+		"drift_count":              rec.DriftCount,
+	})
 }
 
 // ListCenters returns id + name for every centre, so the platform admin can pick
@@ -200,7 +219,7 @@ func (c *PlatformController) ProcessTopUp(ctx *gin.Context) {
 func (c *PlatformController) ListCenters(ctx *gin.Context) {
 	centers, err := c.centerRepo.FindAllSummaries()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -231,12 +250,12 @@ func (c *PlatformController) GetCenterPayment(ctx *gin.Context) {
 
 	config, err := c.paymentSvc.Get(centerID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	tiers, err := c.paymentSvc.GetTiers(centerID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -262,12 +281,12 @@ func (c *PlatformController) UpdateCenterPayment(ctx *gin.Context) {
 
 	var req updatePaymentConfigRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	if err := c.paymentSvc.Update(centerID, "", req.PaymentPhone, req.Tiers); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -294,12 +313,12 @@ func (c *PlatformController) UploadCenterPaymentQR(ctx *gin.Context) {
 
 	url, err := c.uploadCtrl.UploadReceiptFromFile(file)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	if err := c.paymentSvc.Update(centerID, url, "", nil); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 

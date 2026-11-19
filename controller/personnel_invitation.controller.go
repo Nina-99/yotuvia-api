@@ -38,7 +38,7 @@ func (c *PersonnelInvitationController) Generate(ctx *gin.Context) {
 	// INVITE_BASE_URL env: set to "https://yotuvia.com/join/" in production
 	token, err := c.invitationService.Generate(beautyCenterID.(uint), req.Email)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -81,12 +81,12 @@ func (c *PersonnelInvitationController) Accept(ctx *gin.Context) {
 		Password  string `json:"password" binding:"required,min=8"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	if err := c.invitationService.Accept(req.Token, req.FirstName, req.LastName, req.Phone, req.Password); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -106,7 +106,7 @@ func (c *PersonnelInvitationController) ListByCenter(ctx *gin.Context) {
 
 	invitations, err := c.invitationService.ListByCenter(beautyCenterID.(uint))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 

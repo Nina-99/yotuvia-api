@@ -29,14 +29,14 @@ func (c *PromotionController) writeError(ctx *gin.Context, err error) {
 		ctx.JSON(status, gin.H{"error": msg})
 		return
 	}
-	ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	writeBadRequest(ctx, err)
 }
 
 // Create creates a new promotion for a beauty center.
 func (c *PromotionController) Create(ctx *gin.Context) {
 	var req request.CreatePromotionRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -54,7 +54,7 @@ func (c *PromotionController) Create(ctx *gin.Context) {
 
 	res, err := c.promoService.Create(req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusCreated, res)
@@ -105,7 +105,7 @@ func (c *PromotionController) Update(ctx *gin.Context) {
 
 	var req request.UpdatePromotionRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -160,7 +160,7 @@ func (c *PromotionController) FindApplicable(ctx *gin.Context) {
 
 	res, err := c.promoService.FindApplicable(uint(centerID), uint(serviceID), hour, dayOfWeek)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, res)

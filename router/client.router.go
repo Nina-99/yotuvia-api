@@ -23,6 +23,6 @@ func ClientRoutes(rg *gin.RouterGroup, db *gorm.DB, validate *validator.Validate
 		client.GET("/:id", ctrl.FindByID)
 		client.DELETE("/:id", ctrl.Delete)
 		client.PUT("/:id", ctrl.Update)
-		client.POST("/avatar", middleware.RequireRole("client"), ctrl.UploadAvatar)
+		client.POST("/avatar", middleware.WithUploadGuard(middleware.RequireRole("client"), ctrl.UploadAvatar)...)
 	}
 }

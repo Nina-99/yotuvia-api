@@ -21,7 +21,7 @@ func NewAuthAccountController(authAccountService service.AuthAccountService) *Au
 func (c *AuthAccountController) Register(ctx *gin.Context) {
 	var req request.RegisterRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -38,7 +38,7 @@ func (c *AuthAccountController) Register(ctx *gin.Context) {
 func (c *AuthAccountController) Login(ctx *gin.Context) {
 	var req request.LoginRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -54,7 +54,7 @@ func (c *AuthAccountController) Login(ctx *gin.Context) {
 func (c *AuthAccountController) SocialLogin(ctx *gin.Context) {
 	var req request.SocialLoginRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -70,7 +70,7 @@ func (c *AuthAccountController) SocialLogin(ctx *gin.Context) {
 func (c *AuthAccountController) RegisterPersonnel(ctx *gin.Context) {
 	var req request.RegisterPersonnelRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 

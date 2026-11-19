@@ -67,13 +67,13 @@ func (c *PaymentConfigController) GetPaymentConfig(ctx *gin.Context) {
 
 	config, err := c.paymentSvc.Get(centerID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
 	tiers, err := c.paymentSvc.GetTiers(centerID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -102,12 +102,12 @@ func (c *PaymentConfigController) UpdatePaymentConfig(ctx *gin.Context) {
 
 	var req updatePaymentConfigRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	if err := c.paymentSvc.Update(centerID, "", req.PaymentPhone, req.Tiers); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -132,13 +132,13 @@ func (c *PaymentConfigController) UploadPaymentQR(ctx *gin.Context) {
 
 	url, err := c.uploadCtrl.UploadReceiptFromFile(file)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	// Persist the URL against the caller's centre.
 	if err := c.paymentSvc.Update(centerID, url, "", nil); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -159,7 +159,7 @@ func (c *PaymentConfigController) GetTierConfig(ctx *gin.Context) {
 
 	tiers, err := c.paymentSvc.GetTiers(centerID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 

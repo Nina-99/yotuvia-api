@@ -28,13 +28,13 @@ func (c *SocialMediaController) writeError(ctx *gin.Context, err error) {
 		ctx.JSON(status, gin.H{"error": msg})
 		return
 	}
-	ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	writeInternalError(ctx, err)
 }
 
 func (c *SocialMediaController) Create(ctx *gin.Context) {
 	var req request.CreateSocialMediaRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -51,7 +51,7 @@ func (c *SocialMediaController) Create(ctx *gin.Context) {
 	req.BeautyCenterID = centerID
 
 	if err := c.socialMediaService.Create(req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -68,7 +68,7 @@ func (c *SocialMediaController) Update(ctx *gin.Context) {
 
 	var req request.UpdateSocialMediaRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 

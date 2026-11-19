@@ -30,7 +30,7 @@ func (c *FavoriteController) writeError(ctx *gin.Context, err error) {
 func (c *FavoriteController) Create(ctx *gin.Context) {
 	var req request.CreateFavoriteRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -41,7 +41,7 @@ func (c *FavoriteController) Create(ctx *gin.Context) {
 	}
 
 	if err := c.FavoriteService.Create(req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusCreated, gin.H{"message": "favorite added successfully"})

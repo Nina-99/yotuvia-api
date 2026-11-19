@@ -293,7 +293,12 @@ func (c *NotificationController) UnregisterPushDevice(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "push_token is required"})
 		return
 	}
-	if err := c.notificationService.UnregisterPushDevice(req.PushToken); err != nil {
+	actorID := ctx.GetUint("clientID")
+	if actorID == 0 {
+		c.writeError(ctx, apperrors.ErrUnauthorized)
+		return
+	}
+	if err := c.notificationService.UnregisterPushDevice(req.PushToken, ctx.GetString("role"), actorID); err != nil {
 		c.writeError(ctx, err)
 		return
 	}

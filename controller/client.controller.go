@@ -37,7 +37,7 @@ func (c *ClientController) Update(ctx *gin.Context) {
 	var req request.UpdateClientRequest
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -95,14 +95,7 @@ func (c *ClientController) Delete(ctx *gin.Context) {
 // JWTAuthMiddleware — never from body or query — and the route gates the
 // beauty_center role.
 func (c *ClientController) FindAllAdmin(ctx *gin.Context) {
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 || limit > 100 {
-		limit = 20
-	}
+	page, limit := pagination(ctx)
 
 	clients, total, err := c.clientService.FindAllAdmin(ctx.GetUint("centerID"), page, limit)
 	if err != nil {
@@ -116,19 +109,6 @@ func (c *ClientController) FindAllAdmin(ctx *gin.Context) {
 		Page:  page,
 		Limit: limit,
 	})
-}
-
-func (c *ClientController) GetUserByEmail(ctx *gin.Context) {
-	Email := ctx.Param("email")
-	client, err := c.clientService.FindEmail(Email)
-	if err != nil {
-		c.writeError(ctx, err)
-		return
-	}
-
-	var res []response.ClientResponse
-	res = append(res, response.ClientResponse{ID: client.ID, FirstName: client.FirstName, LastName: client.LastName, Username: client.Username, Email: client.Email})
-	ctx.JSON(http.StatusOK, res)
 }
 
 func (c *ClientController) FindMe(ctx *gin.Context) {

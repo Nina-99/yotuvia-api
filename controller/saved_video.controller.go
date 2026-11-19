@@ -23,7 +23,7 @@ func (c *SavedVideoController) Toggle(ctx *gin.Context) {
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -35,7 +35,7 @@ func (c *SavedVideoController) Toggle(ctx *gin.Context) {
 
 	saved, err := c.savedVideoService.Toggle(clientID.(uint), req.FeedPostID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -59,7 +59,7 @@ func (c *SavedVideoController) CheckIfSaved(ctx *gin.Context) {
 
 	saved, err := c.savedVideoService.CheckIfSaved(clientID.(uint), uint(postID))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -76,7 +76,7 @@ func (c *SavedVideoController) ListByClient(ctx *gin.Context) {
 
 	savedVideos, err := c.savedVideoService.ListByClient(clientID.(uint))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 

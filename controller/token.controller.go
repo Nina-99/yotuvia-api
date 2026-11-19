@@ -76,7 +76,16 @@ func (c *TokenController) GetBalance(ctx *gin.Context) {
 		}
 	}
 
-	ctx.JSON(http.StatusOK, response.NewTokenBalanceResponse(balance, reserved, overdraft, fiatCurrency, fiatRate))
+	resp := response.NewTokenBalanceResponse(balance, reserved, overdraft, fiatCurrency, fiatRate)
+	if health, hErr := c.accountSvc.HealthSnapshot(centerID.(uint)); hErr == nil {
+		resp.TokenHealth = &response.TokenHealthDTO{
+			State:             health.State,
+			DeficitSince:      health.DeficitSince,
+			DeficitDays:       health.DeficitDays,
+			CanAcceptBookings: health.CanAcceptBookings,
+		}
+	}
+	ctx.JSON(http.StatusOK, resp)
 }
 
 // GET /api/v1/tokens/history
@@ -87,12 +96,11 @@ func (c *TokenController) GetHistory(ctx *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+	page, limit := pagination(ctx)
 
 	txs, total, err := c.txSvc.GetHistory(centerID.(uint), page, limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -126,7 +134,7 @@ func (c *TokenController) CreateTopUp(ctx *gin.Context) {
 
 	_, err = c.accountSvc.GetOrCreate(centerID.(uint), center.Currency)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -144,7 +152,7 @@ func (c *TokenController) CreateTopUp(ctx *gin.Context) {
 	// Handle application/json (existing behavior)
 	var req request.CreateTopUpRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -160,7 +168,7 @@ func (c *TokenController) CreateTopUp(ctx *gin.Context) {
 	}
 
 	if err := c.topUpRepo.Create(topup); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -200,7 +208,7 @@ func (c *TokenController) createTopUpMultipart(ctx *gin.Context, centerID uint, 
 
 	receiptURL, err := c.uploadCtrl.UploadReceiptFromFile(file)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -216,7 +224,7 @@ func (c *TokenController) createTopUpMultipart(ctx *gin.Context, centerID uint, 
 	}
 
 	if err := c.topUpRepo.Create(topup); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -239,7 +247,7 @@ func (c *TokenController) GetMissions(ctx *gin.Context) {
 
 	progress, err := c.missionSvc.GetProgress(centerID.(uint))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -284,7 +292,7 @@ func (c *TokenController) ClaimMission(ctx *gin.Context) {
 			ctx.JSON(http.StatusConflict, gin.H{"error": apperrors.ErrConflict.Error()})
 			return
 		}
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -321,12 +329,12 @@ func (c *TokenController) CreateReferral(ctx *gin.Context) {
 
 	var req request.CreateReferralByCodeRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	if err := c.referralSvc.CreateReferralByCode(centerID.(uint), req.Code); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -343,7 +351,7 @@ func (c *TokenController) GetReferrals(ctx *gin.Context) {
 
 	referrals, err := c.referralSvc.GetReferrals(centerID.(uint))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -352,12 +360,11 @@ func (c *TokenController) GetReferrals(ctx *gin.Context) {
 
 // Admin: GET /api/v1/admin/tokens/topups
 func (c *TokenController) AdminListTopUps(ctx *gin.Context) {
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+	page, limit := pagination(ctx)
 
 	topups, total, err := c.topUpRepo.FindAll(page, limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
@@ -390,7 +397,7 @@ func (c *TokenController) AdminProcessTopUp(ctx *gin.Context) {
 
 	var req request.ApproveTopUpRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -401,7 +408,7 @@ func (c *TokenController) AdminProcessTopUp(ctx *gin.Context) {
 			ctx.JSON(http.StatusForbidden, gin.H{"error": apperrors.ErrForbidden.Error()})
 			return
 		}
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
@@ -416,16 +423,12 @@ func (c *TokenController) FindMyTopUps(ctx *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-	if limit > 100 {
-		limit = 100
-	}
+	page, limit := pagination(ctx)
 	status := ctx.Query("status")
 
 	topups, total, err := c.topUpRepo.FindByCenterIDWithStatus(centerID.(uint), page, limit, status)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 

@@ -28,13 +28,13 @@ func (c *VideoCommentController) CreateComment(ctx *gin.Context) {
 
 	var req request.CreateCommentRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	resp, err := c.videoCommentService.CreateComment(feedActor(ctx), uint(feedPostID), req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusCreated, resp)
@@ -50,13 +50,13 @@ func (c *VideoCommentController) ReplyToComment(ctx *gin.Context) {
 
 	var req request.ReplyRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	resp, err := c.videoCommentService.ReplyToComment(feedActor(ctx), uint(commentID), req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusCreated, resp)
@@ -72,13 +72,13 @@ func (c *VideoCommentController) UpdateComment(ctx *gin.Context) {
 
 	var req request.UpdateCommentRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 
 	resp, err := c.videoCommentService.UpdateComment(feedActor(ctx), uint(commentID), req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBadRequest(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, resp)
@@ -133,7 +133,7 @@ func (c *VideoCommentController) ListComments(ctx *gin.Context) {
 
 	comments, nextCursor, err := c.videoCommentService.ListComments(uint(feedPostID), cursor, 20)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, response.CommentListResponse{
@@ -152,7 +152,7 @@ func (c *VideoCommentController) GetCommentReplies(ctx *gin.Context) {
 
 	replies, err := c.videoCommentService.GetCommentReplies(uint(commentID))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, response.CommentListResponse{Comments: replies})

@@ -7,10 +7,18 @@ import (
 	"github.com/Nina-99/yotuvia-api/configs"
 	"github.com/Nina-99/yotuvia-api/router"
 	"github.com/Nina-99/yotuvia-api/utils"
+	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Production default: release mode. Gin's debug mode prints the route table
+	// and verbose request diagnostics at boot; `GIN_MODE=debug` opts back in for
+	// local work.
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("🚀 Could not load environment variables", err)
 	}

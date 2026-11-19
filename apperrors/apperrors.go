@@ -43,7 +43,34 @@ var (
 	// ErrTooManyRequests signals a per-account throttle (e.g. login-code
 	// requests) exceeded. The middleware limiter still covers per-IP floods.
 	ErrTooManyRequests = errors.New("too many requests")
+	// ErrCenterInactive signals a booking against a centre that is not active.
+	// The message is deliberately neutral: the caller may be a client.
+	ErrCenterInactive = errors.New("center is not active")
+	// ErrCenterUnavailable signals a centre that cannot fund the commission of a
+	// new visit (no balance and no overdraft headroom left). Neutral on purpose:
+	// the client must not learn the centre's financial state, and the centre's
+	// own wrap replaces it with an actionable message.
+	ErrCenterUnavailable = errors.New("this centre is not accepting reservations right now")
+	// ErrCenterSuspended signals a centre suspended for staying in deficit past
+	// the platform's window. Same neutral client copy as unavailable, but the
+	// owner gets a distinct, actionable message.
+	ErrCenterSuspended = errors.New("this centre is temporarily unavailable")
 )
+
+// UserFacingError is a business-rule failure whose message is DELIBERATELY shown
+// to the client ("you must complete a booking before leaving a review"). It is
+// the explicit opt-in that lets a service keep human-readable copy without
+// forwarding arbitrary internal text: anything NOT wrapped in this type reaches
+// the client as a generic 500.
+type UserFacingError struct {
+	Message string
+}
+
+func (e *UserFacingError) Error() string { return e.Message }
+
+// NewUserFacing builds a UserFacingError. Use it only for text written for the
+// end user, never for a wrapped driver/repository error.
+func NewUserFacing(message string) error { return &UserFacingError{Message: message} }
 
 // MapToHTTP returns the HTTP status code and a client-safe message for err.
 // Known sentinels (and errors wrapping them) map to their canonical status and
@@ -73,9 +100,18 @@ func MapToHTTP(err error) (int, string) {
 		return http.StatusBadRequest, ErrInvalidToken.Error()
 	case errors.Is(err, ErrTooManyRequests):
 		return http.StatusTooManyRequests, ErrTooManyRequests.Error()
+	case errors.Is(err, ErrCenterInactive), errors.Is(err, ErrCenterUnavailable), errors.Is(err, ErrCenterSuspended):
+		return http.StatusConflict, err.Error()
 	case errors.Is(err, ErrFileTooLarge):
 		return http.StatusRequestEntityTooLarge, ErrFileTooLarge.Error()
 	default:
+		// A deliberate, user-safe business message. Checked before the generic
+		// 500 so services can keep copy their UI displays ("you must complete a
+		// booking first") without leaking anything else.
+		var userFacing *UserFacingError
+		if errors.As(err, &userFacing) {
+			return http.StatusConflict, userFacing.Message
+		}
 		utils.Log.Errorf("[apperrors] internal error: %v", err)
 		return http.StatusInternalServerError, "internal server error"
 	}
