@@ -83,22 +83,49 @@ Production `.env` checklist (a fresh `.env.example` boots, but not safely):
   (the seed never overwrites an existing password)
 - `SMTP_*` — real provider, sending domain verified (SPF/DKIM/DMARC)
 
+## Cutting a release (recommended)
+
+`.github/workflows/release.yml` builds `linux/amd64` and `linux/arm64` on every
+`v*` tag, runs the test suite, and attaches `yotuvia-api-linux-<arch>.tar.gz`
+plus its `.sha256` to the GitHub release:
+
+```bash
+git tag -a v1.0.0 -m "v1.0.0"
+git push origin v1.0.0
+```
+
+The binary is stamped with the tag (`-X main.version=...`) and logs it at boot:
+
+```
+[BOOT] yotuvia-api v1.0.0
+```
+
 ## Deploying a new version
 
 Run from the API checkout on the server:
 
 ```bash
+# Recommended: install the exact artifact CI built and tested.
+ARTIFACT_URL=https://github.com/Nina-99/yotuvia-api/releases/download/v1.0.0/yotuvia-api-linux-amd64.tar.gz \
+  ./deploy/deploy-api.sh
+
+# Or build from the checkout (needs the Go toolchain on the server).
 ./deploy/deploy-api.sh
 ```
 
 What it does, in order:
-1. `CGO_ENABLED=0 go build -trimpath -ldflags="-s -w"` (static binary).
+1. Downloads the artifact (with `sha256sum -c` against the published
+   `.sha256`; a missing or mismatched checksum aborts before touching the
+   binary), or builds `CGO_ENABLED=0` from source.
 2. Refuses to continue if `/srv/yotuvia/api/.env` is missing.
 3. Installs the binary beside the old one and `mv`s it into place (atomic: a
    running process keeps the old inode until restart).
 4. `systemctl restart yotuvia-api`.
 5. Polls `/api/healthz` for up to 30s and exits non-zero with
    `systemctl status` output if the process is not ready.
+
+`ARCH=arm64` selects the other asset. `ARTIFACT_FILE=/path/file.tar.gz` works
+for an air-gapped host.
 
 The schema is migrated by `AutoMigrate` on boot, so **take a database backup
 before deploying** anything that touches a model.
