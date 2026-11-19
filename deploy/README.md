@@ -10,6 +10,12 @@ is not a git repository, so that doc never reaches GitHub).
 | `backup.sh` / `restore.sh` | database + uploads backup set, and its restore |
 | `yotuvia-backup.{service,timer}` | nightly backup at 03:30 |
 | `BACKUP.md` | backup/restore runbook and the pre-deploy procedure |
+| `docker-compose.yml` | canonical Postgres definition for `/srv/yotuvia` |
+
+The `docker-compose.yml` in the monorepo root is a **dev-only** copy that binds
+`yotuvia-api/postgres_data`; it is not versioned and must not be copied to the
+server. The file here is the canonical one: it mounts `./postgres_data`, which
+is `/srv/yotuvia/postgres_data` in the layout below.
 
 ## Layout on the server
 
@@ -22,6 +28,10 @@ the receipts subdirectory. That is why the unit pins `WorkingDirectory`:
 ├── api/
 │   ├── yotuvia-api      <- binary installed by deploy-api.sh
 │   └── .env             <- secrets, chmod 600, NEVER committed
+├── .env -> api/.env     <- symlink read by docker compose interpolation
+├── docker-compose.yml   <- copy of deploy/docker-compose.yml
+├── postgres_data/       <- bind mount, owned by uid 999 (the postgres user)
+├── backups/             <- backup.sh output (keep retention low)
 ├── web/                 <- static SPA (deploy-web.sh in yotuvia-web)
 └── uploads/             <- nginx serves this; must be writable by the API user
     ├── receipts/
@@ -40,11 +50,20 @@ sudo mkdir -p /srv/yotuvia/{api,web,uploads/{receipts,clients,images,personnel,v
 sudo chown -R yotuvia:yotuvia /srv/yotuvia
 
 # 2. Configuration (never copy the local dev .env)
-sudo -u yotuvia cp .env.example /srv/yotuvia/api/.env
+sudo cp .env.example /srv/yotuvia/api/.env
+sudo -e /srv/yotuvia/api/.env        # sudoedit, runs your $EDITOR
+sudo chown yotuvia:yotuvia /srv/yotuvia/api/.env
 sudo chmod 600 /srv/yotuvia/api/.env
-sudo -u yotuvia "$EDITOR" /srv/yotuvia/api/.env
 
-# 3. Unit
+# 3. Database
+sudo cp deploy/docker-compose.yml /srv/yotuvia/docker-compose.yml
+# Compose interpolates from ./.env, while the API reads api/.env. One symlink
+# keeps both on the same DB credentials instead of duplicating the password.
+sudo ln -s api/.env /srv/yotuvia/.env
+cd /srv/yotuvia && sudo docker compose up -d
+sudo docker compose ps          # db must report (healthy)
+
+# 4. Unit
 sudo cp deploy/yotuvia-api.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable yotuvia-api
@@ -54,7 +73,8 @@ Production `.env` checklist (a fresh `.env.example` boots, but not safely):
 
 - `JWT_SECRET` — new random value, **not** the dev default
 - `REGISTRATION_TICKET_SECRET`, `BOOST_IMPRESSION_SECRET` — new random values
-- `DB_PASSWORD` — must match `POSTGRES_PASSWORD` in `docker-compose.yml`
+- `DB_PASSWORD` — one value only: the container reads it through the `.env`
+  symlink created in step 3, so the API and Postgres cannot diverge
 - `GIN_MODE=release`, `LOG_FORMAT=json`, `LOG_LEVEL=info`
 - `TRUSTED_PROXIES=127.0.0.1/32`
 - `CORS_ALLOWED_ORIGINS` and `FRONT_HOST` — the real https origin

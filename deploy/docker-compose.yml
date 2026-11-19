@@ -1,0 +1,53 @@
+# Yotuvia — Postgres only.
+#
+# This file is meant to live at /srv/yotuvia/docker-compose.yml, next to the
+# `api/` and `web/` directories and the `uploads/` tree. The API runs under
+# systemd (see yotuvia-api.service); only the database is containerized.
+#
+#   cd /srv/yotuvia && docker compose up -d
+#
+# IMPORTANT — where the variables come from:
+#   Compose interpolates ${...} from the SHELL or from `./.env` in this
+#   directory. It does NOT read `env_file:` for interpolation. The API reads
+#   `/srv/yotuvia/api/.env`. To keep both on the same values instead of
+#   duplicating the password, link them once:
+#
+#       ln -s api/.env /srv/yotuvia/.env
+#
+#   The `:?` markers below make a missing value fail loudly. A silent default
+#   is how the container ends up with one password and the API with another.
+
+services:
+  db:
+    image: postgres:17
+    container_name: yotuvia_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:?set DB_USER in /srv/yotuvia/.env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in /srv/yotuvia/.env}
+      POSTGRES_DB: ${DB_NAME:?set DB_NAME in /srv/yotuvia/.env}
+    ports:
+      # Loopback only, on purpose: the database must never be reachable from
+      # outside the host. Publishing "5432:5432" exposes it on every interface,
+      # where a weak password is one dictionary away from a full dump.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # Bind mount, not a named volume: backups, restores and the documented
+      # layout all assume the data is at /srv/yotuvia/postgres_data.
+      # The postgres image runs as uid 999 and MUST own this directory.
+      # Never chown it to your login user; if it loses read/execute for the
+      # host user, `go list ./...` starts failing for reasons unrelated to it.
+      - ./postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # $$ escapes compose interpolation so the shell inside the container reads
+      # the image's own POSTGRES_* variables.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
