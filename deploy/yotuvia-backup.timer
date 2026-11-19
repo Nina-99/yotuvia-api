@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly Yotuvia backup
+
+[Timer]
+# Off-peak. Persistent=true runs a missed backup after the machine comes back
+# up, so a reboot at 03:30 does not silently skip the night.
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

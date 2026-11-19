@@ -1,0 +1,15 @@
+[Unit]
+Description=Yotuvia database and uploads backup
+Documentation=file:///srv/yotuvia/api/deploy/BACKUP.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Needs root: it reads the API .env, writes /srv/yotuvia/backups and talks to
+# the Postgres container. It is a short, single-purpose job, so it does not get
+# a dedicated user instead of the docker group.
+ExecStart=/srv/yotuvia/api/deploy/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

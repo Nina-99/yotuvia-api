@@ -7,6 +7,9 @@ is not a git repository, so that doc never reaches GitHub).
 |---|---|
 | `yotuvia-api.service` | systemd unit (`/etc/systemd/system/yotuvia-api.service`) |
 | `deploy-api.sh` | builds the binary, installs it, restarts, gates on `/api/healthz` |
+| `backup.sh` / `restore.sh` | database + uploads backup set, and its restore |
+| `yotuvia-backup.{service,timer}` | nightly backup at 03:30 |
+| `BACKUP.md` | backup/restore runbook and the pre-deploy procedure |
 
 ## Layout on the server
 
