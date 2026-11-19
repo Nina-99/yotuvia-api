@@ -78,6 +78,11 @@ func TestReservationCenterNotifications_Walkin(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
 	db := setupRouterAuthzDB(t)
 	seedClient(t, db, 5, "client5", "c5@example.com")
+	// The walk-in now validates the centre (existence, active flag and token
+	// solvency) before creating anything, so the fixture must actually own one.
+	assert.NoError(t, db.Create(&models.BeautyCenter{
+		Name: "Center One", Email: "center1@example.com", ReferralCode: "CTR1", IsActive: true,
+	}).Error)
 	assert.NoError(t, db.Create(&models.Service{
 		BeautyCenterID: 1, CategoryID: 1, Name: "Corte", Description: "corte", Duration: 30, Price: 100, IsActive: true,
 	}).Error)
@@ -107,6 +112,9 @@ func TestReservationCenterNotifications_WalkinPersonnel(t *testing.T) {
 	utils.Log = zap.NewNop().Sugar()
 	db := setupRouterAuthzDB(t)
 	seedClient(t, db, 5, "client5", "c5@example.com")
+	assert.NoError(t, db.Create(&models.BeautyCenter{
+		Name: "Center One", Email: "center1@example.com", ReferralCode: "CTR1", IsActive: true,
+	}).Error)
 	seedPersonnel(t, db, 7, 1)
 	assert.NoError(t, db.Create(&models.Service{
 		BeautyCenterID: 1, CategoryID: 1, Name: "Corte", Description: "corte", Duration: 30, Price: 100, IsActive: true,

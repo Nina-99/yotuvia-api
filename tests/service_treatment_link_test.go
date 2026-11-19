@@ -45,7 +45,7 @@ func TestServiceTreatmentLink_LinksAndUnlinks(t *testing.T) {
 	)
 
 	linked := uint(1)
-	createdID, err := svc.Create(request.CreateServiceRequest{
+	createdID, err := svc.Create(1, request.CreateServiceRequest{
 		BeautyCenterID: 1,
 		CategoryID:     1,
 		Name:           "Corte",
@@ -65,7 +65,7 @@ func TestServiceTreatmentLink_LinksAndUnlinks(t *testing.T) {
 
 	// Re-link to a different treatment: a normal update.
 	other := uint(2)
-	require.NoError(t, svc.Update(created.ID, request.UpdateServiceRequest{TreatmentID: &other}))
+	require.NoError(t, svc.Update(1, created.ID, request.UpdateServiceRequest{TreatmentID: &other}))
 
 	var relinked models.Service
 	require.NoError(t, db.First(&relinked, created.ID).Error)
@@ -75,15 +75,15 @@ func TestServiceTreatmentLink_LinksAndUnlinks(t *testing.T) {
 	// Unlink: the sentinel 0 must clear it, otherwise a mis-linked service can
 	// never be corrected and stays wrongly catalogued forever.
 	clear := uint(0)
-	require.NoError(t, svc.Update(created.ID, request.UpdateServiceRequest{TreatmentID: &clear}))
+	require.NoError(t, svc.Update(1, created.ID, request.UpdateServiceRequest{TreatmentID: &clear}))
 
 	var unlinked models.Service
 	require.NoError(t, db.First(&unlinked, created.ID).Error)
 	assert.Nil(t, unlinked.TreatmentID, "treatment_id = 0 must clear the link")
 
 	// An update that omits the field entirely must NOT touch the existing link.
-	require.NoError(t, svc.Update(created.ID, request.UpdateServiceRequest{TreatmentID: &linked}))
-	require.NoError(t, svc.Update(created.ID, request.UpdateServiceRequest{Name: "Corte v2"}))
+	require.NoError(t, svc.Update(1, created.ID, request.UpdateServiceRequest{TreatmentID: &linked}))
+	require.NoError(t, svc.Update(1, created.ID, request.UpdateServiceRequest{Name: "Corte v2"}))
 
 	var untouched models.Service
 	require.NoError(t, db.First(&untouched, created.ID).Error)

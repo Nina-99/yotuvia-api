@@ -80,10 +80,11 @@ func TestReviewController_CreateValidation(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	// Current behavior: service validation errors surface as a blanket 500.
-	// Aligned to 400 in fix-api-authz-security (MapToHTTP) — out of scope here.
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "Error:Field validation for 'Rating' failed on the 'max' tag")
+	// A validator failure is the CALLER's fault (400) and the client gets the
+	// canonical sentinel message, not the raw validator text — which used to
+	// echo Go struct field names and validation tags back to the caller.
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "validation failed")
 
 	// Test case: Rating < 1 should fail
 	reqBody2 := request.CreateReviewRequest{
@@ -97,8 +98,8 @@ func TestReviewController_CreateValidation(t *testing.T) {
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
 
-	assert.Equal(t, http.StatusInternalServerError, w2.Code)
-	assert.Contains(t, w2.Body.String(), "Error:Field validation for 'Rating' failed on the 'required' tag")
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assert.Contains(t, w2.Body.String(), "validation failed")
 }
 
 func TestReviewService_OwnershipUpdateDelete(t *testing.T) {

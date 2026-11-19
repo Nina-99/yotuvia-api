@@ -89,6 +89,13 @@ func seedFullWeekWorkingHours(t *testing.T, db *gorm.DB, centerID uint) {
 	}
 }
 
+// Proof references the API itself issues, shaped like the URL returned by
+// POST /api/upload/receipt. Anything else is rejected by UploadProof.
+const (
+	validProofPath1 = "/uploads/receipts/11111111-1111-1111-1111-111111111111.png"
+	validProofPath2 = "/uploads/receipts/22222222-2222-2222-2222-222222222222.jpg"
+)
+
 func depositCreateReq(centerID, clientID, staffID, serviceID uint, start string) request.CreateReservationRequest {
 	return request.CreateReservationRequest{
 		BeautyCenterID: centerID,
@@ -165,15 +172,15 @@ func TestDepositFlow_UploadAndReview(t *testing.T) {
 	})
 
 	t.Run("other client is forbidden", func(t *testing.T) {
-		assert.ErrorIs(t, s.UploadProof(r.ID, riskyID+999, "http://x/y.png"), apperrors.ErrForbidden)
+		assert.ErrorIs(t, s.UploadProof(r.ID, riskyID+999, validProofPath1), apperrors.ErrForbidden)
 	})
 
 	t.Run("upload stores proof and keeps hold", func(t *testing.T) {
-		require.NoError(t, s.UploadProof(r.ID, riskyID, "http://x/receipt.png"))
+		require.NoError(t, s.UploadProof(r.ID, riskyID, validProofPath1))
 		var got models.Reservation
 		require.NoError(t, db.First(&got, r.ID).Error)
 		require.NotNil(t, got.ProofImageURL)
-		assert.Equal(t, "http://x/receipt.png", *got.ProofImageURL)
+		assert.Equal(t, validProofPath1, *got.ProofImageURL)
 		assert.Equal(t, PaymentPendingProof, got.PaymentStatus)
 	})
 
@@ -188,7 +195,7 @@ func TestDepositFlow_UploadAndReview(t *testing.T) {
 		assert.Equal(t, PaymentRejected, got.PaymentStatus)
 		assert.Equal(t, "PENDING", got.Status)
 
-		require.NoError(t, s.UploadProof(r.ID, riskyID, "http://x/receipt2.png"))
+		require.NoError(t, s.UploadProof(r.ID, riskyID, validProofPath2))
 		require.NoError(t, s.ReviewProof(r.ID, centerID, true))
 		require.NoError(t, db.First(&got, r.ID).Error)
 		assert.Equal(t, PaymentApproved, got.PaymentStatus)
@@ -212,7 +219,7 @@ func TestDepositFlow_Expiry(t *testing.T) {
 	require.NoError(t, db.Model(&models.Reservation{}).Where("id = ?", r.ID).Update("hold_expires_at", past).Error)
 
 	t.Run("upload on expired hold cancels it", func(t *testing.T) {
-		err := s.UploadProof(r.ID, riskyID, "http://x/late.png")
+		err := s.UploadProof(r.ID, riskyID, validProofPath1)
 		assert.ErrorIs(t, err, apperrors.ErrConflict)
 		var got models.Reservation
 		require.NoError(t, db.First(&got, r.ID).Error)

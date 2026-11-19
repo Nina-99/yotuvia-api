@@ -203,7 +203,7 @@ func TestBoostService_SettlementExhaustsBudgetAndDropsFromAuction(t *testing.T) 
 		t.Fatalf("spend must equal budget: got %d", stored.SpentMilli)
 	}
 
-	winners, err := svc.SelectWinners(now, 3, 100)
+	winners, err := svc.SelectWinners(now, 3, 100, nil, 0)
 	if err != nil {
 		t.Fatalf("SelectWinners: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestBoostService_SecondPriceAuctionAndPause(t *testing.T) {
 
 	// One slot, two bidders → the high bidder wins and pays the highest LOSING
 	// bid (300), not its own 800.
-	winners, err := svc.SelectWinners(now, 1, 100)
+	winners, err := svc.SelectWinners(now, 1, 100, nil, 0)
 	if err != nil {
 		t.Fatalf("SelectWinners: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestBoostService_SecondPriceAuctionAndPause(t *testing.T) {
 	if err := svc.PauseCampaign(1, high.ID); err != nil {
 		t.Fatalf("PauseCampaign: %v", err)
 	}
-	winners, err = svc.SelectWinners(now, 1, 100)
+	winners, err = svc.SelectWinners(now, 1, 100, nil, 0)
 	if err != nil {
 		t.Fatalf("SelectWinners after pause: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestBoostService_ConfiguredReserveFloorsLowBid(t *testing.T) {
 		t.Fatalf("CreateCampaign: %v", err)
 	}
 
-	winners, err := svc.SelectWinners(now, 1, 0)
+	winners, err := svc.SelectWinners(now, 1, 0, nil, 0)
 	if err != nil {
 		t.Fatalf("SelectWinners: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestBoostService_ConfiguredReservePricesSingleWinner(t *testing.T) {
 		t.Fatalf("CreateCampaign: %v", err)
 	}
 
-	winners, err := svc.SelectWinners(now, 1, 0)
+	winners, err := svc.SelectWinners(now, 1, 0, nil, 0)
 	if err != nil {
 		t.Fatalf("SelectWinners: %v", err)
 	}

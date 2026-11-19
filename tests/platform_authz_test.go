@@ -416,8 +416,11 @@ func TestPlatform_CenterPickerListsEveryCentre(t *testing.T) {
 	assert.Equal(t, "Platform Center Two", byID[2])
 }
 
-// doMultipartPNG posts a one-part multipart body with an image/png part so the
-// real upload path (content-type + extension detection) is exercised.
+// doMultipartPNG posts a one-part multipart body carrying REAL PNG bytes so the
+// real upload path runs. The payload must be a genuine image: since the uploader
+// derives the stored extension from the sniffed bytes (not from the client's
+// Content-Type header or filename), a fake body is correctly rejected as
+// non-image.
 func doMultipartPNG(t *testing.T, r *gin.Engine, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf bytes.Buffer
@@ -427,7 +430,7 @@ func doMultipartPNG(t *testing.T, r *gin.Engine, path, token string) *httptest.R
 	header.Set("Content-Type", "image/png")
 	part, err := mw.CreatePart(header)
 	require.NoError(t, err)
-	_, err = part.Write([]byte("fake-png-bytes"))
+	_, err = part.Write(pngBytes)
 	require.NoError(t, err)
 	require.NoError(t, mw.Close())
 

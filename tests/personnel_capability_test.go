@@ -58,6 +58,12 @@ func capabilityData(t *testing.T, db *gorm.DB) {
 	seedServiceRow(t, db, 1, 1, 30)
 	seedServiceRow(t, db, 2, 1, 30)
 	seedServiceRow(t, db, 3, 1, 30)
+	// A centre that accepts bookings can settle their commission. Without a
+	// wallet the solvency gate (correctly) refuses carts above the new-centre
+	// overdraft, and this fixture is about personnel capability, not funds.
+	require.NoError(t, db.Create(&models.TokenAccount{
+		BeautyCenterID: 1, Balance: 1_000_000, Currency: "USD",
+	}).Error)
 }
 
 func seedCapability(t *testing.T, db *gorm.DB, personnelID, serviceID uint) {

@@ -90,8 +90,11 @@ func TestFavoriteCRUD(t *testing.T) {
 
 		router.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assert.Contains(t, w.Body.String(), "already marked as favorite")
+		// A duplicate favorite is a state conflict, not a server fault: the
+		// service returns apperrors.ErrConflict and the message is the canonical
+		// sentinel text, never a free-form internal string.
+		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Contains(t, w.Body.String(), "conflict")
 	})
 
 	t.Run("Get Favorites By ClientID - Includes Preload", func(t *testing.T) {

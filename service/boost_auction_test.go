@@ -171,3 +171,53 @@ func TestWithinPacing(t *testing.T) {
 		t.Fatal("a campaign that has not started is not allowed")
 	}
 }
+
+// TestMergePromotedIDs_NeverDemotesAPaidPost — the guarantee the advertiser is
+// buying: a post that already ranked organically BETTER than its ad slot keeps
+// its organic position. Before this, a video ranked #3 that paid for a boost was
+// moved down to #5 — the customer paid to lose reach.
+func TestMergePromotedIDs_NeverDemotesAPaidPost(t *testing.T) {
+	// 20 organic posts; the paid one (id 3) was organically THIRD.
+	ranked := make([]uint, 0, 20)
+	for i := uint(1); i <= 20; i++ {
+		ranked = append(ranked, i)
+	}
+
+	ordered, promoted := MergePromotedIDs(ranked, []uint{3}, 5)
+
+	if !promoted[3] {
+		t.Fatal("3 must be marked promoted")
+	}
+	// 0-based index 2 == third position. It must stay there (or higher), never
+	// slide to the slot at index 4.
+	if got := indexOfID(ordered, 3); got > 2 {
+		t.Fatalf("paid post was demoted: organic #3 ended at index %d (%v)", got, ordered)
+	}
+	if len(ordered) != len(ranked) {
+		t.Fatalf("length must be preserved: want %d, got %d", len(ranked), len(ordered))
+	}
+	seen := map[uint]int{}
+	for _, id := range ordered {
+		seen[id]++
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Fatalf("id %d appears %d times", id, n)
+		}
+	}
+}
+
+// TestMergePromotedIDs_StillSpacesWhenTheSlotIsBetter — the normal case is
+// untouched: a post ranked below its slot is pulled UP to the slot.
+func TestMergePromotedIDs_StillSpacesWhenTheSlotIsBetter(t *testing.T) {
+	ranked := make([]uint, 0, 20)
+	for i := uint(1); i <= 20; i++ {
+		ranked = append(ranked, i)
+	}
+
+	ordered, _ := MergePromotedIDs(ranked, []uint{18}, 5)
+
+	if got := indexOfID(ordered, 18); got != 4 {
+		t.Fatalf("a promoted post ranked below its slot must land on slot 5 (index 4), got %d (%v)", got, ordered)
+	}
+}

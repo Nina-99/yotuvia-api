@@ -306,7 +306,7 @@ func TestAccessTokenExpiry15MinutesAndClaimsIntact(t *testing.T) {
 	t.Setenv("JWT_SECRET", testJWTSecret)
 	utils.Log = zap.NewNop().Sugar()
 
-	token, err := utils.GenerateJWT(42, 7, "beauty_center", "owner@test.com", "the-owner")
+	token, err := utils.GenerateJWT(42, 7, "beauty_center", "owner@test.com", "the-owner", "test-session")
 	assert.NoError(t, err)
 
 	claims, err := utils.ValidateToken(token)

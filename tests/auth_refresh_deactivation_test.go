@@ -98,7 +98,7 @@ func TestPersonnelDeactivation_RevokesSessions(t *testing.T) {
 		repository.NewUserSessionRepositoryImpl(db),
 		validator.New(),
 	)
-	_, err := svc.Update(personnel.ID, request.UpdatePersonnelRequest{IsActive: false})
+	_, err := svc.Update(personnel.ID, personnel.BeautyCenterID, request.UpdatePersonnelRequest{IsActive: false})
 	require.NoError(t, err)
 
 	var live int64

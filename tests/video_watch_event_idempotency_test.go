@@ -25,6 +25,7 @@ func newWatchService(t *testing.T) (service.VideoWatchEventService, func(clientI
 		repository.NewFeedPostRepositoryImpl(db),
 		repository.NewPostLikeRepositoryImpl(db),
 		repository.NewSavedVideoRepositoryImpl(db),
+		repository.NewFeedImpressionRepositoryImpl(db),
 		validator.New(),
 	)
 	rows := func(clientID, postID uint) []models.VideoWatchEvent {

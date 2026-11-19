@@ -80,7 +80,7 @@ func TestPersonnelCRUD(t *testing.T) {
 			},
 		}
 
-		res, err := svc.Update(personnelID, req)
+		res, err := svc.Update(personnelID, personnel.BeautyCenterID, req)
 		assert.NoError(t, err)
 		assert.Equal(t, "555555555", res.Phone)
 		assert.Len(t, res.Images, 1)
@@ -96,7 +96,7 @@ func TestPersonnelCRUD(t *testing.T) {
 	})
 
 	t.Run("Delete Personnel (Soft Delete)", func(t *testing.T) {
-		err := svc.Delete(personnelID)
+		err := svc.Delete(personnelID, personnel.BeautyCenterID)
 		assert.NoError(t, err)
 
 		// Check if it's still in DB but has DeletedAt

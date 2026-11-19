@@ -45,7 +45,7 @@ func signToken(claims *utils.JWTClaim, method jwt.SigningMethod, key interface{}
 
 // GenerateTestJWT issues an HS256 token through the production code path.
 func GenerateTestJWT(userID, centerID uint, role string) (string, error) {
-	return utils.GenerateJWT(userID, centerID, role, "test@test.com", "")
+	return utils.GenerateJWT(userID, centerID, role, "test@test.com", "", "test-session")
 }
 
 // jwtProbeRouter mounts JWTAuthMiddleware in front of a probe handler so tests
@@ -69,7 +69,7 @@ func TestJWTAlgorithmGuard(t *testing.T) {
 		t.Fatalf("failed to generate RSA key: %v", err)
 	}
 
-	validHS256, err := utils.GenerateJWT(7, 1, "beauty_center", "owner@test.com", "")
+	validHS256, err := utils.GenerateJWT(7, 1, "beauty_center", "owner@test.com", "", "test-session")
 	if err != nil {
 		t.Fatalf("failed to generate valid token: %v", err)
 	}
