@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref: a stale green check is worse than none.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: vet · build · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      # The test suite uses mattn/go-sqlite3 (in-memory), which needs CGO.
+      # ubuntu-latest ships gcc and CGO is enabled by default on linux, but we
+      # state it explicitly so a toolchain change cannot silently drop the driver.
+      - name: Enable CGO
+        run: echo "CGO_ENABLED=1" >> "$GITHUB_ENV"
+
+      # Sanity check from AGENTS.md: `go list ./...` must resolve the full module.
+      # If a directory inside the module loses read/execute permissions (e.g. a
+      # commit that includes postgres_data), `./...` silently degrades to the
+      # current directory and every later step "passes" while testing nothing.
+      - name: Sanity check package graph
+        run: |
+          count=$(go list ./... 2>/dev/null | wc -l)
+          echo "packages resolved: $count"
+          if [ "$count" -lt 15 ]; then
+            echo "::error::go list ./... resolved only $count packages (expected >= 15). A blocked directory made ./... degrade."
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        # -count=1 disables the test cache so a green run reflects this commit.
+        run: go test ./... -count=1
