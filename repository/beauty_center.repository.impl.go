@@ -1,11 +1,60 @@
 package repository
 
 import (
+	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
 )
+
+// deficitDiscoveryGraceHours is how long a centre may stay unfundable before it
+// is removed from DISCOVERY (search, ranking, nearby).
+//
+// The delay is deliberate. Commission is charged when a visit COMPLETES, so a
+// centre that dips into deficit for a day or two can still settle the visits it
+// already has by topping up. Hiding it instantly would punish a temporary dip
+// and start a death spiral: no visibility -> no visits -> no mission rewards ->
+// no reason to come back. After the grace, the centre can no longer promise a
+// service it cannot close, so it stops being offered. Its profile stays
+// reachable by id (a client with a link, or a booking already made), and
+// bookings against it are refused by the reservation gate.
+//
+// TOKEN_DEFICIT_GRACE_HOURS overrides it; a malformed value falls back to the
+// default rather than disabling the filter.
+func deficitDiscoveryGraceHours() int {
+	const defaultHours = 168 // 7 days
+	raw := os.Getenv("TOKEN_DEFICIT_GRACE_HOURS")
+	if raw == "" {
+		return defaultHours
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return defaultHours
+	}
+	return n
+}
+
+// withoutDeficitCenters excludes centres whose deficit started before the grace
+// window elapsed. `alias` is the beauty-centres table alias in the enclosing
+// query (always an internal constant, never user input).
+func withoutDeficitCenters(alias string) func(*gorm.DB) *gorm.DB {
+	cutoff := time.Now().Add(-time.Duration(deficitDiscoveryGraceHours()) * time.Hour)
+	condition := fmt.Sprintf(`NOT EXISTS (
+		SELECT 1 FROM token_accounts ta
+		WHERE ta.beauty_center_id = %s.id
+		  AND ta.deleted_at IS NULL
+		  AND (
+			ta.suspended_at IS NOT NULL
+			OR (ta.deficit_since IS NOT NULL AND ta.deficit_since < ?)
+		  )
+	)`, alias)
+	return func(db *gorm.DB) *gorm.DB {
+		return db.Where(condition, cutoff)
+	}
+}
 
 // ratingAggregateJoin computes avg_rating and review_count for a whole page of
 // centres in ONE pass over reviews, using the same grouped LEFT JOIN shape as
@@ -84,7 +133,10 @@ func (r *BeautyCenterRepositoryImpl) FindAll(page, limit int) ([]models.BeautyCe
 	var centers []models.BeautyCenter
 	var total int64
 
-	r.db.Model(&models.BeautyCenter{}).Where("is_active = ?", true).Count(&total)
+	r.db.Model(&models.BeautyCenter{}).
+		Where("is_active = ?", true).
+		Scopes(withoutDeficitCenters("beauty_centers")).
+		Count(&total)
 
 	offset := (page - 1) * limit
 	err := r.db.
@@ -92,6 +144,7 @@ func (r *BeautyCenterRepositoryImpl) FindAll(page, limit int) ([]models.BeautyCe
 		Preload("BeautyCenterImage").
 		Preload("WorkingHour").
 		Where("is_active = ?", true).
+		Scopes(withoutDeficitCenters("beauty_centers")).
 		Offset(offset).Limit(limit).
 		Find(&centers).Error
 	return centers, total, err
@@ -283,9 +336,13 @@ func (r *BeautyCenterRepositoryImpl) Search(query string, page, limit int) ([]mo
 	offset := (page - 1) * limit
 	searchPattern := "%" + query + "%"
 
+	// The scope is applied ONCE, at construction: applying it to a derived chain
+	// (`base.Scopes(...).Count(...)`) filters the count but leaves the page
+	// query untouched, so total and data disagree.
 	base := r.db.Model(&models.BeautyCenter{}).
 		Where("is_active = ?", true).
-		Where("LOWER(name) LIKE LOWER(?) OR LOWER(address) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?)", searchPattern, searchPattern, searchPattern)
+		Where("LOWER(name) LIKE LOWER(?) OR LOWER(address) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?)", searchPattern, searchPattern, searchPattern).
+		Scopes(withoutDeficitCenters("beauty_centers"))
 
 	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -310,6 +367,7 @@ func (r *BeautyCenterRepositoryImpl) FindTopRated(limit int) ([]models.BeautyCen
 		Preload("BeautyCenterImage").
 		Preload("WorkingHour").
 		Where("is_active = ?", true).
+		Scopes(withoutDeficitCenters("beauty_centers")).
 		Order("avg_rating DESC, review_count DESC").
 		Limit(limit).
 		Find(&centers).Error
@@ -328,6 +386,7 @@ func (r *BeautyCenterRepositoryImpl) FindNearby(latitude, longitude float64, lim
 		Preload("BeautyCenterImage").
 		Preload("WorkingHour").
 		Where("is_active = ? AND latitude != 0 AND longitude != 0", true).
+		Scopes(withoutDeficitCenters("beauty_centers")).
 		Order("distance ASC").
 		Limit(limit).
 		Find(&centers).Error
@@ -513,11 +572,23 @@ func (r *BeautyCenterRepositoryImpl) FindRanking(from *time.Time, limit int) ([]
 			GROUP BY beauty_center_id
 		) fav ON fav.beauty_center_id = bc.id
 		WHERE bc.is_active = true AND bc.deleted_at IS NULL
+		  -- Discovery: a centre in deficit past the grace window stops being
+		  -- ranked. Its profile stays reachable by id.
+		  AND NOT EXISTS (
+			SELECT 1 FROM token_accounts ta
+			WHERE ta.beauty_center_id = bc.id
+			  AND ta.deleted_at IS NULL
+			  AND (
+				ta.suspended_at IS NOT NULL
+				OR (ta.deficit_since IS NOT NULL AND ta.deficit_since < ?)
+			  )
+		  )
 		ORDER BY score DESC
 		LIMIT ?
 	`
 
-	allArgs = append(allArgs, limit)
+	cutoff := time.Now().Add(-time.Duration(deficitDiscoveryGraceHours()) * time.Hour)
+	allArgs = append(allArgs, cutoff, limit)
 
 	var rows []RankingRow
 	if err := r.db.Raw(query, allArgs...).Scan(&rows).Error; err != nil {

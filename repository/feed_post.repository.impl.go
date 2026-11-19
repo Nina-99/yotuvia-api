@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"math"
+
 	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
 )
@@ -100,7 +102,11 @@ func (r *FeedPostRepositoryImpl) FindAllActive(page, limit int) ([]models.FeedPo
 
 	offset := (page - 1) * limit
 	err := applyFeedPreloads(q).
-		Order("is_promo DESC, created_at DESC").
+		// Newest first. `is_promo` is a LABEL, not a ranking signal: ordering by
+		// it gave any centre free top-of-feed placement, which undercut the paid
+		// boost that is the only placement the platform sells. Promotion is
+		// injected by the auction (MergePromotedIDs) and nowhere else.
+		Order("created_at DESC").
 		Offset(offset).Limit(limit).Find(&posts).Error
 	return posts, total, err
 }
@@ -128,7 +134,11 @@ func (r *FeedPostRepositoryImpl) FindActiveByCenter(centerID uint) ([]models.Fee
 	var posts []models.FeedPost
 	err := applyFeedPreloads(r.db).
 		Where("beauty_center_id = ? AND is_active = ?", centerID, true).
-		Order("is_promo DESC, created_at DESC").
+		// Newest first. `is_promo` is a LABEL, not a ranking signal: ordering by
+		// it gave any centre free top-of-feed placement, which undercut the paid
+		// boost that is the only placement the platform sells. Promotion is
+		// injected by the auction (MergePromotedIDs) and nowhere else.
+		Order("created_at DESC").
 		Limit(ListQueryLimit).
 		Find(&posts).Error
 	return posts, err
@@ -180,4 +190,45 @@ func (r *FeedPostRepositoryImpl) Exists(id uint) (bool, error) {
 	var count int64
 	err := r.db.Model(&models.FeedPost{}).Where("id = ?", id).Count(&count).Error
 	return count > 0, err
+}
+
+// FindActiveForFeed bounds the ranking candidate set.
+//
+// Two problems solved at once:
+//  1. VOLUME: the ranker used to load the entire newest-1000 catalog with every
+//     association just to score it and throw most of it away.
+//  2. RELEVANCE: loading the whole country only to filter it in Go wasted the
+//     `idx_bc_location` index that already exists.
+//
+// Centres with (0,0) — never given coordinates — are INCLUDED: excluding them
+// would silently delete them from discovery, which is worse than a post scoring
+// zero on proximity.
+func (r *FeedPostRepositoryImpl) FindActiveForFeed(lat, lng, radiusKm float64, limit int) ([]models.FeedPost, error) {
+	if limit <= 0 {
+		limit = 300
+	}
+
+	q := applyFeedPreloads(r.db.Model(&models.FeedPost{})).
+		Where("feed_posts.is_active = ?", true)
+
+	if lat != 0 || lng != 0 {
+		const kmPerDegree = 111.32
+		dLat := radiusKm / kmPerDegree
+		cosLat := math.Cos(lat * math.Pi / 180)
+		if cosLat < 0.01 {
+			cosLat = 0.01 // near the poles the longitude span explodes
+		}
+		dLng := radiusKm / (kmPerDegree * cosLat)
+
+		q = q.
+			Joins("JOIN beauty_centers bc ON bc.id = feed_posts.beauty_center_id AND bc.deleted_at IS NULL").
+			Where(`(
+				(bc.latitude BETWEEN ? AND ? AND bc.longitude BETWEEN ? AND ?)
+				OR (bc.latitude = 0 AND bc.longitude = 0)
+			)`, lat-dLat, lat+dLat, lng-dLng, lng+dLng)
+	}
+
+	var posts []models.FeedPost
+	err := q.Order("feed_posts.created_at DESC, feed_posts.id DESC").Limit(limit).Find(&posts).Error
+	return posts, err
 }

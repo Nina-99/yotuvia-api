@@ -6,7 +6,7 @@ package repository
 // result set to the mobile client.
 //
 // Every capped finder keeps its existing ordering (created_at DESC, or
-// is_promo DESC, created_at DESC), so the NEWEST rows survive the cut.
+// created_at DESC), so the NEWEST rows survive the cut.
 //
 // It deliberately does NOT apply to:
 //   - COUNT(*) methods (they return a scalar, not a list);

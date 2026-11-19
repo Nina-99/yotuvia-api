@@ -49,3 +49,24 @@ func (r *VideoWatchEventRepositoryImpl) FindRecentByClientID(clientID uint, limi
 	err := r.Db.Where("client_id = ?", clientID).Order("created_at DESC").Limit(limit).Find(&events).Error
 	return events, err
 }
+
+// WatchedPostIDs returns the subset of postIDs the client has a watch event for.
+func (r *VideoWatchEventRepositoryImpl) WatchedPostIDs(clientID uint, postIDs []uint) (map[uint]bool, error) {
+	watched := make(map[uint]bool, len(postIDs))
+	if clientID == 0 || len(postIDs) == 0 {
+		return watched, nil
+	}
+
+	var ids []uint
+	err := r.Db.Model(&models.VideoWatchEvent{}).
+		Where("client_id = ? AND feed_post_id IN ?", clientID, postIDs).
+		Distinct("feed_post_id").
+		Pluck("feed_post_id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		watched[id] = true
+	}
+	return watched, nil
+}

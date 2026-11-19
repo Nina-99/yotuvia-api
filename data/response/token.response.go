@@ -18,6 +18,11 @@ type TokenBalanceResponse struct {
 	// FiatRate is the reference conversion for the center's currency:
 	// 1 Ytv = FiatRate <Currency>. Display only; accounting never uses it.
 	FiatRate float64 `json:"fiat_rate"`
+
+	// TokenHealth is the owner-facing state (ok | low | deficit | suspended).
+	// Same source the booking gate uses, so the banner never contradicts a
+	// rejected booking.
+	TokenHealth *TokenHealthDTO `json:"token_health,omitempty"`
 }
 
 type TokenTransactionResponse struct {

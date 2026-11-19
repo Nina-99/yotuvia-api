@@ -49,6 +49,24 @@ type UserSessionRepository interface {
 	// account's sessions, never another type's.
 	RevokeAllForUser(ctx context.Context, userID uint, role string) error
 
+	// IsActive reports whether the session behind an access token may still
+	// authenticate a request.
+	//
+	// It closes the revocation window: without it a token signed before a
+	// logout, a password reset, a session-cap eviction or a deactivation kept
+	// working until its 15-minute expiry, and a role/centre change took the same
+	// time to propagate.
+	//
+	// Rotation needs care. Refresh revokes the presented generation and inserts
+	// the next one in the same family, so requiring "not revoked" would invalidate
+	// the access token the client is still holding for the rest of that round
+	// trip. A revoked generation therefore stays acceptable for `grace` after it
+	// was rotated, but ONLY while its family has a live generation. That split
+	// keeps real revocations immediate — logout-all and eviction leave the family
+	// with no live generation, so they bite on the next request — without
+	// breaking an in-flight request during a refresh.
+	IsActive(ctx context.Context, sessionID uint, now time.Time, grace time.Duration) (bool, error)
+
 	// EnforceActiveLimit keeps at most `limit` LIVE sessions for one
 	// (userID, role) pair and returns how many were revoked to get there. A
 	// session is live when it is not revoked AND not past ExpiresAt — an

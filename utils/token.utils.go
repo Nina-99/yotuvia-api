@@ -25,6 +25,13 @@ type JWTClaim struct {
 	Email    string `json:"email,omitempty"`
 	Username string `json:"username,omitempty"`
 
+	// SessionID ties the access token to the session row that issued it, so a
+	// revocation (logout, logout-all, password reset, deactivated account,
+	// session-cap eviction) takes effect on the NEXT request instead of waiting
+	// out the 15-minute token lifetime. Validated by the auth middleware against
+	// UserSessionRepository.IsActive.
+	SessionID string `json:"sid,omitempty"`
+
 	// Purpose is set only on non-session tokens (e.g. the registration ticket).
 	// Access tokens never carry it. ValidateToken rejects any token that has it
 	// so a registration ticket can never be replayed as a bearer credential.
@@ -33,13 +40,17 @@ type JWTClaim struct {
 	jwt.RegisteredClaims
 }
 
-func GenerateJWT(userID uint, centerID uint, role string, email string, username string) (string, error) {
+// GenerateJWT signs an access token bound to sessionID. The session id is
+// mandatory: a token without one cannot be revoked and would be rejected by the
+// auth middleware.
+func GenerateJWT(userID uint, centerID uint, role string, email string, username string, sessionID string) (string, error) {
 	claims := &JWTClaim{
-		UserID:   userID,
-		CenterID: centerID,
-		Role:     role,
-		Email:    email,
-		Username: username,
+		UserID:    userID,
+		CenterID:  centerID,
+		Role:      role,
+		Email:     email,
+		Username:  username,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(AccessTokenTTL)),
 		},

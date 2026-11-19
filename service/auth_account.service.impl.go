@@ -103,14 +103,14 @@ func maxActiveSessions() int {
 // session(s) are revoked until exactly `limit` remain. The new login always
 // succeeds — that is the point of option A: the user is never locked out of
 // the device they are using right now.
-func (s *AuthAccountServiceImpl) mintSession(userID, centerID uint, role, email, username string) (string, int, error) {
+func (s *AuthAccountServiceImpl) mintSession(userID, centerID uint, role, email, username string) (string, string, int, error) {
 	raw, err := utils.GenerateRefreshToken()
 	if err != nil {
-		return "", 0, err
+		return "", "", 0, err
 	}
 	familyID, err := utils.GenerateFamilyID()
 	if err != nil {
-		return "", 0, err
+		return "", "", 0, err
 	}
 	session := &models.UserSession{
 		UserID:           userID,
@@ -123,7 +123,15 @@ func (s *AuthAccountServiceImpl) mintSession(userID, centerID uint, role, email,
 		Username:         username,
 	}
 	if err := s.SessionRepo.Create(context.Background(), session); err != nil {
-		return "", 0, err
+		return "", "", 0, err
+	}
+
+	// The access token is bound to the row just created (its id is populated by
+	// the insert), so the auth middleware can revoke THIS session on the next
+	// request instead of waiting out the token's 15-minute lifetime.
+	accessToken, err := utils.GenerateJWT(userID, centerID, role, email, username, sessionIDString(session.ID))
+	if err != nil {
+		return "", "", 0, err
 	}
 
 	evicted, err := s.SessionRepo.EnforceActiveLimit(context.Background(), userID, role, maxActiveSessions(), time.Now())
@@ -132,9 +140,14 @@ func (s *AuthAccountServiceImpl) mintSession(userID, centerID uint, role, email,
 		// failed enforcement degrades to "one session over the cap", never to
 		// "the user cannot sign in". The client simply gets no warning.
 		utils.Log.Errorf("[AUTH] session limit not enforced for %s #%d: %v", role, userID, err)
-		return raw, 0, nil
+		return accessToken, raw, 0, nil
 	}
-	return raw, evicted, nil
+	return accessToken, raw, evicted, nil
+}
+
+// sessionIDString renders a session primary key as the JWT `sid` claim value.
+func sessionIDString(id uint) string {
+	return strconv.FormatUint(uint64(id), 10)
 }
 
 // termsVersion returns the server-authoritative Terms version stamped on every
@@ -286,12 +299,7 @@ func (s *AuthAccountServiceImpl) loginByType(identifier, password, userType stri
 	}
 
 	utils.Log.Infof("[AUTH] Classic Login successful. UserType: %s, ID: %d", userType, userID)
-	token, err := utils.GenerateJWT(userID, centerID, userType, email, username)
-	if err != nil {
-		return AuthResult{}, err
-	}
-
-	refreshToken, evicted, err := s.mintSession(userID, centerID, userType, email, username)
+	token, refreshToken, evicted, err := s.mintSession(userID, centerID, userType, email, username)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -569,12 +577,7 @@ func (s *AuthAccountServiceImpl) Register(req request.RegisterRequest) (AuthResu
 	s.sendVerificationEmail(context.Background(), verificationAccount, req.UserType, userID, email, firstName)
 
 	utils.Log.Infof("[AUTH] New %s registered successfully. ID: %d, Email: %s", req.UserType, userID, email)
-	token, err := utils.GenerateJWT(userID, centerID, req.UserType, email, username)
-	if err != nil {
-		return AuthResult{}, err
-	}
-
-	refreshToken, evicted, err := s.mintSession(userID, centerID, req.UserType, email, username)
+	token, refreshToken, evicted, err := s.mintSession(userID, centerID, req.UserType, email, username)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -876,12 +879,7 @@ func (s *AuthAccountServiceImpl) generateTokenForUser(account *models.AuthAccoun
 		return AuthResult{}, errors.New("failed to identify user ID associated with this social account")
 	}
 
-	token, err := utils.GenerateJWT(userID, centerID, account.UserType, email, username)
-	if err != nil {
-		return AuthResult{}, err
-	}
-
-	refreshToken, evicted, err := s.mintSession(userID, centerID, account.UserType, email, username)
+	token, refreshToken, evicted, err := s.mintSession(userID, centerID, account.UserType, email, username)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -1090,11 +1088,7 @@ func (s *AuthAccountServiceImpl) issueSessionForUser(userType string, userID uin
 		return AuthResult{}, apperrors.ErrUnauthorized
 	}
 
-	token, err := utils.GenerateJWT(userID, centerID, userType, resolvedEmail, username)
-	if err != nil {
-		return AuthResult{}, err
-	}
-	refreshToken, evicted, err := s.mintSession(userID, centerID, userType, resolvedEmail, username)
+	token, refreshToken, evicted, err := s.mintSession(userID, centerID, userType, resolvedEmail, username)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -1211,11 +1205,7 @@ func (s *AuthAccountServiceImpl) CompleteRegistration(ctx context.Context, req r
 	committed = true
 
 	utils.Log.Infof("[AUTH] New %s completed passwordless registration. ID: %d, Email: %s", req.UserType, userID, email)
-	token, err := utils.GenerateJWT(userID, centerID, req.UserType, email, username)
-	if err != nil {
-		return AuthResult{}, err
-	}
-	refreshToken, evicted, err := s.mintSession(userID, centerID, req.UserType, email, username)
+	token, refreshToken, evicted, err := s.mintSession(userID, centerID, req.UserType, email, username)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -1294,7 +1284,7 @@ func (s *AuthAccountServiceImpl) Refresh(ctx context.Context, rawToken string) (
 		}
 	}
 
-	accessToken, err := utils.GenerateJWT(newSession.UserID, newSession.CenterID, newSession.Role, newSession.Email, newSession.Username)
+	accessToken, err := utils.GenerateJWT(newSession.UserID, newSession.CenterID, newSession.Role, newSession.Email, newSession.Username, sessionIDString(newSession.ID))
 	if err != nil {
 		return RefreshResult{}, err
 	}

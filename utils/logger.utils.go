@@ -9,9 +9,15 @@ import (
 	"os"
 )
 
-// Log is our global instance of the Logger
+// Log is our global instance of the Logger.
 // We use SugaredLogger because it allows easy formating (e.g., Log.Infof("User %d",id))
-var Log *zap.SugaredLogger
+//
+// It starts as a NO-OP logger instead of nil. main() replaces it with the real
+// one via InitLogger, but any code path that logs before that (or in a test that
+// never installs a logger) must not be able to panic a request with a nil
+// pointer: logging is observability, never a failure mode. The `if Log != nil`
+// guards elsewhere stay harmless.
+var Log *zap.SugaredLogger = zap.NewNop().Sugar()
 
 // LoggerConfig defines the configuraton structure we discussed
 type LoggerConfig struct {

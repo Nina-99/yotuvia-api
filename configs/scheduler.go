@@ -37,6 +37,12 @@ type schedulerSweeps struct {
 	expireReferrals  func(now time.Time) (int64, error)
 	sweepBoosts      func(now time.Time) (int, error)
 	processReferrals func(now time.Time) (int, error)
+	// sweepTokenAlerts warns owners whose wallet is running low, warns (and
+	// eventually suspends) centres that can no longer fund a visit, and clears
+	// those states once a top-up restores the balance. It is the safety net for
+	// the event-driven call sites: a centre that simply goes quiet still gets
+	// its alerts on time.
+	sweepTokenAlerts func(now time.Time) (int, error)
 }
 
 // runSchedulerTick executes all four sweeps for one tick. Every sweep stays
@@ -78,6 +84,14 @@ func runSchedulerTick(s schedulerSweeps, now time.Time) {
 		utils.Log.Errorf("[SCHEDULER] referral processing failed: %v", err)
 	} else if n > 0 {
 		utils.Log.Infof("[SCHEDULER] processed %d pending referrals", n)
+	}
+	// Nil-guarded: the sweeps struct is built by tests that predate this sweep.
+	if s.sweepTokenAlerts != nil {
+		if n, err := s.sweepTokenAlerts(now); err != nil {
+			utils.Log.Errorf("[SCHEDULER] token alert sweep failed: %v", err)
+		} else if n > 0 {
+			utils.Log.Debugf("[SCHEDULER] evaluated %d wallets", n)
+		}
 	}
 }
 
@@ -174,6 +188,7 @@ func StartBackgroundScheduler(db *gorm.DB) {
 		},
 		sweepBoosts:      boostSvc.SweepEnded,
 		processReferrals: func(time.Time) (int, error) { return referralSvc.ProcessPendingReferrals() },
+		sweepTokenAlerts: accountSvc.SweepBalanceAlerts,
 	}
 
 	go func() {

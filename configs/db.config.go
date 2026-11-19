@@ -46,6 +46,7 @@ func DBConnection() {
 		&models.Favorite{},
 		&models.PersonnelFollow{},
 		&models.FeedPost{},
+		&models.FeedImpression{},
 		&models.LoyaltyProgram{},
 		&models.LoyaltyRedemption{},
 		&models.Personnel{},
@@ -89,6 +90,14 @@ func DBConnection() {
 			utils.Log.Fatalf("Error migrating the model %T: %v", model, err)
 		}
 	}
+
+	// Defense-in-depth for the manual money path: at most ONE ledger credit per
+	// top-up. The service already settles atomically (compare-and-set), so this
+	// index can only ever fire if a bug bypasses that path. Partial on
+	// type='topup' so it never constrains other transaction types. Non-fatal:
+	// if legacy duplicate rows exist the index cannot be built, and taking the
+	// whole boot down for a defense-in-depth guard would be worse than logging it.
+	ensureTopUpLedgerUniqueIndex(db)
 
 	DB = db
 
@@ -230,4 +239,18 @@ func MigrateMissionPeriods(db *gorm.DB) {
 			utils.Log.Errorf("[MIGRATE] failed to create idx_mission_center_period: %v", err)
 		}
 	}
+}
+
+// ensureTopUpLedgerUniqueIndex guarantees at most ONE "topup" ledger row per
+// top-up id. It is a partial unique index so other transaction types are never
+// constrained. Idempotent (IF NOT EXISTS) and non-fatal: if legacy duplicate
+// rows block creation, we log instead of refusing to boot.
+func ensureTopUpLedgerUniqueIndex(db *gorm.DB) {
+	const stmt = `CREATE UNIQUE INDEX IF NOT EXISTS ux_token_tx_topup_ref
+		ON token_transactions (reference_id) WHERE type = 'topup' AND reference_id IS NOT NULL`
+	if err := db.Exec(stmt).Error; err != nil {
+		utils.Log.Errorf("[MIGRATE] could not create ux_token_tx_topup_ref (duplicate topup credits exist?): %v", err)
+		return
+	}
+	utils.Log.Info("[MIGRATE] ensured ux_token_tx_topup_ref")
 }

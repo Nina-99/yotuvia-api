@@ -9,6 +9,14 @@ type FeedPostRepository interface {
 	FindByID(id uint) (*models.FeedPost, error)
 	// FindAllActive serves the PUBLIC feed: is_active = true only.
 	FindAllActive(page, limit int) ([]models.FeedPost, int64, error)
+
+	// FindActiveForFeed returns the ranking candidates: active posts whose centre
+	// is inside the viewer's bounding box (plus centres with no coordinates, so
+	// unset data never disappears), newest first and capped.
+	//
+	// A zero lat/lng means "viewer position unknown": it falls back to the global
+	// newest posts, exactly the pre-geo behaviour.
+	FindActiveForFeed(lat, lng, radiusKm float64, limit int) ([]models.FeedPost, error)
 	// FindActiveByPersonnel serves the public professional profile feed:
 	// is_active = true for one professional, newest first, paginated.
 	FindActiveByPersonnel(personnelID uint, page, limit int) ([]models.FeedPost, int64, error)

@@ -1,5 +1,7 @@
 package response
 
+import "time"
+
 // TopServiceDTO is one rank in the top-services leaderboard. Revenue is the
 // SUM of reservation-time prices over COMPLETED reservations in range
 // (feat-admin-analytics D5); appointment_count remains populated during the
@@ -109,7 +111,21 @@ type DashboardStatsResponse struct {
 	RatingSeries       []SeriesDayDTO          `json:"rating_series"`
 
 	// ── Token / Ytv balance (feat-token-economy) ──
-	Balance        float64 `json:"balance"`
-	OverdraftLimit float64 `json:"overdraft_limit"`
+	Balance          float64 `json:"balance"`
+	OverdraftLimit   float64 `json:"overdraft_limit"`
 	AvailableBalance float64 `json:"available_balance"`
+
+	// TokenHealth tells the owner WHY the wallet matters: whether bookings are
+	// still accepted, and for how long it has been unable to fund one. The
+	// dashboard banner reads this; the booking gate uses the same source.
+	TokenHealth *TokenHealthDTO `json:"token_health,omitempty"`
+}
+
+// TokenHealthDTO mirrors service.TokenHealth on the wire.
+type TokenHealthDTO struct {
+	// State: "ok" | "low" | "deficit" | "suspended".
+	State             string     `json:"state"`
+	DeficitSince      *time.Time `json:"deficit_since,omitempty"`
+	DeficitDays       int        `json:"deficit_days"`
+	CanAcceptBookings bool       `json:"can_accept_bookings"`
 }

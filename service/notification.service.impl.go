@@ -270,8 +270,8 @@ func (s *NotificationServiceImpl) RegisterPushDevice(role string, actorID uint, 
 	return s.PushDeviceRepo.Register(device)
 }
 
-func (s *NotificationServiceImpl) UnregisterPushDevice(token string) error {
-	return s.PushDeviceRepo.Unregister(token)
+func (s *NotificationServiceImpl) UnregisterPushDevice(token string, role string, actorID uint) error {
+	return s.PushDeviceRepo.Unregister(token, role, actorID)
 }
 
 // ──────────────────────────────────────────────
@@ -425,7 +425,7 @@ func (s *NotificationServiceImpl) sendWebPush(devices []models.PushDevice, title
 		// 404/410 = the subscription no longer exists; drop it so the next send
 		// does not keep retrying a dead endpoint.
 		if resp.StatusCode == http.StatusGone || resp.StatusCode == http.StatusNotFound {
-			if err := s.PushDeviceRepo.Unregister(d.PushToken); err != nil {
+			if err := s.PushDeviceRepo.Unregister(d.PushToken, d.OwnerRole, d.ClientID); err != nil {
 				utils.Log.Errorf("[PUSH] pruning stale web subscription failed: %v", err)
 			}
 		}

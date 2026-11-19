@@ -1,8 +1,9 @@
 package service
 
 import (
-	"errors"
+	"fmt"
 
+	"github.com/Nina-99/yotuvia-api/apperrors"
 	"github.com/Nina-99/yotuvia-api/data/request"
 	"github.com/Nina-99/yotuvia-api/models"
 	"github.com/Nina-99/yotuvia-api/repository"
@@ -22,13 +23,21 @@ func NewCategoryServiceImpl(categoryRepository repository.CategoryRepository, va
 	}
 }
 
-func (s *CategoryServiceImpl) Create(req request.CreateCategoryRequest) error {
+// Create adds a category to the CALLER'S centre. The owner comes from the JWT
+// `center_id` claim and overwrites the body: a category is centre-owned data,
+// and the previous version let any authenticated account create one anywhere.
+func (s *CategoryServiceImpl) Create(actorCenterID uint, req request.CreateCategoryRequest) error {
+	if actorCenterID == 0 {
+		return apperrors.ErrForbidden
+	}
+	req.BeautyCenterID = actorCenterID
+
 	if err := s.Validate.Struct(req); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
 	}
 
 	category := models.Category{
-		BeautyCenterID:  req.BeautyCenterID,
+		BeautyCenterID:  actorCenterID,
 		Name:            req.Name,
 		Description:     req.Description,
 		NameI18n:        utils.NormalizeI18n(req.NameI18n),
@@ -39,17 +48,25 @@ func (s *CategoryServiceImpl) Create(req request.CreateCategoryRequest) error {
 	return s.CategoryRepository.Create(&category)
 }
 
-func (s *CategoryServiceImpl) Update(categoryID uint, req request.CreateCategoryRequest) error {
+// Update edits a category owned by the caller's centre. Ownership is checked
+// before any write and the category can never move to another centre
+// (`beauty_center_id` in the body is ignored).
+func (s *CategoryServiceImpl) Update(actorCenterID uint, categoryID uint, req request.CreateCategoryRequest) error {
+	if actorCenterID == 0 {
+		return apperrors.ErrForbidden
+	}
 	if err := s.Validate.Struct(req); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
 	}
 
 	category, err := s.CategoryRepository.FindById(categoryID)
 	if err != nil || category == nil {
-		return errors.New("category not found")
+		return apperrors.ErrNotFound
+	}
+	if category.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
 	}
 
-	category.BeautyCenterID = req.BeautyCenterID
 	category.Name = req.Name
 	category.Description = req.Description
 	category.NameI18n = utils.NormalizeI18n(req.NameI18n)
@@ -59,10 +76,17 @@ func (s *CategoryServiceImpl) Update(categoryID uint, req request.CreateCategory
 	return s.CategoryRepository.Update(category)
 }
 
-func (s *CategoryServiceImpl) Delete(categoryID uint) error {
+// Delete removes a category owned by the caller's centre.
+func (s *CategoryServiceImpl) Delete(actorCenterID uint, categoryID uint) error {
+	if actorCenterID == 0 {
+		return apperrors.ErrForbidden
+	}
 	category, err := s.CategoryRepository.FindById(categoryID)
 	if err != nil || category == nil {
-		return errors.New("category not found")
+		return apperrors.ErrNotFound
+	}
+	if category.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
 	}
 
 	return s.CategoryRepository.Delete(category)

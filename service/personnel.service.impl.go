@@ -38,7 +38,18 @@ func (s *PersonnelServiceImpl) revokeSessions(personnelID uint) {
 }
 
 // Update implements PersonnelService
-func (s *PersonnelServiceImpl) Update(id uint, req request.UpdatePersonnelRequest) (response.PersonnelResponse, error) {
+// Update edits a staff member that belongs to the caller's centre.
+//
+// The ownership check is the whole point: `beauty_center` is a self-registrable
+// role, so without it any centre (or attacker who just created one) could edit
+// a competitor's staff by enumerating ids. The password is NOT part of this
+// request any more — an admin setting a staff member's password is an account
+// takeover primitive, and password changes belong to the self-service path
+// (UpdateMe) or to a dedicated, re-authenticated flow.
+func (s *PersonnelServiceImpl) Update(id uint, actorCenterID uint, req request.UpdatePersonnelRequest) (response.PersonnelResponse, error) {
+	if actorCenterID == 0 {
+		return response.PersonnelResponse{}, apperrors.ErrForbidden
+	}
 	if err := s.Validate.Struct(req); err != nil {
 		return response.PersonnelResponse{}, apperrors.ErrValidation
 	}
@@ -48,6 +59,9 @@ func (s *PersonnelServiceImpl) Update(id uint, req request.UpdatePersonnelReques
 			return response.PersonnelResponse{}, apperrors.ErrNotFound
 		}
 		return response.PersonnelResponse{}, err
+	}
+	if personnel.BeautyCenterID != actorCenterID {
+		return response.PersonnelResponse{}, apperrors.ErrForbidden
 	}
 
 	// Update fields if provided
@@ -68,13 +82,8 @@ func (s *PersonnelServiceImpl) Update(id uint, req request.UpdatePersonnelReques
 	if req.Phone != "" {
 		personnel.Phone = req.Phone
 	}
-	if req.Password != "" {
-		hashed, err := utils.HashPassword(req.Password)
-		if err != nil {
-			return response.PersonnelResponse{}, err
-		}
-		personnel.Password = hashed
-	}
+	// No password handling here on purpose: UpdatePersonnelRequest no longer
+	// carries one. See the doc comment above.
 	wasActive := personnel.IsActive
 	personnel.IsActive = req.IsActive
 
@@ -155,12 +164,20 @@ func (s *PersonnelServiceImpl) UpdateMe(id uint, req request.UpdateMePersonnelRe
 }
 
 // Delete implements PersonnelService
-func (s *PersonnelServiceImpl) Delete(id uint) error {
-	if _, err := s.repo.FindByID(id); err != nil {
+// Delete removes a staff member of the caller's centre.
+func (s *PersonnelServiceImpl) Delete(id uint, actorCenterID uint) error {
+	if actorCenterID == 0 {
+		return apperrors.ErrForbidden
+	}
+	personnel, err := s.repo.FindByID(id)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return apperrors.ErrNotFound
 		}
 		return err
+	}
+	if personnel.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
 	}
 	if err := s.repo.Delete(id); err != nil {
 		return err

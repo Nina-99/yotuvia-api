@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"github.com/Nina-99/yotuvia-api/apperrors"
 	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
 )
@@ -41,6 +42,11 @@ func (r *PushDeviceRepositoryImpl) FindByOwner(role string, ownerID uint) ([]mod
 	return devices, err
 }
 
-func (r *PushDeviceRepositoryImpl) Unregister(token string) error {
-	return r.db.Where("push_token = ?", token).Delete(&models.PushDevice{}).Error
+func (r *PushDeviceRepositoryImpl) Unregister(token string, role string, ownerID uint) error {
+	if token == "" || role == "" || ownerID == 0 {
+		// Refuse an unscoped delete: an empty filter would wipe every device.
+		return apperrors.ErrBadRequest
+	}
+	return r.db.Where("push_token = ? AND owner_role = ? AND client_id = ?", token, role, ownerID).
+		Delete(&models.PushDevice{}).Error
 }

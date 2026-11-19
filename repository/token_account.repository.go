@@ -2,15 +2,35 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/Nina-99/yotuvia-api/models"
 	"gorm.io/gorm"
 )
 
+// ErrTopUpAlreadyProcessed is returned by the settlement methods when the top-up
+// is no longer pending: another operator won the race, or it was already decided.
+// Callers translate it to a user-facing "already processed" message.
+var ErrTopUpAlreadyProcessed = errors.New("top-up already processed")
+
 type TokenAccountRepository interface {
 	Create(account *models.TokenAccount) error
 	Update(account *models.TokenAccount) error
 	FindByBeautyCenterID(beautyCenterID uint) (*models.TokenAccount, error)
+
+	// FindNeedingHealthCheck returns the accounts that could need a balance
+	// alert or a suspension decision: anyone in deficit, suspended, already
+	// notified (so a recovery can clear the stamp), or whose real available
+	// balance is under the ceiling. The SQL filter is a deliberate SUPERSET
+	// (overdraft is computed in Go), so the caller re-checks each row.
+	FindNeedingHealthCheck(availableCeilingMilli int64) ([]models.TokenAccount, error)
+
+	// SetHealthStamps writes the three alert/suspension markers in ONE statement.
+	// It takes pointers and uses a map update on purpose: GORM's struct-based
+	// Save/Updates SKIP nil fields, so clearing a stamp through the model would
+	// silently not persist. Map updates do write NULL.
+	SetHealthStamps(accountID uint, lowAt, deficitAt, suspendedAt *time.Time) error
 
 	// Consume deducts amountMilli from the account balance and inserts the
 	// ledger row atomically: one transaction locks the account row (FOR UPDATE)
@@ -31,6 +51,19 @@ type TokenAccountRepository interface {
 	// operations (e.g. mission claim: flag + credit) commit as one unit.
 	AddTokensInTx(tx *gorm.DB, accountID uint, amountMilli int64,
 		txnType string, description string, referenceID *uint) (*models.TokenAccount, error)
+
+	// SettleTopUpApproval approves a pending top-up and credits its tokens as
+	// ONE transaction. It locks the top-up row, re-checks that it is still
+	// pending, flips the status conditionally and credits balance + ledger in
+	// the same commit. Two concurrent approvals therefore credit exactly once:
+	// the loser gets ErrTopUpAlreadyProcessed, and a failed credit rolls the
+	// status flip back so a top-up is never left "approved" without tokens.
+	SettleTopUpApproval(topUpID, adminID uint, description string) error
+
+	// SettleTopUpRejection rejects a pending top-up via the same conditional
+	// transition, returning ErrTopUpAlreadyProcessed if it was already decided so
+	// a rejection cannot overwrite an approval.
+	SettleTopUpRejection(topUpID, adminID uint) error
 
 	// DebitInTx is the overdraft-aware transactional counterpart used by QR
 	// completion (feat-token-economy-config): locks the account row and

@@ -242,6 +242,7 @@ func (s *DashboardServiceImpl) GetStats(centerID uint) (*response.DashboardStats
 		Balance:              utils.FromMilli(balanceMilli),
 		OverdraftLimit:       utils.FromMilli(overdraftMilli),
 		AvailableBalance:     utils.FromMilli(balanceMilli - reservedMilli + overdraftMilli),
+		TokenHealth:          s.tokenHealthDTO(centerID),
 	}
 
 	for _, row := range topServices {
@@ -577,6 +578,7 @@ func (s *DashboardServiceImpl) GetStatsWithRange(centerID uint, from, to time.Ti
 		Balance:          utils.FromMilli(balanceMilli),
 		OverdraftLimit:   utils.FromMilli(overdraftMilli),
 		AvailableBalance: utils.FromMilli(balanceMilli - reservedMilli + overdraftMilli),
+		TokenHealth:      s.tokenHealthDTO(centerID),
 	}
 
 	for _, row := range topServicesByRevenue {
@@ -777,4 +779,26 @@ func startOfWeekUTC(t time.Time) time.Time {
 func startOfMonthUTC(t time.Time) time.Time {
 	y, m, _ := t.UTC().Date()
 	return time.Date(y, m, 1, 0, 0, 0, 0, time.UTC)
+}
+
+// tokenHealthDTO adapts the service snapshot to the wire shape. A failure here
+// degrades to nil (the banner simply does not render) rather than failing the
+// whole dashboard: the numbers above are still valid.
+func (s *DashboardServiceImpl) tokenHealthDTO(centerID uint) *response.TokenHealthDTO {
+	if s.tokenAccountSvc == nil {
+		return nil
+	}
+	health, err := s.tokenAccountSvc.HealthSnapshot(centerID)
+	if err != nil {
+		if utils.Log != nil {
+			utils.Log.Warnf("[DASHBOARD] token health unavailable for centre %d: %v", centerID, err)
+		}
+		return nil
+	}
+	return &response.TokenHealthDTO{
+		State:             health.State,
+		DeficitSince:      health.DeficitSince,
+		DeficitDays:       health.DeficitDays,
+		CanAcceptBookings: health.CanAcceptBookings,
+	}
 }

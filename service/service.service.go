@@ -11,9 +11,11 @@ type ServiceTemplate struct {
 }
 
 type ServiceService interface {
-	Create(req request.CreateServiceRequest) (uint, error)
-	Update(serviceID uint, req request.UpdateServiceRequest) error
-	Delete(serviceID uint) error
+	// Create/Update/Delete are centre-scoped: actorCenterID is the caller's
+	// `center_id` claim. A foreign id is ErrForbidden and never reaches a write.
+	Create(actorCenterID uint, req request.CreateServiceRequest) (uint, error)
+	Update(actorCenterID uint, serviceID uint, req request.UpdateServiceRequest) error
+	Delete(actorCenterID uint, serviceID uint) error
 	FindAll(beautyCenterID uint, categoryID uint, isActive *bool, page, limit int) ([]models.Service, int64, error)
 	FindById(serviceID uint) (*models.Service, error)
 	GetServiceTemplates(categoryID uint, lang string) ([]ServiceTemplate, error)

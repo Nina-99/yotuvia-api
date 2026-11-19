@@ -8,5 +8,9 @@ type PushDeviceRepository interface {
 	// what keeps a staff device from receiving a client's push when the numeric
 	// ids happen to collide.
 	FindByOwner(role string, ownerID uint) ([]models.PushDevice, error)
-	Unregister(token string) error
+	// Unregister drops ONE device, but only if it belongs to (role, ownerID).
+	// Keying on the token alone let any authenticated caller that knew or
+	// guessed a subscription endpoint silently unsubscribe someone else's
+	// device (and, for web push, the endpoint is the only secret).
+	Unregister(token string, role string, ownerID uint) error
 }

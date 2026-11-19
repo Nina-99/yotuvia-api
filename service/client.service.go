@@ -19,7 +19,6 @@ type ClientService interface {
 	// centerID claim (authz spec: Client Endpoint Ownership) as
 	// AdminClientResponse DTOs — the global client table is never exposed.
 	FindAllAdmin(centerID uint, page, limit int) ([]response.AdminClientResponse, int64, error)
-	FindEmail(email string) (*models.Client, error)
 	// UploadAvatar stores an image under uploads/clients/{clientID}/ and returns
 	// the relative /uploads/... URL. It writes the file only — persistence of
 	// the returned URL happens later via Update(avatar_url).

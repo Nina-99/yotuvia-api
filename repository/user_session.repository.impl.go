@@ -198,3 +198,39 @@ func (r *UserSessionRepositoryImpl) EnforceActiveLimit(ctx context.Context, user
 	}
 	return revoked, nil
 }
+
+// IsActive reports whether an access token's session may still authenticate.
+//
+// Fast path: one primary-key lookup on a live row. Grace path: a row revoked by
+// rotation is still accepted while (a) it was revoked within `grace` and (b) its
+// family still holds a live generation. Revocations that must be immediate —
+// logout, logout-all, password reset, deactivation, cap eviction — leave the
+// family without a live generation, so condition (b) fails and the request is
+// rejected on the next call.
+func (r *UserSessionRepositoryImpl) IsActive(ctx context.Context, sessionID uint, now time.Time, grace time.Duration) (bool, error) {
+	var session models.UserSession
+	err := r.db.WithContext(ctx).First(&session, sessionID).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	if !session.IsRevoked && session.ExpiresAt.After(now) {
+		return true, nil
+	}
+	if !session.IsRevoked || grace <= 0 || session.UpdatedAt.Before(now.Add(-grace)) {
+		return false, nil
+	}
+
+	var live int64
+	err = r.db.WithContext(ctx).Model(&models.UserSession{}).
+		Where("family_id = ? AND is_revoked = ? AND expires_at > ? AND id <> ?",
+			session.FamilyID, false, now, session.ID).
+		Count(&live).Error
+	if err != nil {
+		return false, err
+	}
+	return live > 0, nil
+}

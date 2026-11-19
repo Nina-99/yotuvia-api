@@ -4,7 +4,9 @@ import (
 	crand "crypto/rand"
 	"errors"
 	"fmt"
+	"math"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/Nina-99/yotuvia-api/apperrors"
@@ -390,7 +392,12 @@ func (s *BoostServiceImpl) ListByCenter(centerID uint) ([]models.BoostCampaign, 
 }
 
 // SelectWinners reads the eligible campaigns and runs the second-price auction.
-func (s *BoostServiceImpl) SelectWinners(now time.Time, slots int, reserveCPMMilli int64) ([]BoostWinner, error) {
+// RecordUnservedWins implements BoostService.
+func (s *BoostServiceImpl) RecordUnservedWins(campaignIDs []uint) error {
+	return s.repo.AddUnservedWins(campaignIDs)
+}
+
+func (s *BoostServiceImpl) SelectWinners(now time.Time, slots int, reserveCPMMilli int64, viewer *GeoPoint, viewerID uint) ([]BoostWinner, error) {
 	if slots <= 0 {
 		return nil, nil
 	}
@@ -413,8 +420,37 @@ func (s *BoostServiceImpl) SelectWinners(now time.Time, slots int, reserveCPMMil
 	if err != nil {
 		return nil, err
 	}
+
+	radiusKm := boostMaxRadiusKM()
+
+	// Frequency cap: one grouped query, only when a viewer is known.
+	campaignIDs := make([]uint, 0, len(campaigns))
+	for _, c := range campaigns {
+		campaignIDs = append(campaignIDs, c.ID)
+	}
+	seenByViewer, err := s.repo.CountImpressionsByViewer(viewerID, campaignIDs)
+	if err != nil {
+		// A cap lookup failure must not stop the auction; it degrades to no cap.
+		seenByViewer = nil
+	}
+	freqCap := boostFrequencyCap()
+
 	candidates := make([]BoostCandidate, 0, len(campaigns))
 	for _, campaign := range campaigns {
+		// Geo filter: never serve an ad for a centre the viewer cannot reach.
+		// A centre with no coordinates keeps its historical reach — punishing
+		// missing data would silently zero out real campaigns.
+		if viewer.Valid() && (campaign.CenterLatitude != 0 || campaign.CenterLongitude != 0) {
+			km := HaversineKM(viewer.Latitude, viewer.Longitude, campaign.CenterLatitude, campaign.CenterLongitude)
+			if km > radiusKm {
+				continue
+			}
+		}
+		// Frequency cap: this viewer already paid the advertiser enough attention.
+		if viewerID != 0 && freqCap > 0 && seenByViewer[campaign.ID] >= freqCap {
+			continue
+		}
+
 		// Budget pacing: a campaign may only spend what its schedule allows, so
 		// the highest bidder cannot exhaust its budget in the first minutes.
 		if !WithinPacing(campaign.BudgetMilli, campaign.SpentMilli, campaign.StartsAt, campaign.EndsAt, now) {
@@ -429,4 +465,162 @@ func (s *BoostServiceImpl) SelectWinners(now time.Time, slots int, reserveCPMMil
 		})
 	}
 	return SelectBoostWinners(candidates, slots, reserveCPMMilli), nil
+}
+
+// boostMaxRadiusKM resolves BOOST_MAX_RADIUS_KM: how far from the viewer a
+// promoted centre may be to still be auctioned. Defaults to 50 km (a city and
+// its metropolitan ring). 0 disables the radius filter entirely.
+func boostMaxRadiusKM() float64 {
+	const defaultKm = 50.0
+	raw := os.Getenv("BOOST_MAX_RADIUS_KM")
+	if raw == "" {
+		return defaultKm
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v < 0 {
+		return defaultKm
+	}
+	if v == 0 {
+		return math.Inf(1) // explicitly disabled
+	}
+	return v
+}
+
+// boostFrequencyCap resolves BOOST_FREQUENCY_CAP: how many billed views one
+// viewer may produce for the same campaign before it stops being served to
+// them. Defaults to 2 (see it, maybe rewatch once, then move on). 0 disables it.
+func boostFrequencyCap() int64 {
+	const defaultCap = 2
+	raw := os.Getenv("BOOST_FREQUENCY_CAP")
+	if raw == "" {
+		return defaultCap
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n < 0 {
+		return defaultCap
+	}
+	return n
+}
+
+// Performance assembles the owner-facing report for one campaign.
+//
+// Every number comes from what was actually BILLED (boost_impressions) or from
+// the campaign row, never from a re-simulation: the owner must be able to trust
+// that the report matches the money that left their wallet.
+func (s *BoostServiceImpl) Performance(centerID, campaignID uint) (BoostPerformance, error) {
+	campaign, err := s.repo.FindByID(campaignID)
+	if err != nil {
+		return BoostPerformance{}, err
+	}
+	if campaign == nil {
+		return BoostPerformance{}, apperrors.ErrNotFound
+	}
+	// Owner-only: the route proves the ROLE, this proves the ROW.
+	if campaign.BeautyCenterID != centerID {
+		return BoostPerformance{}, apperrors.ErrForbidden
+	}
+
+	currency := "USD"
+	if account, accErr := s.accountRepo.FindByBeautyCenterID(centerID); accErr == nil && account != nil && account.Currency != "" {
+		currency = account.Currency
+	}
+
+	perf := BoostPerformance{
+		CampaignID:   campaign.ID,
+		Status:       campaign.Status,
+		Currency:     currency,
+		Budget:       utils.FromMilli(campaign.BudgetMilli),
+		Spent:        utils.FromMilli(campaign.SpentMilli),
+		Remaining:    utils.FromMilli(campaign.BudgetMilli - campaign.SpentMilli),
+		Impressions:  campaign.Impressions,
+		UnservedWins: campaign.UnservedWins,
+		StartsAt:     campaign.StartsAt,
+		EndsAt:       campaign.EndsAt,
+	}
+
+	// Effective CPM: what the owner actually paid per thousand delivered views.
+	// It is the number a renewal decision hangs on, so it is derived from spend,
+	// never from the bid (a second-price auction rarely charges the bid).
+	if campaign.Impressions > 0 {
+		perf.EffectiveCPM = utils.FromMilli(campaign.SpentMilli) * 1000 / float64(campaign.Impressions)
+	}
+
+	// Delivery rate: of every auction this campaign won, how many became a real
+	// view. A low rate with a full budget is the signal that the creative or the
+	// audience is the problem, not the bid.
+	wins := campaign.Impressions + campaign.UnservedWins
+	if wins > 0 {
+		perf.DeliveryRate = float64(campaign.Impressions) / float64(wins)
+	}
+
+	rows, err := s.repo.DailyImpressions(campaign.ID)
+	if err != nil {
+		return BoostPerformance{}, err
+	}
+	perf.Daily = make([]BoostDailyPoint, 0, len(rows))
+	for _, row := range rows {
+		perf.Daily = append(perf.Daily, BoostDailyPoint{
+			Day:         row.Day,
+			Impressions: row.Impressions,
+			Spend:       utils.FromMilli(row.SpendMilli),
+		})
+	}
+	return perf, nil
+}
+
+// PlatformOverview aggregates the whole ad book.
+//
+// Same honesty rule as the per-campaign report: effective CPM comes from the
+// money actually charged, never from the bids. A platform-wide CPM that drifted
+// from reality would mislead every pricing decision.
+func (s *BoostServiceImpl) PlatformOverview() (BoostOverview, error) {
+	agg, err := s.repo.PlatformAggregates()
+	if err != nil {
+		return BoostOverview{}, err
+	}
+
+	overview := BoostOverview{
+		Campaigns:       agg.Campaigns,
+		ActiveCampaigns: agg.ActiveCampaigns,
+		Impressions:     agg.Impressions,
+		Spent:           utils.FromMilli(agg.SpentMilli),
+		UnservedWins:    agg.UnservedWins,
+	}
+
+	if agg.Impressions > 0 {
+		overview.EffectiveCPM = utils.FromMilli(agg.SpentMilli) * 1000 / float64(agg.Impressions)
+	}
+	if wins := agg.Impressions + agg.UnservedWins; wins > 0 {
+		overview.DeliveryRate = float64(agg.Impressions) / float64(wins)
+	}
+
+	top, err := s.repo.TopBySpend(10)
+	if err != nil {
+		return BoostOverview{}, err
+	}
+	overview.TopCampaigns = make([]BoostTopCampaign, 0, len(top))
+	for _, row := range top {
+		overview.TopCampaigns = append(overview.TopCampaigns, BoostTopCampaign{
+			CampaignID:   row.CampaignID,
+			CenterID:     row.CenterID,
+			CenterName:   row.CenterName,
+			Spent:        utils.FromMilli(row.SpentMilli),
+			Impressions:  row.Impressions,
+			UnservedWins: row.UnservedWins,
+		})
+	}
+
+	daily, err := s.repo.DailyAllImpressions()
+	if err != nil {
+		return BoostOverview{}, err
+	}
+	overview.Daily = make([]BoostDailyPoint, 0, len(daily))
+	for _, row := range daily {
+		overview.Daily = append(overview.Daily, BoostDailyPoint{
+			Day:         row.Day,
+			Impressions: row.Impressions,
+			Spend:       utils.FromMilli(row.SpendMilli),
+		})
+	}
+	return overview, nil
 }

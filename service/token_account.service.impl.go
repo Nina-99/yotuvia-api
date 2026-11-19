@@ -80,6 +80,15 @@ func (s *TokenAccountServiceImpl) GetBalance(beautyCenterID uint) (balance, rese
 	return account.Balance, account.ReservedMilli, overdraftLimit, account.Currency, nil
 }
 
+// logOverdraftTier logs the tier decision without ever being able to panic a
+// request: utils.Log is a package global installed by main(), and a path that
+// computes a balance must not depend on that having happened.
+func logOverdraftTier(beautyCenterID uint, tier string, limit int) {
+	if utils.Log != nil {
+		utils.Log.Debugf("[OVERDRAFT] Center %d — %s tier (-%d)", beautyCenterID, tier, limit)
+	}
+}
+
 func (s *TokenAccountServiceImpl) computeOverdraft(beautyCenterID uint) float64 {
 	account, err := s.accountRepo.FindByBeautyCenterID(beautyCenterID)
 	if err != nil || account == nil {
@@ -104,18 +113,18 @@ func (s *TokenAccountServiceImpl) computeOverdraft(beautyCenterID uint) float64 
 
 	// Premium: 3+ approved top-ups OR 500+ purchased (500 Ytv = 500_000 milli)
 	if approvedCount >= 3 || account.TotalPurchased >= 500_000 {
-		utils.Log.Debugf("[OVERDRAFT] Center %d — Premium tier (-30)", beautyCenterID)
+		logOverdraftTier(beautyCenterID, "Premium", 30)
 		return 30
 	}
 
 	// Active: 30+ days active
 	if daysActive >= 30 {
-		utils.Log.Debugf("[OVERDRAFT] Center %d — Active tier (-15)", beautyCenterID)
+		logOverdraftTier(beautyCenterID, "Active", 15)
 		return 15
 	}
 
 	// New: default
-	utils.Log.Debugf("[OVERDRAFT] Center %d — New tier (-5)", beautyCenterID)
+	logOverdraftTier(beautyCenterID, "New", 5)
 	return 5
 }
 
@@ -244,6 +253,13 @@ func (s *TokenAccountServiceImpl) AddTokens(beautyCenterID uint, amountMilli int
 
 	utils.Log.Infof("[TOKEN] Center %d received %.2f Ytv (type=%s). Balance: %.2f",
 		beautyCenterID, utils.FromMilli(amountMilli), txType, utils.FromMilli(updated.Balance))
+
+	// A credit can END an episode (deficit, suspension, low balance). Re-evaluate
+	// so the stamps clear and the next dip notifies again. Best-effort.
+	if err := s.EvaluateBalanceAlerts(beautyCenterID); err != nil {
+		utils.Log.Warnf("[TOKEN] balance alert evaluation failed after credit for centre %d: %v",
+			beautyCenterID, err)
+	}
 	return nil
 }
 
@@ -256,10 +272,10 @@ func (s *TokenAccountServiceImpl) loadPendingTopUp(topUpID uint) (*models.TokenT
 		return nil, err
 	}
 	if topup == nil {
-		return nil, errors.New("top-up request not found")
+		return nil, apperrors.NewUserFacing("top-up request not found")
 	}
 	if topup.Status != "pending" {
-		return nil, errors.New("top-up already processed")
+		return nil, apperrors.NewUserFacing("top-up already processed")
 	}
 	return topup, nil
 }
@@ -298,11 +314,12 @@ func (s *TokenAccountServiceImpl) ProcessTopUpAsPlatform(topUpID, adminID uint, 
 // pending.
 func (s *TokenAccountServiceImpl) applyTopUpDecision(topup *models.TokenTopUp, adminID uint, status string) error {
 	if status == "rejected" {
-		topup.Status = "rejected"
-		topup.ValidatedBy = &adminID
-		now := time.Now()
-		topup.ValidatedAt = &now
-		if err := s.topUpRepo.Update(topup); err != nil {
+		// Conditional transition: a rejection cannot overwrite an approval that
+		// already won the race.
+		if err := s.accountRepo.SettleTopUpRejection(topup.ID, adminID); err != nil {
+			if errors.Is(err, repository.ErrTopUpAlreadyProcessed) {
+				return apperrors.NewUserFacing("top-up already processed")
+			}
 			return err
 		}
 		// Best-effort trigger (design D4): the center is told its top-up was
@@ -313,31 +330,25 @@ func (s *TokenAccountServiceImpl) applyTopUpDecision(topup *models.TokenTopUp, a
 		return nil
 	}
 
-	// approved — credit exactly tokens_received + bonus_tokens; historical grace
-	// rows are read-only and never deducted here.
-	totalTokens := topup.TokensReceived + topup.BonusTokens
-
-	topup.Status = "approved"
-	topup.ValidatedBy = &adminID
-	now := time.Now()
-	topup.ValidatedAt = &now
-
-	if err := s.topUpRepo.Update(topup); err != nil {
-		return err
-	}
-
-	// AddTokens credits the balance and logs the ledger row atomically.
-	if err := s.AddTokens(topup.BeautyCenterID, totalTokens, "topup", topup.ID, "Top-up approved: "+topup.ReceiptURL); err != nil {
+	// approved — the status flip and the credit (tokens_received + bonus_tokens)
+	// commit as ONE transaction. Concurrent approvers credit exactly once; a
+	// failed credit rolls the status back instead of leaving it "approved".
+	if err := s.accountRepo.SettleTopUpApproval(
+		topup.ID, adminID, "Top-up approved: "+topup.ReceiptURL,
+	); err != nil {
+		if errors.Is(err, repository.ErrTopUpAlreadyProcessed) {
+			return apperrors.NewUserFacing("top-up already processed")
+		}
 		return err
 	}
 
 	// Best-effort trigger (design D4): the center is told its top-up was
-	// approved, after the persist + credit succeeded. The pending guard above
-	// prevents double-send on reprocess.
+	// approved, after the persist + credit succeeded.
 	_ = s.notificationService.CreateForCenter(topup.BeautyCenterID, "topup_approved",
 		"Recarga aprobada", "Tu recarga fue aprobada",
 		fmt.Sprintf(`{"topup_id":%d}`, topup.ID))
 
+	totalTokens := topup.TokensReceived + topup.BonusTokens
 	utils.Log.Infof("[TOPUP] Center %d top-up approved: %.2f + %.2f bonus = %.2f Ytv",
 		topup.BeautyCenterID, utils.FromMilli(topup.TokensReceived), utils.FromMilli(topup.BonusTokens), utils.FromMilli(totalTokens))
 	return nil

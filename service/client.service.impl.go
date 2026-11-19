@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"mime/multipart"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Nina-99/yotuvia-api/apperrors"
@@ -175,17 +173,6 @@ func (s *ClientServiceImpl) FindAllAdmin(centerID uint, page, limit int) ([]resp
 	return res, total, nil
 }
 
-func (s *ClientServiceImpl) FindEmail(Email string) (*models.Client, error) {
-	client, err := s.ClientRepository.FindByEmail(Email)
-	if err != nil {
-		return nil, err
-	}
-	if client == nil {
-		return nil, apperrors.ErrNotFound
-	}
-	return client, nil
-}
-
 func (s *ClientServiceImpl) FindByID(id uint, actorClientID uint) (*models.Client, error) {
 	// Ownership at entry: a client may only read its own profile.
 	if actorClientID != id {
@@ -205,16 +192,6 @@ func (s *ClientServiceImpl) FindByID(id uint, actorClientID uint) (*models.Clien
 // maxAvatarBytes is the 5MB upload cap from the spec.
 const maxAvatarBytes = 5 * 1024 * 1024
 
-// sniffedImageExtensions maps a detected image/* MIME type to the extension the
-// stored file gets. The extension ALWAYS comes from the sniff, never from the
-// client-controlled filename (spoofable, may carry path separators).
-var sniffedImageExtensions = map[string]string{
-	"image/jpeg": ".jpg",
-	"image/png":  ".png",
-	"image/webp": ".webp",
-	"image/gif":  ".gif",
-}
-
 func (s *ClientServiceImpl) UploadAvatar(clientID uint, file *multipart.FileHeader) (string, error) {
 	if file.Size > maxAvatarBytes {
 		return "", apperrors.ErrFileTooLarge
@@ -227,23 +204,11 @@ func (s *ClientServiceImpl) UploadAvatar(clientID uint, file *multipart.FileHead
 	}
 	defer src.Close()
 
-	// Sniff the first 512 bytes for the real MIME type (mirrors the spec's
-	// "detected MIME type" requirement and http.DetectContentType's window).
-	head := make([]byte, 512)
-	n := 0
-	for n < len(head) {
-		read, err := src.Read(head[n:])
-		n += read
-		if err != nil {
-			break
-		}
-	}
-	mime := http.DetectContentType(head[:n])
-	if !strings.HasPrefix(mime, "image/") {
-		return "", apperrors.ErrValidation
-	}
-	ext, ok := sniffedImageExtensions[mime]
-	if !ok {
+	// Sniff the first 512 bytes for the real MIME type. The stored extension
+	// ALWAYS comes from the sniff, never from the client-controlled filename
+	// (spoofable, may carry path separators) nor the Content-Type header.
+	mime, ext, sniffErr := utils.SniffImage(src)
+	if sniffErr != nil {
 		utils.Log.Warnf("UploadAvatar rejected unsupported image type %q for client %d", mime, clientID)
 		return "", apperrors.ErrValidation
 	}

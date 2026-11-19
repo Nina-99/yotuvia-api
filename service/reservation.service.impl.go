@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -240,6 +241,16 @@ func (s *ReservationServiceImpl) createReservationCore(beautyCenterID, clientID,
 		}
 		totalPrice += svc.Price
 	}
+	// ── Solvency gate (before the expensive checks) ──
+	// A booking is a promise to serve, and the commission is charged when the
+	// visit COMPLETES. If the centre cannot cover that commission even with its
+	// overdraft, the booking must never be created: otherwise the client gets a
+	// confirmed visit the centre is unable to close, and the failure surfaces
+	// days later at the worst moment for both sides.
+	if err := s.ensureCenterCanFundBooking(beautyCenterID, totalPrice); err != nil {
+		return 0, err
+	}
+
 	// One shared duration definition (service/availability) so the booking
 	// flow and the availability search can never compute different totals.
 	totalDuration := TotalServicesDuration(services)
@@ -525,6 +536,12 @@ func (s *ReservationServiceImpl) Create(req request.CreateReservationRequest) er
 	}
 	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, personnelID, req.ServiceIDs, req.Date, req.StartTime, s.resolveSourcePostID(req.SourcePostID), linePersonnel, req.ApplyLoyalty)
 	if err != nil {
+		// Neutral to the client on purpose: whether the centre can pay its
+		// commission is none of the client's business, and saying so would leak
+		// a competitor's financial state.
+		if errors.Is(err, apperrors.ErrCenterUnavailable) || errors.Is(err, apperrors.ErrCenterSuspended) {
+			return apperrors.NewUserFacing("este centro no está recibiendo reservas por el momento")
+		}
 		return err
 	}
 	// Deposit decision (client flow only — walk-ins pay in person). Trusted
@@ -771,6 +788,17 @@ func (s *ReservationServiceImpl) CreateAdminReservation(req request.CreateAdminR
 
 	id, err := s.createReservationCore(req.BeautyCenterID, req.ClientID, req.PersonnelID, req.ServiceIDs, req.Date, req.StartTime, nil, nil, nil)
 	if err != nil {
+		switch {
+		case errors.Is(err, apperrors.ErrCenterUnavailable):
+			return nil, apperrors.NewUserFacing(
+				"no podés cargar este turno: el saldo de Ytv no alcanza para la comisión. Recargá y reintentá")
+		case errors.Is(err, apperrors.ErrCenterSuspended):
+			return nil, apperrors.NewUserFacing(
+				"tu cuenta está suspendida por falta de saldo: recargá Ytv y se reactiva automáticamente")
+		case errors.Is(err, apperrors.ErrCenterInactive):
+			return nil, apperrors.NewUserFacing(
+				"tu centro está inactivo: activalo antes de cargar turnos")
+		}
 		return nil, err
 	}
 
@@ -1277,6 +1305,15 @@ func (s *ReservationServiceImpl) completeWithCharge(reservation *models.Reservat
 		return err
 	}
 
+	// The wallet just got lighter: warn the owner before the next visit is
+	// refused. Best-effort — an alert must never fail a completed visit.
+	if s.TokenAccountService != nil && !alreadyCompleted {
+		if alertErr := s.TokenAccountService.EvaluateBalanceAlerts(reservation.BeautyCenterID); alertErr != nil {
+			utils.Log.Warnf("[TOKEN] balance alert evaluation failed for centre %d: %v",
+				reservation.BeautyCenterID, alertErr)
+		}
+	}
+
 	reservation.Status = "COMPLETED"
 	reservation.VerificationToken = nil
 	reservation.TokenExpiresAt = nil
@@ -1610,7 +1647,11 @@ func (s *ReservationServiceImpl) applyDepositDecision(reservation *models.Reserv
 
 // UploadProof implements ReservationService.
 func (s *ReservationServiceImpl) UploadProof(reservationID, clientID uint, imageURL string) error {
-	if imageURL == "" || len(imageURL) > 500 {
+	// The proof reference must be a path THIS API produced. Accepting an
+	// arbitrary string lets a client point the centre's payment-review screen
+	// at an attacker-controlled host (IP/User-Agent beacon, phishing redirect)
+	// or at a non-image scheme.
+	if imageURL == "" || len(imageURL) > 500 || !utils.IsStoredReceiptPath(imageURL) {
 		return apperrors.ErrBadRequest
 	}
 	reservation, err := s.ReservationRepository.FindById(reservationID)
@@ -2217,6 +2258,15 @@ func (s *ReservationServiceImpl) VerifyQR(token string, authBeautyCenterID uint)
 		return reservation, true, nil
 	}
 
+	// Same warning as the manual path: the commission was charged, so re-evaluate
+	// the wallet (best-effort, never fails the scan).
+	if s.TokenAccountService != nil {
+		if alertErr := s.TokenAccountService.EvaluateBalanceAlerts(authBeautyCenterID); alertErr != nil {
+			utils.Log.Warnf("[TOKEN] balance alert evaluation failed for centre %d: %v",
+				authBeautyCenterID, alertErr)
+		}
+	}
+
 	// Mirror the persisted state onto the returned struct (legacy behavior):
 	// callers read these fields directly after a successful verification.
 	reservation.Status = "COMPLETED"
@@ -2339,6 +2389,70 @@ func (s *ReservationServiceImpl) lastScanReward(reservation *models.Reservation)
 // ComputeChargeMilli resolves the token charge for a reservation in integer
 // milli-Ytv (feat-token-economy-config D3/D5): percentage of the total with
 // a per-market floor, exact integer math (pct treated at 2-decimal precision).
+// ensureCenterCanFundBooking rejects a booking the centre cannot pay for.
+//
+// It checks the EXACT charge for this cart (percentage of the total with the
+// configured floor), not a "typical" commission: a centre at the floor may still
+// be able to serve a cheap service but not an expensive one, and a flat estimate
+// would block work it can actually settle.
+//
+// Two separate outcomes, both neutral to a client:
+//   - the centre is inactive            -> ErrCenterInactive
+//   - it cannot fund the commission      -> ErrCenterUnavailable
+//
+// The centre's own booking path wraps them with actionable text; a client must
+// never learn the centre's financial state.
+func (s *ReservationServiceImpl) ensureCenterCanFundBooking(centerID uint, totalPrice float64) error {
+	center, err := s.CenterRepository.FindByID(centerID)
+	if err != nil {
+		return err
+	}
+	if center == nil {
+		return apperrors.ErrNotFound
+	}
+	if !center.IsActive {
+		return apperrors.ErrCenterInactive
+	}
+
+	// Wiring without the token economy (unit-test routers, some embeddings)
+	// keeps the historical behaviour instead of blocking every booking.
+	if s.TokenAccountService == nil {
+		return nil
+	}
+
+	// GetBalance auto-creates the account for legacy centres, so CanConsume
+	// below never sees a missing row.
+	_, _, _, currency, err := s.TokenAccountService.GetBalance(centerID)
+	if err != nil {
+		return err
+	}
+
+	// Suspension is the platform's decision (deficit outlived the window), not
+	// the owner's is_active switch, so it gets its own outcome and its own copy.
+	suspended, err := s.TokenAccountService.IsSuspended(centerID)
+	if err != nil {
+		return err
+	}
+	if suspended {
+		return apperrors.ErrCenterSuspended
+	}
+
+	economy := defaultEconomy
+	if s.MarketConfigService != nil {
+		economy = s.MarketConfigService.GetEconomyForCurrency(currency)
+	}
+	charge := ComputeChargeMilli(utils.ToMilli(totalPrice), economy.CommissionPct, economy.MinChargeMilli)
+
+	canFund, err := s.TokenAccountService.CanConsume(centerID, charge)
+	if err != nil {
+		return err
+	}
+	if !canFund {
+		return apperrors.ErrCenterUnavailable
+	}
+	return nil
+}
+
 func ComputeChargeMilli(totalMilli int64, commissionPct float64, minChargeMilli int64) int64 {
 	bp := int64(math.Round(commissionPct * 100)) // 3.5% → 350 basis points
 	pctCharge := totalMilli * bp / 10000

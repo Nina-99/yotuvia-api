@@ -1,8 +1,6 @@
 package service
 
 import (
-	"errors"
-
 	"github.com/Nina-99/yotuvia-api/apperrors"
 	"github.com/Nina-99/yotuvia-api/data/request"
 	"github.com/Nina-99/yotuvia-api/data/response"
@@ -34,7 +32,7 @@ func (s *FavoriteServiceImpl) Create(req request.CreateFavoriteRequest) error {
 		return err
 	}
 	if isFav {
-		return errors.New("already marked as favorite")
+		return apperrors.ErrConflict
 	}
 
 	favorite := &models.Favorite{

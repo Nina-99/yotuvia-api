@@ -1,8 +1,9 @@
 package service
 
 import (
-	"errors"
+	"fmt"
 
+	"github.com/Nina-99/yotuvia-api/apperrors"
 	"github.com/Nina-99/yotuvia-api/data/request"
 	"github.com/Nina-99/yotuvia-api/models"
 	"github.com/Nina-99/yotuvia-api/repository"
@@ -28,19 +29,33 @@ func NewServiceServiceImpl(
 	}
 }
 
-func (s *ServiceServiceImpl) Create(req request.CreateServiceRequest) (uint, error) {
+// Create adds a service to the CALLER'S centre.
+//
+// actorCenterID comes from the JWT `center_id` claim and overwrites whatever the
+// body says: before this, `beauty_center_id` in the request decided the owner,
+// so any authenticated account (a public `client` included) could add services
+// to any centre. The category must belong to the same centre, otherwise a centre
+// could hang its services off another centre's catalog.
+func (s *ServiceServiceImpl) Create(actorCenterID uint, req request.CreateServiceRequest) (uint, error) {
+	if actorCenterID == 0 {
+		return 0, apperrors.ErrForbidden
+	}
+	req.BeautyCenterID = actorCenterID
+
 	if err := s.Validate.Struct(req); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
 	}
 
-	// Validate category existence
 	category, err := s.CategoryRepository.FindById(req.CategoryID)
 	if err != nil || category == nil {
-		return 0, errors.New("category not found")
+		return 0, apperrors.ErrNotFound
+	}
+	if category.BeautyCenterID != actorCenterID {
+		return 0, apperrors.ErrForbidden
 	}
 
 	service := models.Service{
-		BeautyCenterID:  req.BeautyCenterID,
+		BeautyCenterID:  actorCenterID,
 		CategoryID:      req.CategoryID,
 		Name:            req.Name,
 		Description:     req.Description,
@@ -60,27 +75,39 @@ func (s *ServiceServiceImpl) Create(req request.CreateServiceRequest) (uint, err
 	return service.ID, nil
 }
 
-func (s *ServiceServiceImpl) Update(serviceID uint, req request.UpdateServiceRequest) error {
+// Update edits a service owned by the caller's centre.
+//
+// Ownership is checked against actorCenterID before anything is written, and the
+// service can NEVER move to another centre: `beauty_center_id` in the body is
+// ignored. That field used to be applied verbatim, which let a caller re-parent
+// another centre's service into its own catalog.
+func (s *ServiceServiceImpl) Update(actorCenterID uint, serviceID uint, req request.UpdateServiceRequest) error {
+	if actorCenterID == 0 {
+		return apperrors.ErrForbidden
+	}
 	if err := s.Validate.Struct(req); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
 	}
 
 	service, err := s.ServiceRepository.FindById(serviceID)
 	if err != nil || service == nil {
-		return errors.New("service not found")
+		return apperrors.ErrNotFound
+	}
+	if service.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
 	}
 
 	if req.CategoryID != 0 {
 		category, err := s.CategoryRepository.FindById(req.CategoryID)
 		if err != nil || category == nil {
-			return errors.New("category not found")
+			return apperrors.ErrNotFound
+		}
+		if category.BeautyCenterID != actorCenterID {
+			return apperrors.ErrForbidden
 		}
 		service.CategoryID = req.CategoryID
 	}
 
-	if req.BeautyCenterID != 0 {
-		service.BeautyCenterID = req.BeautyCenterID
-	}
 	if req.Name != "" {
 		service.Name = req.Name
 	}
@@ -118,10 +145,20 @@ func (s *ServiceServiceImpl) Update(serviceID uint, req request.UpdateServiceReq
 	return s.ServiceRepository.Update(service)
 }
 
-func (s *ServiceServiceImpl) Delete(serviceID uint) error {
+// Delete removes a service owned by the caller's centre. A foreign id is
+// ErrForbidden rather than ErrNotFound so a probe cannot distinguish "not yours"
+// from "does not exist" by status code... except that both are rejected before
+// any write either way; 403 is kept because the caller IS authenticated.
+func (s *ServiceServiceImpl) Delete(actorCenterID uint, serviceID uint) error {
+	if actorCenterID == 0 {
+		return apperrors.ErrForbidden
+	}
 	service, err := s.ServiceRepository.FindById(serviceID)
 	if err != nil || service == nil {
-		return errors.New("service not found")
+		return apperrors.ErrNotFound
+	}
+	if service.BeautyCenterID != actorCenterID {
+		return apperrors.ErrForbidden
 	}
 
 	return s.ServiceRepository.Delete(service)
@@ -138,7 +175,7 @@ func (s *ServiceServiceImpl) FindById(serviceID uint) (*models.Service, error) {
 func (s *ServiceServiceImpl) GetServiceTemplates(categoryID uint, lang string) ([]ServiceTemplate, error) {
 	category, err := s.CategoryRepository.FindById(categoryID)
 	if err != nil || category == nil {
-		return nil, errors.New("category not found")
+		return nil, apperrors.ErrNotFound
 	}
 
 	suggestions := utils.GetServiceTemplates(category.Name, lang)

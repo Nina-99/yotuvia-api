@@ -18,12 +18,18 @@ type CreatePersonnelRequest struct {
 	Images         []PersonnelImageRequest `json:"images"`
 }
 
+// UpdatePersonnelRequest is the admin edit DTO for a staff member.
+//
+// It deliberately has NO `password`: a centre admin setting an employee's
+// password is an account-takeover primitive (self-registered centres could
+// reset a competitor's staff and log in as them). Password changes live in
+// UpdateMePersonnelRequest (self-service) and in the dedicated auth flows. A
+// request that still sends the field has it ignored by the binder.
 type UpdatePersonnelRequest struct {
 	FirstName string                  `json:"first_name" validate:"omitempty,max=50"`
 	LastName  string                  `json:"last_name" validate:"omitempty,max=50"`
 	Email     string                  `json:"email" validate:"omitempty,email,max=70"`
 	Phone     string                  `json:"phone" validate:"omitempty,max=20"`
-	Password  string                  `json:"password" validate:"omitempty,min=8,max=255"`
 	IsActive  bool                    `json:"is_active"`
 	Images    []PersonnelImageRequest `json:"images"`
 }

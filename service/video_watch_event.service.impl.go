@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"hash/fnv"
 	"time"
 
 	"github.com/Nina-99/yotuvia-api/data/request"
@@ -12,11 +14,12 @@ import (
 )
 
 type VideoWatchEventServiceImpl struct {
-	WatchEventRepo    repository.VideoWatchEventRepository
-	FeedPostRepo      repository.FeedPostRepository
-	PostLikeRepo      repository.PostLikeRepository
-	SavedVideoRepo    repository.SavedVideoRepository
-	Validate          *validator.Validate
+	WatchEventRepo repository.VideoWatchEventRepository
+	FeedPostRepo   repository.FeedPostRepository
+	PostLikeRepo   repository.PostLikeRepository
+	SavedVideoRepo repository.SavedVideoRepository
+	ImpressionRepo repository.FeedImpressionRepository
+	Validate       *validator.Validate
 }
 
 func NewVideoWatchEventServiceImpl(
@@ -24,6 +27,7 @@ func NewVideoWatchEventServiceImpl(
 	feedRepo repository.FeedPostRepository,
 	likeRepo repository.PostLikeRepository,
 	savedRepo repository.SavedVideoRepository,
+	impressionRepo repository.FeedImpressionRepository,
 	validate *validator.Validate,
 ) VideoWatchEventService {
 	return &VideoWatchEventServiceImpl{
@@ -31,6 +35,7 @@ func NewVideoWatchEventServiceImpl(
 		FeedPostRepo:   feedRepo,
 		PostLikeRepo:   likeRepo,
 		SavedVideoRepo: savedRepo,
+		ImpressionRepo: impressionRepo,
 		Validate:       validate,
 	}
 }
@@ -110,7 +115,12 @@ func (s *VideoWatchEventServiceImpl) RecordWatch(clientID uint, req request.Reco
  * watched, we fall back to the unexcluded ranking rather than returning an
  * empty feed.
  */
-func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit int) ([]uint, error) {
+// WatchedPostIDs implements VideoWatchEventService.
+func (s *VideoWatchEventServiceImpl) WatchedPostIDs(clientID uint, postIDs []uint) (map[uint]bool, error) {
+	return s.WatchEventRepo.WatchedPostIDs(clientID, postIDs)
+}
+
+func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit, offset int, viewer *GeoPoint, session string) ([]uint, int, error) {
 	// 1. Gather user signals
 	watchEvents, _ := s.WatchEventRepo.FindByClientID(clientID)
 	likes, _ := s.PostLikeRepo.FindByClientID(clientID)
@@ -148,20 +158,13 @@ func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit in
 	centerScore := make(map[uint]float64)
 	personnelScore := make(map[uint]float64)
 
-	// From watch events
-	for _, w := range watchEvents {
-		post, ok := postByID[w.FeedPostID]
-		if !ok {
-			continue
-		}
-		var weight float64
-		if w.Completed {
-			weight = 3.0
-		} else if w.WatchPercentage >= 50 {
-			weight = 2.0
-		} else {
-			weight = 1.0
-		}
+	// Signals are DECAYED by age: yesterday's obsession outranks last season's.
+	// Weights come from InteractionWeight, which can be NEGATIVE (a skip).
+	signalAge := func(createdAt time.Time) time.Duration {
+		return time.Since(createdAt)
+	}
+	addSignal := func(post models.FeedPost, baseWeight float64, age time.Duration) {
+		weight := baseWeight * AffinityDecay(age)
 		if post.ServiceID != nil && post.Service.CategoryID != 0 {
 			categoryScore[post.Service.CategoryID] += weight
 		}
@@ -171,55 +174,64 @@ func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit in
 		}
 	}
 
-	// From likes
+	// From watch events.
+	for _, w := range watchEvents {
+		post, ok := postByID[w.FeedPostID]
+		if !ok {
+			continue
+		}
+		addSignal(post, InteractionWeight(w.Completed, w.WatchPercentage), signalAge(w.CreatedAt))
+	}
+
+	// From likes.
 	for _, like := range likes {
 		post, ok := postByID[like.FeedPostID]
 		if !ok {
 			continue
 		}
-		if post.ServiceID != nil && post.Service.CategoryID != 0 {
-			categoryScore[post.Service.CategoryID] += 4.0
-		}
-		centerScore[post.BeautyCenterID] += 4.0
-		if post.PersonnelID != nil {
-			personnelScore[*post.PersonnelID] += 4.0
-		}
+		addSignal(post, LikeWeight, signalAge(like.CreatedAt))
 	}
 
-	// From saved videos
+	// From saved videos — the strongest explicit signal a client can give.
 	for _, sv := range savedVideos {
 		post, ok := postByID[sv.FeedPostID]
 		if !ok {
 			continue
 		}
-		if post.ServiceID != nil && post.Service.CategoryID != 0 {
-			categoryScore[post.Service.CategoryID] += 5.0
-		}
-		centerScore[post.BeautyCenterID] += 5.0
-		if post.PersonnelID != nil {
-			personnelScore[*post.PersonnelID] += 5.0
-		}
+		addSignal(post, SaveWeight, signalAge(sv.CreatedAt))
 	}
 
-	// 3. Get all active posts
-	allPosts, _, err := s.FeedPostRepo.FindAllActive(1, 1000)
+	// 3. Candidate pool: geographically bounded when we know where the viewer is,
+	// capped either way. Loading the whole catalog to score it was the most
+	// expensive thing this endpoint did.
+	allPosts, err := s.feedCandidates(viewer)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	// 4. Exclude already-watched posts. The client's watch events are the
-	// exclusion signal: the personalized feed should surface content the client
-	// has not already seen. (The old `excludeIDs` parameter was dead — the only
-	// caller passed nil — so exclusion is derived here from the same events.)
-	watched := make(map[uint]bool, len(watchEvents))
-	for _, w := range watchEvents {
-		watched[w.FeedPostID] = true
+	// 4. Exclude already-watched posts.
+	//
+	// The exclusion must be COMPLETE, so it is asked of the database for exactly
+	// the candidate set. Deriving it from the signal list (capped at the last 200
+	// events) meant a client who watched more than 200 videos started seeing the
+	// oldest ones again — the opposite of "content you have not already seen".
+	candidateIDs := make([]uint, 0, len(allPosts))
+	for _, p := range allPosts {
+		candidateIDs = append(candidateIDs, p.ID)
+	}
+	watched, watchedErr := s.WatchEventRepo.WatchedPostIDs(clientID, candidateIDs)
+	if watchedErr != nil {
+		// Degrade to "nothing was watched": repeats beat an empty feed.
+		watched = map[uint]bool{}
 	}
 
 	// 5. Score each candidate: affinity + engagement + recency + a bounded
 	// exploration jitter, then rank with a same-center diversity cap.
 	now := time.Now()
-	seed := now.UnixNano()
+	// STABLE seed: the same client in the same session must get the same order on
+	// every request, or page 2 duplicates page 1 and a refresh reshuffles under
+	// the user's thumb.
+	seed := rankingSeed(clientID, session)
 
 	buildCandidates := func(applyExclusion bool) []RankCandidate {
 		out := make([]RankCandidate, 0, len(allPosts))
@@ -233,34 +245,52 @@ func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit in
 
 			score := 0.0
 
-			// Category affinity
+			// Affinity, SATURATED per dimension: unbounded sums let twenty
+			// matching watches swamp everything else and collapse the feed into
+			// one category.
 			if post.ServiceID != nil && post.Service.CategoryID != 0 {
-				score += categoryScore[post.Service.CategoryID]
+				score += Saturate(categoryScore[post.Service.CategoryID], CategoryAffinityCap)
 			}
-			// Center affinity
-			score += centerScore[post.BeautyCenterID]
-			// Personnel affinity
+			score += Saturate(centerScore[post.BeautyCenterID], CenterAffinityCap)
 			if post.PersonnelID != nil {
-				score += personnelScore[*post.PersonnelID]
+				score += Saturate(personnelScore[*post.PersonnelID], PersonnelAffinityCap)
 			}
 
-			// Engagement (attention + booking intent) and recency decay.
-			score += EngagementScore(post.ViewsCount, post.BookTaps)
+			// Quality (booking intent per view) plus a bounded reach prior,
+			// then recency decay.
+			score += QualityScore(post.ViewsCount, post.BookTaps)
+			score += PopularityScore(post.ViewsCount)
 			score += RecencyScore(post.CreatedAt, now)
 
-			// Promos get a small nudge, mirroring the previous +0.5.
-			if post.IsPromo {
-				score += PromoRankBoost
+			// NOTE: `is_promo` adds NOTHING to the score. It is a label ("this
+			// post advertises a promotion"), not a placement: the only thing that
+			// changes a position is the paid auction. Giving the flag even a small
+			// nudge made a free checkbox worth more than the product we sell.
+
+			// Proximity: content the viewer could actually visit outranks content
+			// from another city. Unknown distance (no viewer position, or a centre
+			// without coordinates) contributes 0 — never a penalty.
+			if viewer.Valid() {
+				center := post.BeautyCenter
+				if center.Latitude != 0 || center.Longitude != 0 {
+					km := HaversineKM(viewer.Latitude, viewer.Longitude, center.Latitude, center.Longitude)
+					score += ProximityScore(&km)
+				}
 			}
 
 			// Exploration: a bounded, seed-deterministic jitter that reshuffles
 			// near-ties so the feed never looks frozen in its DB order.
 			score += ExplorationScale * ExplorationScore(seed, post.ID)
 
+			categoryID := uint(0)
+			if post.ServiceID != nil {
+				categoryID = post.Service.CategoryID
+			}
 			out = append(out, RankCandidate{
-				ID:       post.ID,
-				CenterID: post.BeautyCenterID,
-				Score:    score,
+				ID:         post.ID,
+				CenterID:   post.BeautyCenterID,
+				CategoryID: categoryID,
+				Score:      score,
 			})
 		}
 		return out
@@ -273,11 +303,97 @@ func (s *VideoWatchEventServiceImpl) GetPersonalizedFeed(clientID uint, limit in
 		candidates = buildCandidates(false)
 	}
 
-	orderedIDs := RankByScore(candidates, MaxSameCenterRun)
+	orderedIDs := RankByScore(candidates, MaxSameCenterRun, MaxSameCategoryRun)
 
-	// 6. Return top N IDs.
-	if limit > 0 && len(orderedIDs) > limit {
-		orderedIDs = orderedIDs[:limit]
+	// 6. Slice the requested window out of the SAME stable ranking. Pagination is
+	// a cursor over one list, not a jump to a different feed.
+	total := len(orderedIDs)
+	if offset < 0 {
+		offset = 0
 	}
-	return orderedIDs, nil
+	if offset >= total {
+		return []uint{}, total, nil
+	}
+	if limit <= 0 || offset+limit > total {
+		limit = total - offset
+	}
+	return orderedIDs[offset : offset+limit], total, nil
+}
+
+// rankingSeed derives a deterministic seed for one client session.
+//
+// With a session id, the order is reproducible for as long as the session lasts
+// (pagination and re-opens stay coherent, and an A/B test can attribute results).
+// Without one, it falls back to a 10-minute bucket: stable enough for a scroll,
+// changing enough that a client who never sends a session still sees variety.
+func rankingSeed(clientID uint, session string) int64 {
+	if session != "" {
+		h := fnv.New64a()
+		_, _ = fmt.Fprintf(h, "%d:%s", clientID, session)
+		return int64(h.Sum64())
+	}
+	bucket := time.Now().Unix() / 600
+	return int64(clientID)*1_000_003 + bucket
+}
+
+// feedCandidates is the ranking's candidate pool.
+//
+// Constants: a 120 km box covers a city plus its metropolitan ring — beyond that
+// the proximity score is already ~0, so shipping those rows would only cost
+// bandwidth. 300 candidates is more than a feed page can ever show while keeping
+// the per-request work bounded.
+func (s *VideoWatchEventServiceImpl) feedCandidates(viewer *GeoPoint) ([]models.FeedPost, error) {
+	const (
+		candidateRadiusKm = 120.0
+		candidateLimit    = 300
+	)
+	if viewer.Valid() {
+		return s.FeedPostRepo.FindActiveForFeed(viewer.Latitude, viewer.Longitude, candidateRadiusKm, candidateLimit)
+	}
+	posts, _, err := s.FeedPostRepo.FindAllActive(1, candidateLimit)
+	return posts, err
+}
+
+// RecordImpressions implements VideoWatchEventService.
+func (s *VideoWatchEventServiceImpl) RecordImpressions(clientID uint, rows []ImpressionRow) error {
+	if s.ImpressionRepo == nil || len(rows) == 0 {
+		return nil
+	}
+	records := make([]models.FeedImpression, 0, len(rows))
+	for _, row := range rows {
+		records = append(records, models.FeedImpression{
+			PostID:    row.PostID,
+			ClientID:  clientID,
+			Position:  row.Position,
+			SessionID: row.SessionID,
+		})
+	}
+	return s.ImpressionRepo.RecordInBatches(records)
+}
+
+// PositionMetrics implements VideoWatchEventService.
+func (s *VideoWatchEventServiceImpl) PositionMetrics(days int) ([]PositionMetric, error) {
+	if s.ImpressionRepo == nil {
+		return []PositionMetric{}, nil
+	}
+	if days <= 0 {
+		days = 7
+	}
+	rows, err := s.ImpressionRepo.PositionMetrics(time.Now().AddDate(0, 0, -days))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PositionMetric, 0, len(rows))
+	for _, row := range rows {
+		metric := PositionMetric{
+			Position:    row.Position,
+			Impressions: row.Impressions,
+			Engaged:     row.Engaged,
+		}
+		if row.Impressions > 0 {
+			metric.Rate = float64(row.Engaged) / float64(row.Impressions)
+		}
+		out = append(out, metric)
+	}
+	return out, nil
 }

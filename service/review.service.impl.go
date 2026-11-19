@@ -27,7 +27,7 @@ func NewReviewServiceImpl(repo repository.ReviewRepository, notificationService 
 
 func (s *ReviewServiceImpl) Create(clientID uint, req request.CreateReviewRequest) error {
 	if err := s.Validate.Struct(req); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", apperrors.ErrValidation, err)
 	}
 
 	// Strict verification: only clients with a COMPLETED reservation can review
@@ -36,7 +36,7 @@ func (s *ReviewServiceImpl) Create(clientID uint, req request.CreateReviewReques
 		return errors.New("error verifying reservation")
 	}
 	if !hasCompleted {
-		return errors.New("debes completar un turno antes de dejar una reseña")
+		return apperrors.NewUserFacing("debes completar un turno antes de dejar una reseña")
 	}
 
 	// Prevent duplicate reviews
@@ -46,7 +46,7 @@ func (s *ReviewServiceImpl) Create(clientID uint, req request.CreateReviewReques
 	}
 	for _, r := range existing {
 		if r.BeautyCenterID == req.BeautyCenterID {
-			return errors.New("ya dejaste una reseña para este centro")
+			return apperrors.NewUserFacing("ya dejaste una reseña para este centro")
 		}
 	}
 

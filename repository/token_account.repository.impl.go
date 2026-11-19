@@ -116,9 +116,21 @@ func (r *TokenAccountRepositoryImpl) AddTokensInTx(tx *gorm.DB, accountID uint, 
 	if txnType == "topup" {
 		account.TotalPurchased += amountMilli
 	}
+	// A top-up that restores a positive available balance ends the deficit: the
+	// centre is fundable again, so the discovery grace clock restarts from zero.
+	// CLEARING needs its own statement: Save skips nil fields, so putting nil in
+	// the struct would leave the old timestamp in the row.
+	clearDeficit := account.Balance-account.ReservedMilli > 0 && account.DeficitSince != nil
 
 	if err := tx.Save(&account).Error; err != nil {
 		return nil, err
+	}
+	if clearDeficit {
+		if err := tx.Model(&models.TokenAccount{}).Where("id = ?", account.ID).
+			Updates(map[string]interface{}{"deficit_since": nil, "suspended_at": nil}).Error; err != nil {
+			return nil, err
+		}
+		account.DeficitSince = nil
 	}
 
 	ledger := &models.TokenTransaction{
@@ -134,6 +146,70 @@ func (r *TokenAccountRepositoryImpl) AddTokensInTx(tx *gorm.DB, accountID uint, 
 		return nil, err
 	}
 	return &account, nil
+}
+
+// SettleTopUpApproval flips a pending top-up to approved and credits its tokens
+// in a single transaction. The locked read plus the conditional UPDATE make the
+// transition a compare-and-set: of two concurrent approvers, exactly one wins;
+// the other sees a non-pending row and gets ErrTopUpAlreadyProcessed. Because the
+// credit runs in the same transaction, a credit failure rolls the status back.
+func (r *TokenAccountRepositoryImpl) SettleTopUpApproval(topUpID, adminID uint, description string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var topup models.TokenTopUp
+		// FOR UPDATE serializes concurrent settlements on the row (Postgres);
+		// SQLite ignores the hint but the single-connection tests serialize.
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&topup, topUpID).Error; err != nil {
+			return err
+		}
+		if topup.Status != "pending" {
+			return ErrTopUpAlreadyProcessed
+		}
+
+		now := time.Now()
+		res := tx.Model(&models.TokenTopUp{}).
+			Where("id = ? AND status = ?", topUpID, "pending").
+			Updates(map[string]interface{}{
+				"status":       "approved",
+				"validated_by": adminID,
+				"validated_at": now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return ErrTopUpAlreadyProcessed
+		}
+
+		var account models.TokenAccount
+		if err := tx.Where("beauty_center_id = ?", topup.BeautyCenterID).First(&account).Error; err != nil {
+			return err
+		}
+
+		totalTokens := topup.TokensReceived + topup.BonusTokens
+		ref := topUpID
+		_, err := r.AddTokensInTx(tx, account.ID, totalTokens, "topup", description, &ref)
+		return err
+	})
+}
+
+// SettleTopUpRejection rejects a pending top-up with the same compare-and-set, so
+// a rejection cannot clobber an approval that already won.
+func (r *TokenAccountRepositoryImpl) SettleTopUpRejection(topUpID, adminID uint) error {
+	now := time.Now()
+	res := r.db.Model(&models.TokenTopUp{}).
+		Where("id = ? AND status = ?", topUpID, "pending").
+		Updates(map[string]interface{}{
+			"status":       "rejected",
+			"validated_by": adminID,
+			"validated_at": now,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return ErrTopUpAlreadyProcessed
+	}
+	return nil
 }
 
 // Transaction executes fn inside a GORM transaction, committing on nil
@@ -167,6 +243,15 @@ func (r *TokenAccountRepositoryImpl) DebitInTx(tx *gorm.DB, accountID uint, amou
 	balanceBefore := account.Balance
 	account.Balance -= amountMilli
 	account.TotalConsumed += amountMilli
+
+	// Real headroom (available funds + overdraft) at or below zero means the
+	// centre can no longer settle another commission. Stamp the clock ONCE so
+	// the discovery grace window has a start; a subsequent top-up clears it.
+	if account.DeficitSince == nil &&
+		account.Balance-account.ReservedMilli+overdraftMilli <= 0 {
+		now := time.Now()
+		account.DeficitSince = &now
+	}
 
 	if err := tx.Save(&account).Error; err != nil {
 		return err
@@ -354,4 +439,41 @@ func (r *TokenAccountRepositoryImpl) ReleaseReserved(ctx context.Context, accoun
 		return nil, err
 	}
 	return r.findByID(accountID)
+}
+
+// FindNeedingHealthCheck returns a SUPERSET of the accounts that may need an
+// alert or a suspension decision. Overdraft is computed in Go (it depends on
+// top-up history and account age), so the SQL side can only bound the balance
+// generously; the service re-checks every row with the real numbers.
+func (r *TokenAccountRepositoryImpl) FindNeedingHealthCheck(availableCeilingMilli int64) ([]models.TokenAccount, error) {
+	var accounts []models.TokenAccount
+	// ONE grouped condition: chaining separate Where calls would AND them
+	// together and produce a dangling "AND OR".
+	err := r.db.
+		Where(`deficit_since IS NOT NULL
+			OR suspended_at IS NOT NULL
+			OR low_balance_notified_at IS NOT NULL
+			OR (balance - reserved_milli) <= ?`, availableCeilingMilli).
+		Find(&accounts).Error
+	return accounts, err
+}
+
+// SetHealthStamps writes the alert/suspension markers in one statement. Pointer
+// values are passed through a map so nil becomes SQL NULL (a struct update would
+// skip it, which is the bug this method exists to avoid).
+func (r *TokenAccountRepositoryImpl) SetHealthStamps(accountID uint, lowAt, deficitAt, suspendedAt *time.Time) error {
+	// Unwrap to a plain value: a typed nil pointer inside an interface is NOT
+	// treated as NULL by every driver/dialect.
+	stamp := func(v *time.Time) interface{} {
+		if v == nil {
+			return nil
+		}
+		return *v
+	}
+	values := map[string]interface{}{
+		"low_balance_notified_at": stamp(lowAt),
+		"deficit_notified_at":     stamp(deficitAt),
+		"suspended_at":            stamp(suspendedAt),
+	}
+	return r.db.Model(&models.TokenAccount{}).Where("id = ?", accountID).Updates(values).Error
 }

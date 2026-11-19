@@ -43,6 +43,13 @@ type BoostCampaign struct {
 
 	Impressions int64 `gorm:"not null;default:0" json:"impressions"`
 
+	// UnservedWins counts auctions this campaign WON but that were never served:
+	// the winning post was not part of the page the viewer received (a short
+	// feed, or a post outside the scanned window). It is the delivery signal the
+	// advertiser never had — a campaign can win every auction and still reach
+	// nobody, and this is the number that says so.
+	UnservedWins int64 `gorm:"not null;default:0" json:"unserved_wins"`
+
 	// Status: active | paused | exhausted | ended. Exhausted is derived from the
 	// budget; paused is a manual switch; ended is a campaign past ends_at whose
 	// remainder was released; active is the only billable state.

@@ -144,6 +144,16 @@ func MergePromotedIDs(ranked, promoted []uint, density int) ([]uint, map[uint]bo
 		queue = append(queue, id)
 	}
 
+	// Where each promoted post sat in the ORGANIC ranking before the merge. This
+	// is the guarantee the advertiser buys: paying can only improve or keep the
+	// position, never worsen it.
+	organicRank := make(map[uint]int, len(promotedSet))
+	for i, id := range ranked {
+		if promotedSet[id] {
+			organicRank[id] = i
+		}
+	}
+
 	organic := make([]uint, 0, len(ranked))
 	for _, id := range ranked {
 		if promotedSet[id] {
@@ -169,5 +179,38 @@ func MergePromotedIDs(ranked, promoted []uint, density int) ([]uint, map[uint]bo
 		ordered = append(ordered, queue[promotedIndex])
 		promotedIndex++
 	}
+
+	// Rescue pass: a promoted post whose organic position was BETTER than the
+	// slot it landed in is moved back up. Without this, a video ranked #3 that
+	// pays for a boost is demoted to #5 — the customer paid to lose reach.
+	for _, id := range queue {
+		want, ok := organicRank[id]
+		if !ok {
+			continue
+		}
+		at := indexOfID(ordered, id)
+		if at < 0 || want >= at {
+			continue
+		}
+		ordered = append(ordered[:at], ordered[at+1:]...)
+		// Clamp: the organic rank can point past the end after removals.
+		if want > len(ordered) {
+			want = len(ordered)
+		}
+		ordered = append(ordered, 0)
+		copy(ordered[want+1:], ordered[want:])
+		ordered[want] = id
+	}
+
 	return ordered, promotedSet
+}
+
+// indexOfID returns the position of id in ids, or -1.
+func indexOfID(ids []uint, id uint) int {
+	for i, candidate := range ids {
+		if candidate == id {
+			return i
+		}
+	}
+	return -1
 }

@@ -6,12 +6,14 @@ import (
 )
 
 type PersonnelService interface {
-	Update(id uint, req request.UpdatePersonnelRequest) (response.PersonnelResponse, error)
+	// Update/Delete are centre-scoped: actorCenterID is the caller's `center_id`
+	// claim. Editing or removing staff from another centre is ErrForbidden.
+	Update(id uint, actorCenterID uint, req request.UpdatePersonnelRequest) (response.PersonnelResponse, error)
 	// UpdateMe is the self-service profile edit: the allow-listed DTO carries no
 	// email/is_active/beauty_center_id, so identity and center affiliation are
 	// structurally immutable through PATCH /personnel/me (design D2/D4).
 	UpdateMe(id uint, req request.UpdateMePersonnelRequest) (response.PersonnelResponse, error)
-	Delete(id uint) error
+	Delete(id uint, actorCenterID uint) error
 	FindByID(id uint) (response.PersonnelResponse, error)
 	// FindAll returns a page of a centre's personnel. serviceIDs is the optional
 	// booking-picker capability filter: empty means unchanged behaviour, while a

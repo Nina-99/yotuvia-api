@@ -40,7 +40,7 @@ type NotificationService interface {
 	// "personnel" or "beauty_center". The role comes from the JWT, so a staff or
 	// owner device is never mistaken for a client one.
 	RegisterPushDevice(role string, actorID uint, pushToken, platform, p256dh, auth string) error
-	UnregisterPushDevice(token string) error
+	UnregisterPushDevice(token string, role string, actorID uint) error
 	SendPushToClient(clientID uint, title, body, dataJSON string) error
 	// SendPushToOwner delivers to one (role, owner) — "personnel" or
 	// "beauty_center". It is what staff and owners receive; clients keep using
