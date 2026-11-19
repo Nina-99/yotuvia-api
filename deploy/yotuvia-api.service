@@ -1,0 +1,37 @@
+[Unit]
+Description=Yotuvia API
+Documentation=file:///srv/yotuvia/api/deploy/README.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yotuvia
+Group=yotuvia
+
+# CRITICAL: avatar / centre / staff / video uploads are written to
+# `uploads/<sub>` RELATIVE TO THE WORKING DIRECTORY. If this is not the parent
+# of `uploads/`, nginx serves an empty directory and the "fix" people reach for
+# is chmod 777.
+WorkingDirectory=/srv/yotuvia
+ExecStart=/srv/yotuvia/api/yotuvia-api
+EnvironmentFile=/srv/yotuvia/api/.env
+
+Restart=always
+RestartSec=5
+# The API drains uploads up to 10 minutes; give it room before SIGKILL.
+TimeoutStopSec=30
+
+# Hardening. ProtectSystem=full keeps /usr, /boot and /etc read-only while
+# leaving /srv writable, which the uploads directory needs.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/srv/yotuvia/uploads
+
+[Install]
+WantedBy=multi-user.target

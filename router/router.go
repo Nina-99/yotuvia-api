@@ -35,6 +35,11 @@ func SetupRouter() *gin.Engine {
 	validate := validator.New()
 	db := configs.DB
 
+	// Readiness probe: mounted on the engine so it bypasses the /api rate
+	// limiter (a probe backed by a throttle fails when traffic is high) and
+	// never depends on the SPA or the uploads directory.
+	HealthRoutes(r, db)
+
 	// Bind access tokens to their session row. Without this, a logged-out or
 	// deactivated session kept working until its token expired (15 min); now the
 	// revocation is visible on the very next request.
